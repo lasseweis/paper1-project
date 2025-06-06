@@ -16,7 +16,7 @@ import os
 import traceback
 import warnings
 from functools import lru_cache
-from scipy import signal  # <-- THIS LINE IS ADDED TO FIX THE ERROR
+from scipy import signal
 
 # Import the project's configuration
 from config import Config
@@ -147,9 +147,13 @@ class DataProcessor:
                     raise ValueError(f"Variable '{var_in_file}' or its alias not found in {file}")
 
             rename_dict = {}
-            if 'latitude' in ds.dims: rename_dict['latitude'] = 'lat'
-            if 'longitude' in ds.dims: rename_dict['longitude'] = 'lon'
-            if rename_dict: ds = ds.rename(rename_dict)
+            if 'latitude' in ds.dims or 'latitude' in ds.coords:
+                rename_dict['latitude'] = 'lat'
+            if 'longitude' in ds.dims or 'longitude' in ds.coords:
+                rename_dict['longitude'] = 'lon'
+            if rename_dict:
+                ds = ds.rename(rename_dict)
+                logging.info(f"Coordinates after renaming attempt: {list(ds.coords.keys())}")
             
             if 'lon' in ds.coords and np.any(ds.lon > 180):
                 ds = ds.assign_coords(lon=(((ds.lon + 180) % 360) - 180)).sortby('lon')
@@ -157,12 +161,13 @@ class DataProcessor:
             if level_val is not None and 'level' in ds.dims:
                 ds = ds.sel(level=level_val)
             
-            if var_out_name:
+            if var_out_name and var_out_name != var_name_used:
                 ds = ds.rename({var_name_used: var_out_name})
                 var_name_used = var_out_name
 
-            # Calculate monthly means from daily data, ensuring correct variable is used
-            ds_monthly = ds[var_name_used].resample(time='1MS').mean().to_dataset(name=var_name_used)
+            # === FINALE KORREKTUR ===
+            # Resample the entire Dataset to preserve all coordinates.
+            ds_monthly = ds.resample(time='1MS').mean()
             
             time_coords = ds_monthly.time.dt
             ds_monthly = ds_monthly.assign_coords(year=("time", time_coords.year.values), month=("time", time_coords.month.values))

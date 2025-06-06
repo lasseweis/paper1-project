@@ -317,6 +317,7 @@ class DataProcessor:
         try:
             clean_data = data.dropna(dim=time_dim, how='all')
             if clean_data[time_dim].size < 2: return data 
+            clean_data = clean_data.load()
 
             def detrend_if_possible(x):
                 if np.all(np.isfinite(x)):
@@ -329,9 +330,9 @@ class DataProcessor:
                 input_core_dims=[[time_dim]],
                 output_core_dims=[[time_dim]],
                 exclude_dims=set((time_dim,)),
-                dask="parallelized",
                 output_dtypes=[data.dtype]
             )
+            
             detrended_data = detrended_data.assign_coords(
                 {time_dim: clean_data[time_dim]}
             )
@@ -341,7 +342,8 @@ class DataProcessor:
         except Exception as e_scipy:
             logging.warning(f"Detrending with scipy failed: {e_scipy}. Trying polyfit fallback.")
             try:
-                clean_data = data.dropna(dim=time_dim, how='any')
+                # Hier laden wir die Daten auch, falls der erste Versuch fehlschlägt
+                clean_data = data.dropna(dim=time_dim, how='any').load()
                 if clean_data[time_dim].size < 2: return data
 
                 p = clean_data.polyfit(dim=time_dim, deg=1)

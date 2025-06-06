@@ -126,10 +126,9 @@ class ClimateAnalysis:
 
         Visualizer.ensure_plot_dir_exists()
 
-        # --- PART 1: REANALYSIS DATA PROCESSING AND ANALYSIS ---
+        # --- TEIL 1: DATENVERARBEITUNG UND ANALYSE DER REANALYSE-DATEN ---
         logging.info("\n--- Processing Reanalysis Datasets ---")
         
-        # CORRECTED: Call methods on ClimateAnalysis, not DataProcessor
         datasets_reanalysis = {
             **ClimateAnalysis.process_20crv3_data(),
             **ClimateAnalysis.process_era5_data()
@@ -138,8 +137,33 @@ class ClimateAnalysis:
         if not datasets_reanalysis:
             logging.critical("Failed to process reanalysis datasets. Aborting.")
             return None
-        
-        # ... (The rest of the run_full_analysis method remains the same) ...
+
+        # --- HINZUGEFÜGTER ANALYSE- UND PLOTTING-TEIL ---
+        logging.info("\n--- Calculating and Plotting Reanalysis Regression Maps ---")
+        regression_results = {}
+        # Definieren der Periode für die Regressionsanalyse
+        regression_period = (1981, 2010) 
+
+        for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
+            logging.info(f"\n--> Processing regression analysis for {dset_key}")
+            
+            # Aufruf der Regressionsberechnung aus dem AdvancedAnalyzer
+            results = AdvancedAnalyzer.calculate_regression_maps(
+                datasets=datasets_reanalysis,
+                dataset_key=dset_key,
+                regression_period=regression_period
+            )
+            
+            if results:
+                regression_results[dset_key] = results
+                # Aufruf der Plot-Funktion aus dem Visualizer
+                logging.info(f"--> Plotting regression maps for {dset_key}")
+                Visualizer.plot_regression_analysis(results, dset_key)
+            else:
+                logging.warning(f"Could not calculate or plot regression for {dset_key}. Results were empty.")
+        # --- ENDE DES HINZUGEFÜGTEN TEILS ---
+
+        # Hier könnten zukünftige Analyseschritte folgen (z.B. für CMIP6)
 
         logging.info("\n\n=====================================================")
         logging.info("=== FULL ANALYSIS COMPLETED ===")
@@ -147,7 +171,7 @@ class ClimateAnalysis:
         logging.info(f"Log file saved to: {log_filename}")
         logging.info("=====================================================\n")
         
-        return {} # Placeholder for full results dictionary
+        return regression_results # Gibt die Ergebnisse zurück
 
 def main():
     """Main entry point for the program."""

@@ -153,7 +153,6 @@ class DataProcessor:
                 rename_dict['longitude'] = 'lon'
             if rename_dict:
                 ds = ds.rename(rename_dict)
-                logging.info(f"Coordinates after renaming attempt: {list(ds.coords.keys())}")
             
             if 'lon' in ds.coords and np.any(ds.lon > 180):
                 ds = ds.assign_coords(lon=(((ds.lon + 180) % 360) - 180)).sortby('lon')
@@ -165,8 +164,6 @@ class DataProcessor:
                 ds = ds.rename({var_name_used: var_out_name})
                 var_name_used = var_out_name
 
-            # === FINALE KORREKTUR ===
-            # Resample the entire Dataset to preserve all coordinates.
             ds_monthly = ds.resample(time='1MS').mean()
             
             time_coords = ds_monthly.time.dt
@@ -205,7 +202,6 @@ class DataProcessor:
             season_year=("time", df_time['season_year'].values)
         )
         
-        # Create a unique key for grouping to avoid MultiIndex issues
         season_key = [f"{sy}-{s}" for sy, s in zip(da['season_year'].values, da['season'].values)]
         return da.assign_coords(season_key=("time", season_key))
 
@@ -216,13 +212,11 @@ class DataProcessor:
             logging.error("'season_key' coordinate missing in calculate_seasonal_means.")
             return None
 
-        # Group by the unique season key and calculate the mean
         seasonal_mean = da.groupby("season_key").mean(dim="time", skipna=True)
         
         if seasonal_mean.season_key.size == 0:
             return None
 
-        # Extract year and season string from the key to create a multi-index
         years_list = [int(key.split('-')[0]) for key in seasonal_mean['season_key'].values]
         seasons_list = [key.split('-')[1] for key in seasonal_mean['season_key'].values]
 
@@ -231,7 +225,6 @@ class DataProcessor:
             temp_season_str=("season_key", seasons_list)
         )
         
-        # Unstack to create separate 'season_year' and 'season' dimensions
         ds_unstacked = seasonal_mean.set_index(season_key=["temp_season_year", "temp_season_str"]).unstack("season_key")
         
         final_da = ds_unstacked.rename({"temp_season_year": "season_year", "temp_season_str": "season"})
@@ -271,7 +264,16 @@ class DataProcessor:
         if da is None: return None
             
         try:
-            domain = da.sel(lat=slice(lat_min, lat_max), lon=slice(lon_min, lon_max))
+            # === KORRIGIERTER ABSCHNITT START ===
+            # This logic checks if latitude is descending and reverses the slice if needed.
+            lat_slice = slice(lat_min, lat_max)
+            if 'lat' in da.coords and da.lat.size > 1:
+                if da.lat.values[0] > da.lat.values[-1]: # Check for descending order
+                    lat_slice = slice(lat_max, lat_min)
+            
+            domain = da.sel(lat=lat_slice, lon=slice(lon_min, lon_max))
+            # === KORRIGIERTER ABSCHNITT ENDE ===
+            
             if domain.lat.size == 0 or domain.lon.size == 0:
                 logging.warning("Spatial domain selection resulted in zero size.")
                 return None
@@ -308,18 +310,14 @@ class DataProcessor:
         """Detrend a time series or spatial DataArray using scipy.detrend or a polyfit fallback."""
         if data is None: return None
         
-        # Ensure the time dimension is valid for operations
         time_dim = 'season_year'
         if time_dim not in data.dims or data[time_dim].size < 2:
             return data
 
         try:
-            # Drop NaN values along the time dimension to ensure regression works
-            # This is critical for apply_ufunc to work with scipy.signal.detrend
             clean_data = data.dropna(dim=time_dim, how='all')
-            if clean_data[time_dim].size < 2: return data # Not enough points to detrend
+            if clean_data[time_dim].size < 2: return data 
 
-            # The function to apply: detrend if all values are finite, otherwise return original
             def detrend_if_possible(x):
                 if np.all(np.isfinite(x)):
                     return signal.detrend(x)
@@ -334,18 +332,15 @@ class DataProcessor:
                 dask="parallelized",
                 output_dtypes=[data.dtype]
             )
-            # Reassign coordinates that might be lost
             detrended_data = detrended_data.assign_coords(
                 {time_dim: clean_data[time_dim]}
             )
             detrended_data.attrs = dict(data.attrs, detrended=True)
-            # Reindex to original time axis to put NaNs back where they were
             return detrended_data.reindex_like(data)
             
         except Exception as e_scipy:
             logging.warning(f"Detrending with scipy failed: {e_scipy}. Trying polyfit fallback.")
             try:
-                # polyfit is often more robust to internal NaNs
                 clean_data = data.dropna(dim=time_dim, how='any')
                 if clean_data[time_dim].size < 2: return data
 

@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# IDE- und Editor-spezifische Ordner
+.vscode/
+.idea/
+
+# Generierte Dateien aus Ihrem Projekt
+paper1_log.log
+paper1-plots/

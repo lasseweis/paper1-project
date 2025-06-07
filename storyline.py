@@ -52,7 +52,7 @@ class StorylineAnalyzer:
         search_path = os.path.join(base_path, file_pattern)
         found_files = glob.glob(search_path)
         
-        if member != '*':
+        if member != '*' and found_files:
             found_files = [f for f in found_files if f"_{member}_" in os.path.basename(f)]
 
         return sorted(list(set(found_files)))
@@ -79,15 +79,25 @@ class StorylineAnalyzer:
 
         try:
             preprocess_func = None
+            # Define common arguments for open_mfdataset
+            common_args = {
+                "paths": all_files,
+                "parallel": False,
+                "engine": 'netcdf4',
+                "use_cftime": True,
+                "coords": 'minimal',
+                "data_vars": 'minimal',
+                "compat": 'override',
+                "chunks": {'time': 120}
+            }
+
+            # **FIX:** Choose the combine strategy based on the variable, like in the original script.
             if variable == 'ua':
                 preprocess_func = lambda ds: select_level_preprocess(ds, level_hpa=self.config.CMIP6_LEVEL)
+                ds = xr.open_mfdataset(**common_args, combine='by_coords', preprocess=preprocess_func)
+            else:
+                ds = xr.open_mfdataset(**common_args, combine='nested', concat_dim='time')
 
-            ds = xr.open_mfdataset(
-                all_files, combine='by_coords', concat_dim='time', parallel=False,
-                engine='netcdf4', use_cftime=True, coords='minimal', data_vars='minimal',
-                compat='override', chunks={'time': 120}, preprocess=preprocess_func
-            )
-            
             data_var = ds[actual_var_name]
 
             # Standardize coordinates
@@ -116,8 +126,7 @@ class StorylineAnalyzer:
                 if 'lat' in data_var.dims and 'lon' in data_var.dims:
                     weights = np.cos(np.deg2rad(data_var.lat))
                     data_var = data_var.weighted(weights).mean(dim=("lon", "lat"), skipna=True)
-                # Ensure it's a 1D time series
-                if data_var.ndim > 1:
+                if data_var.ndim > 1: # Ensure it's a 1D time series
                     data_var = data_var.squeeze(drop=True)
                 if data_var.ndim != 1 or 'time' not in data_var.dims:
                     raise ValueError(f"Global TAS for {model} could not be reduced to 1D time series. Dims: {data_var.dims}")
@@ -183,12 +192,30 @@ class StorylineAnalyzer:
     def analyze_cmip6_changes_at_gwl(self, models_to_run=None):
         """The main workflow for analyzing CMIP6 data at specific GWLs."""
         logging.info("\n--- Starting CMIP6 Analysis at Global Warming Levels ---")
+        
+        # **FIX:** Determine the list of models to run *before* the loop.
+        # If models_to_run is None, find all available models instead of using a wildcard '*'.
+        if models_to_run is None:
+            logging.info("No model list provided, scanning for available models...")
+            # Scan for models based on a primary variable like 'ua'
+            base_path_scan = self.config.CMIP6_VAR_PATH.format(variable='ua')
+            if not os.path.exists(base_path_scan): base_path_scan = self.config.CMIP6_DATA_BASE_PATH
+            
+            search_pattern = os.path.join(base_path_scan, self.config.CMIP6_FILE_PATTERN.format(
+                variable='ua', model='*', experiment='*', member=self.config.CMIP6_MEMBER_ID, grid='*'
+            ))
+            all_ua_files = glob.glob(search_pattern)
+            models_found = sorted(list(set(os.path.basename(f).split('_')[2] for f in all_ua_files)))
+            models_to_run = models_found
+            logging.info(f"Found {len(models_to_run)} models to process: {models_to_run}")
+
+        if not models_to_run:
+            logging.error("No models to run for CMIP6 analysis. Aborting.")
+            return {}
+
         # Step 1: Load data for all specified models and variables
         all_vars = self.config.CMIP6_VARIABLES_TO_LOAD + [self.config.CMIP6_GLOBAL_TAS_VAR]
-        
         model_data = {}
-        if models_to_run is None: models_to_run = ['*'] # Find all if not specified
-
         for model in models_to_run:
             for scenario in self.config.CMIP6_SCENARIOS:
                 key = self.get_model_scenario_key(model, scenario)
@@ -201,19 +228,28 @@ class StorylineAnalyzer:
                         break
                     model_data[key][var] = data
                 if not is_valid:
-                    model_data.pop(key)
+                    model_data.pop(key, None)
 
+        if not model_data:
+            logging.error("No CMIP6 models were successfully loaded. Aborting analysis.")
+            return {}
+            
         # Step 2: Calculate GWL threshold years for each model
         gwl_thresholds = {}
         for key, data in model_data.items():
-            thresholds = self.calculate_gwl_thresholds(
-                data[self.config.CMIP6_GLOBAL_TAS_VAR],
-                (self.config.CMIP6_PRE_INDUSTRIAL_REF_START, self.config.CMIP6_PRE_INDUSTRIAL_REF_END),
-                self.config.GWL_TEMP_SMOOTHING_WINDOW,
-                self.config.GWL_FINE_STEPS_FOR_PLOT
-            )
-            if thresholds:
-                gwl_thresholds[key] = thresholds
+            global_tas_var_name = self.config.CMIP6_GLOBAL_TAS_VAR
+            if global_tas_var_name in data and data[global_tas_var_name] is not None:
+                thresholds = self.calculate_gwl_thresholds(
+                    data[global_tas_var_name],
+                    (self.config.CMIP6_PRE_INDUSTRIAL_REF_START, self.config.CMIP6_PRE_INDUSTRIAL_REF_END),
+                    self.config.GWL_TEMP_SMOOTHING_WINDOW,
+                    self.config.GWL_FINE_STEPS_FOR_PLOT
+                )
+                if thresholds:
+                    gwl_thresholds[key] = thresholds
+            else:
+                logging.warning(f"Global TAS variable '{global_tas_var_name}' not found for {key}. Cannot calculate GWL thresholds.")
+
 
         # Step 3: Calculate time series of all metrics (jet indices, box means)
         metric_timeseries = {}
@@ -243,7 +279,7 @@ class StorylineAnalyzer:
         model_abs_means_at_hist_ref = {}
 
         for key, ts_data in metric_timeseries.items():
-            hist_means = {met: ts.sel(season_year=slice(hist_ref_start, hist_ref_end)).mean().item() for met, ts in ts_data.items() if ts is not None}
+            hist_means = {met: ts.sel(season_year=slice(hist_ref_start, hist_ref_end)).mean().item() for met, ts in ts_data.items() if ts is not None and ts.size > 0}
             if len(hist_means) == len(metrics_list):
                 model_abs_means_at_hist_ref[key] = hist_means
 
@@ -272,7 +308,7 @@ class StorylineAnalyzer:
                                 delta = (delta / hist_val) * 100.0
                             all_deltas[met][gwl].append(delta)
 
-        mmm_changes = {gwl: {met: np.mean(all_deltas[met][gwl]) for met in metrics_list} for gwl in self.config.GLOBAL_WARMING_LEVELS}
+        mmm_changes = {gwl: {met: np.mean(all_deltas[met][gwl]) if all_deltas[met][gwl] else np.nan for met in metrics_list} for gwl in self.config.GLOBAL_WARMING_LEVELS}
 
         return {
             'gwl_threshold_years': gwl_thresholds,

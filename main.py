@@ -126,7 +126,7 @@ class ClimateAnalysis:
 
         Visualizer.ensure_plot_dir_exists()
 
-        # --- TEIL 1: DATENVERARBEITUNG UND ANALYSE DER REANALYSE-DATEN ---
+        # --- PART 1: REANALYSIS DATA PROCESSING AND ANALYSIS ---
         logging.info("\n--- Processing Reanalysis Datasets ---")
         
         datasets_reanalysis = {
@@ -138,16 +138,13 @@ class ClimateAnalysis:
             logging.critical("Failed to process reanalysis datasets. Aborting.")
             return None
 
-        # --- HINZUGEFÜGTER ANALYSE- UND PLOTTING-TEIL ---
         logging.info("\n--- Calculating and Plotting Reanalysis Regression Maps ---")
         regression_results = {}
-        # Definieren der Periode für die Regressionsanalyse
         regression_period = (1981, 2010) 
 
         for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
             logging.info(f"\n--> Processing regression analysis for {dset_key}")
             
-            # Aufruf der Regressionsberechnung aus dem AdvancedAnalyzer
             results = AdvancedAnalyzer.calculate_regression_maps(
                 datasets=datasets_reanalysis,
                 dataset_key=dset_key,
@@ -156,14 +153,41 @@ class ClimateAnalysis:
             
             if results:
                 regression_results[dset_key] = results
-                # Aufruf der Plot-Funktion aus dem Visualizer
                 logging.info(f"--> Plotting regression maps for {dset_key}")
                 Visualizer.plot_regression_analysis(results, dset_key)
             else:
                 logging.warning(f"Could not calculate or plot regression for {dset_key}. Results were empty.")
-        # --- ENDE DES HINZUGEFÜGTEN TEILS ---
+        
+        # --- PART 2: CMIP6 AND STORYLINE ANALYSIS ---
+        logging.info("\n\n--- Analyzing CMIP6 Data and Storylines ---")
+        try:
+            storyline_analyzer = StorylineAnalyzer(config=Config)
+            
+            # This function performs the heavy lifting of loading CMIP6 data,
+            # calculating GWL thresholds, and analyzing changes.
+            cmip6_results = storyline_analyzer.analyze_cmip6_changes_at_gwl()
+            
+            if cmip6_results:
+                logging.info("--> Plotting CMIP6 jet changes vs. Global Warming Level...")
+                Visualizer.plot_jet_changes_vs_gwl(cmip6_results)
+                
+                # The following steps are placeholders for the final storyline calculation.
+                # To run this, you would first need to calculate the observed regression
+                # slopes (beta_obs) from the reanalysis data.
+                #
+                # logging.info("--> Calculating historical slopes for comparison...")
+                # beta_obs_slopes = {} # Placeholder for calculated observational constraints
+                # storyline_impacts = storyline_analyzer.calculate_storyline_impacts(cmip6_results, beta_obs_slopes)
+                # if storyline_impacts:
+                #     logging.info("--> Plotting final storyline impacts...")
+                #     # Visualizer.plot_storyline_impacts(storyline_impacts) # A new plot function would be needed
+            else:
+                logging.warning("CMIP6 analysis did not produce results. Skipping subsequent plots.")
+                
+        except Exception as e:
+            logging.error(f"A critical error occurred during the CMIP6/Storyline analysis phase: {e}")
+            logging.error(traceback.format_exc())
 
-        # Hier könnten zukünftige Analyseschritte folgen (z.B. für CMIP6)
 
         logging.info("\n\n=====================================================")
         logging.info("=== FULL ANALYSIS COMPLETED ===")
@@ -171,7 +195,7 @@ class ClimateAnalysis:
         logging.info(f"Log file saved to: {log_filename}")
         logging.info("=====================================================\n")
         
-        return regression_results # Gibt die Ergebnisse zurück
+        return regression_results 
 
 def main():
     """Main entry point for the program."""

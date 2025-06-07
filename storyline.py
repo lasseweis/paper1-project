@@ -136,7 +136,7 @@ class StorylineAnalyzer:
             
             # Filter time up to 2300 for long-running scenarios
             if 'time' in data_var.coords and data_var.time.size > 0:
-                data_var = data_var.sel(time=slice(None, '2300-12-31'))
+                data_var = data_var.sel(time=slice(None, '2301-01-01'))
 
             return data_var.load()
 

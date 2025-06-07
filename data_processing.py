@@ -207,31 +207,53 @@ class DataProcessor:
 
     @staticmethod
     def calculate_seasonal_means(da):
-        """Calculate seasonal means from a DataArray with a 'season_key' coordinate."""
-        if da is None or 'season_key' not in da.coords:
+        """
+        Calculate seasonal means from a DataArray with season coordinates.
+        The output will have 'season_year' and 'season' as dimensions.
+        This is the more robust version based on the original script to preserve spatial dims.
+        """
+        if da is None:
+            return None
+        if 'season_key' not in da.coords:
             logging.error("'season_key' coordinate missing in calculate_seasonal_means.")
             return None
 
-        seasonal_mean = da.groupby("season_key").mean(dim="time", skipna=True)
-        
-        if seasonal_mean.season_key.size == 0:
-            return None
+        try:
+            # Group by the 'season_key' and calculate the mean over the 'time' dimension.
+            # This operation should preserve other dimensions like 'lat' and 'lon'.
+            seasonal_mean = da.groupby("season_key").mean(dim="time", skipna=True)
 
-        years_list = [int(key.split('-')[0]) for key in seasonal_mean['season_key'].values]
-        seasons_list = [key.split('-')[1] for key in seasonal_mean['season_key'].values]
+            if seasonal_mean.season_key.size == 0:
+                return None
 
-        seasonal_mean = seasonal_mean.assign_coords(
-            temp_season_year=("season_key", years_list),
-            temp_season_str=("season_key", seasons_list)
-        )
-        
-        ds_unstacked = seasonal_mean.set_index(season_key=["temp_season_year", "temp_season_str"]).unstack("season_key")
-        
-        final_da = ds_unstacked.rename({"temp_season_year": "season_year", "temp_season_str": "season"})
-        if 'dataset' in da.attrs:
-            final_da.attrs['dataset'] = da.attrs['dataset']
+            # Extract year and season strings from the 'season_key' to create new coordinates
+            years_list = [int(key.split('-')[0]) for key in seasonal_mean['season_key'].values]
+            seasons_list = [key.split('-')[1] for key in seasonal_mean['season_key'].values]
+
+            seasonal_mean = seasonal_mean.assign_coords(
+                temp_season_year=("season_key", years_list),
+                temp_season_str=("season_key", seasons_list)
+            )
             
-        return final_da
+            # Unstack the 'season_key' dimension into separate 'season' and 'season_year' dimensions.
+            ds_unstacked = seasonal_mean.set_index(
+                season_key=["temp_season_year", "temp_season_str"]
+            ).unstack("season_key")
+            
+            # Rename the temporary dimensions to the final names.
+            final_da = ds_unstacked.rename({
+                "temp_season_year": "season_year",
+                "temp_season_str": "season"
+            })
+
+            # Preserve attributes from the original DataArray.
+            if 'dataset' in da.attrs:
+                final_da.attrs['dataset'] = da.attrs['dataset']
+                
+            return final_da
+        except Exception as e:
+            logging.exception(f"General error in calculate_seasonal_means:")
+            return None
 
     @staticmethod
     def calculate_anomalies(da, base_period_start=None, base_period_end=None, as_percentage=False):

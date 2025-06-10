@@ -89,10 +89,17 @@ class DataProcessor:
                 ds.close()
                 return None
 
+            # Standardize coordinate names (robust version)
             rename_dict = {}
             if 'longitude' in ds.dims: rename_dict['longitude'] = 'lon'
             if 'latitude' in ds.dims: rename_dict['latitude'] = 'lat'
-            if rename_dict: ds = ds.rename(rename_dict)
+            # Prüft auch Koordinaten, die keine Dimensionen sind
+            if 'longitude' in ds.coords and 'longitude' not in ds.dims: rename_dict['longitude'] = 'lon'
+            if 'latitude' in ds.coords and 'latitude' not in ds.dims: rename_dict['latitude'] = 'lat'
+            
+            if rename_dict:
+                 ds = ds.rename(rename_dict)
+                 logging.debug(f"Renamed coordinates/dims: {rename_dict}")
             
             if 'lon' in ds.coords and np.any(ds.lon > 180):
                 ds = ds.assign_coords(lon=(((ds.lon + 180) % 360) - 180)).sortby('lon')
@@ -207,52 +214,166 @@ class DataProcessor:
 
     @staticmethod
     def calculate_seasonal_means(da):
-        """
-        Calculate seasonal means from a DataArray with season coordinates.
-        The output will have 'season_year' and 'season' as dimensions.
-        This is the more robust version based on the original script to preserve spatial dims.
-        """
+        """Calculate seasonal means from a DataArray with season coordinates.
+           The output will have 'season_year' and 'season' as dimensions."""
         if da is None:
             return None
         if 'season_key' not in da.coords:
-            logging.error("'season_key' coordinate missing in calculate_seasonal_means.")
+            logging.error("Koordinate 'season_key' fehlt in calculate_seasonal_means.")
             return None
 
         try:
-            # Group by the 'season_key' and calculate the mean over the 'time' dimension.
-            # This operation should preserve other dimensions like 'lat' and 'lon'.
-            seasonal_mean = da.groupby("season_key").mean(dim="time", skipna=True)
+            # Debug: Gib Infos über das Eingabe-DataArray aus
+            logging.debug(f"--- calculate_seasonal_means INPUT ---")
+            # logging.debug(f"Input DataArray (da) head:\n{da.head()}") # Kann bei großen Arrays zu viel Log erzeugen
+            logging.debug(f"Input DataArray (da) dims: {da.dims}")
+            logging.debug(f"Input DataArray (da) coords: {list(da.coords)}")
+            if 'season_key' in da.coords:
+                logging.debug(f"Input 'season_key' dtype: {da['season_key'].dtype}")
+                # logging.debug(f"Input 'season_key' head:\n{da['season_key'].head().values}")
 
-            if seasonal_mean.season_key.size == 0:
+
+            # Filtere ungültige Keys (wie vorher)
+            keys_da = da['season_key']
+            if keys_da.dtype == object: # Behandlung von object-Typ, der Strings oder gemischte Typen enthalten kann
+                # Konvertiere zu String und prüfe auf NaN-ähnliche Werte und leere Strings
+                keys_str = keys_da.astype(str) # Sicherstellen, dass es Strings sind für die Prüfung
+                valid_keys_mask = keys_str.notnull() & (keys_str != '') & (keys_str != 'nan') & \
+                                  (keys_str != '<NA>') & (keys_str != 'None') & \
+                                  (pd.Series(keys_str).str.contains('-').fillna(False).values) # Muss '-' enthalten
+            elif pd.api.types.is_string_dtype(keys_da.dtype): # Explizit für String-Typen
+                valid_keys_mask = keys_da.notnull() & (keys_da != '') & \
+                                  (keys_da.str.contains('-').fillna(False))
+            else: # Für andere Typen, nur auf Null prüfen (sollte nicht der Fall sein für season_key)
+                valid_keys_mask = keys_da.notnull()
+
+
+            if not valid_keys_mask.all():
+                original_size = da.time.size
+                da_filtered = da.where(valid_keys_mask, drop=True)
+                removed_count = original_size - da_filtered.time.size
+                if removed_count > 0:
+                    logging.warning(f"Ungültige oder schlecht formatierte Einträge in 'season_key' gefunden ({removed_count} entfernt). Filtere sie vor der Gruppierung heraus.")
+                if da_filtered.time.size == 0:
+                    logging.error("Keine gültigen season_key Einträge nach Filterung übrig.")
+                    return None
+            else:
+                da_filtered = da
+
+            # Debug: Gib Infos nach dem Filtern aus
+            logging.debug(f"--- calculate_seasonal_means AFTER FILTER ---")
+            # logging.debug(f"Filtered DataArray (da_filtered) head:\n{da_filtered.head()}")
+            if 'season_key' in da_filtered.coords:
+                logging.debug(f"Filtered 'season_key' dtype: {da_filtered['season_key'].dtype}")
+                # logging.debug(f"Filtered 'season_key' head:\n{da_filtered['season_key'].head().values}")
+                logging.debug(f"Is 'season_key' a dimension? {'season_key' in da_filtered.dims}")
+
+
+            # Groupby und Mittelwertbildung
+            logging.debug(f"Versuche groupby('season_key').mean()...")
+            ds_seasonal = da_filtered.groupby("season_key").mean(dim="time", skipna=True)
+            logging.debug(f"Groupby erfolgreich. ds_seasonal dims: {ds_seasonal.dims}")
+
+            # Entferne Einträge, bei denen der Key nach dem Groupby NaN war (falls groupby NaN-Keys erzeugt)
+            # Normalerweise sollte groupby keine NaN-Keys erzeugen, wenn da_filtered keine hat.
+            # Aber zur Sicherheit:
+            if ds_seasonal['season_key'].isnull().any():
+                 logging.warning("NaN-Werte in 'season_key' nach groupby gefunden. Entferne diese.")
+                 ds_seasonal = ds_seasonal.sel(season_key=ds_seasonal.season_key.notnull())
+
+            if ds_seasonal.season_key.size == 0:
+                logging.warning("Keine gültigen season_keys nach Groupby und NaN-Filterung übrig.")
                 return None
 
-            # Extract year and season strings from the 'season_key' to create new coordinates
-            years_list = [int(key.split('-')[0]) for key in seasonal_mean['season_key'].values]
-            seasons_list = [key.split('-')[1] for key in seasonal_mean['season_key'].values]
+            # Erstelle 'year' und 'season_str' Koordinaten aus der 'season_key' Dimension
+            season_key_values = ds_seasonal['season_key'].values
+            
+            years_list = []
+            seasons_list = []
+            valid_parsed_keys = []
 
-            seasonal_mean = seasonal_mean.assign_coords(
+            for key_str in season_key_values:
+                if isinstance(key_str, str) and '-' in key_str:
+                    try:
+                        year_part, season_part = key_str.split('-', 1)
+                        years_list.append(int(year_part))
+                        seasons_list.append(season_part)
+                        valid_parsed_keys.append(key_str)
+                    except ValueError:
+                        logging.warning(f"Fehler beim Parsen des season_key '{key_str}'. Überspringe.")
+                else:
+                    logging.warning(f"Unerwarteter Typ oder Format für season_key '{key_str}'. Überspringe.")
+            
+            if not valid_parsed_keys:
+                logging.error("Keine season_keys konnten erfolgreich geparst werden.")
+                return None
+            
+            # Filtere ds_seasonal, falls einige Keys nicht geparst werden konnten
+            if len(valid_parsed_keys) < len(season_key_values):
+                ds_seasonal = ds_seasonal.sel(season_key=valid_parsed_keys)
+                if ds_seasonal.season_key.size == 0:
+                    logging.error("Keine Daten übrig nach Filterung nicht parsbarer season_keys.")
+                    return None
+
+            ds_seasonal = ds_seasonal.assign_coords(
                 temp_season_year=("season_key", years_list),
                 temp_season_str=("season_key", seasons_list)
             )
-            
-            # Unstack the 'season_key' dimension into separate 'season' and 'season_year' dimensions.
-            ds_unstacked = seasonal_mean.set_index(
-                season_key=["temp_season_year", "temp_season_str"]
-            ).unstack("season_key")
-            
-            # Rename the temporary dimensions to the final names.
-            final_da = ds_unstacked.rename({
-                "temp_season_year": "season_year",
-                "temp_season_str": "season"
-            })
 
-            # Preserve attributes from the original DataArray.
-            if 'dataset' in da.attrs:
-                final_da.attrs['dataset'] = da.attrs['dataset']
+            # Wandle die 'season_key'-Dimension in ein MultiIndex ('temp_season_year', 'temp_season_str') um
+            # und entpacke ('unstack') diesen, um die neuen Dimensionen zu erstellen.
+            try:
+                logging.debug(f"Vor set_index, ds_seasonal dims: {ds_seasonal.dims}, ds_seasonal coords: {list(ds_seasonal.coords.keys())}")
                 
-            return final_da
+                # Stelle sicher, dass 'season_key' eine Dimension ist
+                if 'season_key' not in ds_seasonal.dims:
+                    # Sollte nach groupby der Fall sein, aber zur Sicherheit
+                    if 'season_key' in ds_seasonal.coords:
+                         ds_seasonal = ds_seasonal.set_index(season_key='season_key')
+                    else:
+                         logging.error("Dimension oder Koordinate 'season_key' nicht in ds_seasonal für set_index vorhanden.")
+                         return None
+
+                ds_multi_indexed = ds_seasonal.set_index(
+                    season_key=["temp_season_year", "temp_season_str"]
+                )
+                logging.debug(f"Nach set_index, ds_multi_indexed dims: {ds_multi_indexed.dims}")
+                
+                # Unstack der 'season_key' (jetzt MultiIndex) Dimension
+                ds_unstacked = ds_multi_indexed.unstack("season_key")
+                logging.debug(f"Nach unstack, ds_unstacked dims: {ds_unstacked.dims}")
+
+                # Benenne die neuen Dimensionen um
+                # Die Namen der neuen Dimensionen entsprechen den Namen, die im set_index verwendet wurden
+                ds_final = ds_unstacked.rename({
+                    "temp_season_year": "season_year",
+                    "temp_season_str": "season"
+                })
+                logging.debug(f"Nach rename, ds_final dims: {ds_final.dims}")
+
+                # Entferne die temporären Koordinaten, falls sie noch als nicht-dimensionale Koordinaten existieren
+                coords_to_drop = [c for c in ['temp_season_year', 'temp_season_str', 'season_key'] if c in ds_final.coords and c not in ds_final.dims]
+                if coords_to_drop:
+                    ds_final = ds_final.drop_vars(coords_to_drop)
+
+            except Exception as e_unstack:
+                logging.exception(f"Fehler beim Umstrukturieren mit set_index/unstack: ")
+                return None
+
+            if 'dataset' in da.attrs:
+                ds_final.attrs['dataset'] = da.attrs['dataset']
+
+            logging.debug(f"calculate_seasonal_means output dims: {ds_final.dims}")
+            return ds_final
+
+        except ValueError as ve:
+            if "Providing a combination of `group` and **groupers is not supported" in str(ve):
+                logging.error(f"ValueError im groupby: {ve}. Prüfe die Struktur von da_filtered und season_key.")
+            else:
+                logging.exception(f"Anderer ValueError in calculate_seasonal_means:")
+            return None
         except Exception as e:
-            logging.exception(f"General error in calculate_seasonal_means:")
+            logging.exception(f"Allgemeiner Fehler in calculate_seasonal_means:")
             return None
 
     @staticmethod

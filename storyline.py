@@ -100,10 +100,22 @@ class StorylineAnalyzer:
 
             data_var = ds[actual_var_name]
 
-            # Standardize coordinates
+            # Standardize coordinates (robust version)
             rename_map = {'latitude': 'lat', 'longitude': 'lon', 'plev': 'lev'}
-            dims_to_rename = {k: v for k, v in rename_map.items() if k in data_var.dims}
-            if dims_to_rename: data_var = data_var.rename(dims_to_rename)
+            final_rename_map = {}
+            for old_name, new_name in rename_map.items():
+                if old_name in data_var.dims:
+                    final_rename_map[old_name] = new_name
+                # WICHTIG: Prüft auch, ob es eine Koordinate ist, die nicht gleichzeitig eine Dimension ist.
+                if old_name in data_var.coords and old_name not in data_var.dims:
+                    final_rename_map[old_name] = new_name
+            
+            if final_rename_map:
+                logging.info(f"Renaming coordinates/dims for {model}: {final_rename_map}")
+                data_var = data_var.rename(final_rename_map)
+
+            # Debugging-Tipp: Fügen Sie diese Zeile hinzu, um die erfolgreiche Umbenennung zu prüfen
+            logging.debug(f"Coordinates after renaming for {model}: {list(data_var.coords.keys())}")
 
             # Ensure time coordinate is clean
             if not data_var.indexes['time'].is_unique:
@@ -220,15 +232,32 @@ class StorylineAnalyzer:
             for scenario in self.config.CMIP6_SCENARIOS:
                 key = self.get_model_scenario_key(model, scenario)
                 model_data[key] = {}
-                is_valid = True
-                for var in set(all_vars):
-                    data = self._load_and_preprocess_model_data(model, [scenario], var)
+                
+                # --- Lade alle regionalen Variablen ---
+                is_valid_model = True
+                for var in self.config.CMIP6_VARIABLES_TO_LOAD:
+                    force_regional = (var == 'tas') # Regionales 'tas' laden
+                    data = self._load_and_preprocess_model_data(model, [scenario], var, force_regional=force_regional)
                     if data is None:
-                        is_valid = False
+                        logging.warning(f"Skipping model {key} due to missing regional variable: {var}")
+                        is_valid_model = False
                         break
                     model_data[key][var] = data
-                if not is_valid:
-                    model_data.pop(key, None)
+                
+                if not is_valid_model:
+                    model_data.pop(key, None) # Modell aus der Liste entfernen
+                    continue # Nächstes Modell/Szenario bearbeiten
+
+                # --- Lade die globale 'tas' Variable separat ---
+                global_tas_var = self.config.CMIP6_GLOBAL_TAS_VAR
+                data = self._load_and_preprocess_model_data(model, [scenario], global_tas_var, force_regional=False)
+                if data is None:
+                    logging.warning(f"Skipping model {key} due to missing global variable: {global_tas_var}")
+                    model_data.pop(key, None) # Modell aus der Liste entfernen
+                    continue # Nächstes Modell/Szenario bearbeiten
+                
+                # Speichere die globale Variable unter einem eindeutigen Namen, um Konflikte zu vermeiden
+                model_data[key][f"{global_tas_var}_global"] = data
 
         if not model_data:
             logging.error("No CMIP6 models were successfully loaded. Aborting analysis.")
@@ -237,10 +266,11 @@ class StorylineAnalyzer:
         # Step 2: Calculate GWL threshold years for each model
         gwl_thresholds = {}
         for key, data in model_data.items():
-            global_tas_var_name = self.config.CMIP6_GLOBAL_TAS_VAR
-            if global_tas_var_name in data and data[global_tas_var_name] is not None:
+            # Verwende den neuen, eindeutigen Namen für die globale Temperatur
+            global_tas_key = f"{self.config.CMIP6_GLOBAL_TAS_VAR}_global"
+            if global_tas_key in data and data[global_tas_key] is not None:
                 thresholds = self.calculate_gwl_thresholds(
-                    data[global_tas_var_name],
+                    data[global_tas_key],
                     (self.config.CMIP6_PRE_INDUSTRIAL_REF_START, self.config.CMIP6_PRE_INDUSTRIAL_REF_END),
                     self.config.GWL_TEMP_SMOOTHING_WINDOW,
                     self.config.GWL_FINE_STEPS_FOR_PLOT
@@ -248,8 +278,7 @@ class StorylineAnalyzer:
                 if thresholds:
                     gwl_thresholds[key] = thresholds
             else:
-                logging.warning(f"Global TAS variable '{global_tas_var_name}' not found for {key}. Cannot calculate GWL thresholds.")
-
+                logging.warning(f"Global TAS variable '{global_tas_key}' not found for {key}. Cannot calculate GWL thresholds.")
 
         # Step 3: Calculate time series of all metrics (jet indices, box means)
         metric_timeseries = {}
@@ -295,7 +324,8 @@ class StorylineAnalyzer:
                 }
         
         # Step 5: Calculate deltas (GWL - historical ref) and MMM changes
-        all_deltas = {met: {gwl: [] for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT} for met in metrics_list}
+        # ÄNDERUNG: Speichere Deltas in einem Dictionary {model_key: delta}, nicht in einer Liste
+        all_deltas = {met: {gwl: {} for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT} for met in metrics_list}
         for key in model_abs_means_at_gwl:
             if key in model_abs_means_at_hist_ref:
                 for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT:
@@ -306,10 +336,18 @@ class StorylineAnalyzer:
                             delta = gwl_val - hist_val
                             if '_pr' in met and abs(hist_val) > 1e-9:
                                 delta = (delta / hist_val) * 100.0
-                            all_deltas[met][gwl].append(delta)
+                            # ÄNDERUNG: Speichere das Delta mit dem Modell-Key
+                            all_deltas[met][gwl][key] = delta
 
-        mmm_changes = {gwl: {met: np.mean(all_deltas[met][gwl]) if all_deltas[met][gwl] else np.nan for met in metrics_list} for gwl in self.config.GLOBAL_WARMING_LEVELS}
-
+        # Die MMM-Berechnung muss ebenfalls angepasst werden, um die Werte aus dem Dictionary zu extrahieren
+        mmm_changes = {
+            gwl: {
+                met: np.mean(list(all_deltas[met][gwl].values())) if all_deltas[met][gwl] else np.nan
+                for met in metrics_list
+            }
+            for gwl in self.config.GLOBAL_WARMING_LEVELS
+        }
+        
         return {
             'gwl_threshold_years': gwl_thresholds,
             'cmip6_model_data_loaded': model_data,

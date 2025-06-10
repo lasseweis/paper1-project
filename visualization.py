@@ -169,18 +169,46 @@ class Visualizer:
         for i, jet_idx in enumerate(jet_indices_to_plot):
             ax = axs[i]
             
-            # Plot individual model lines
-            gwls_fine = sorted(all_deltas[jet_idx].keys())
-            model_count = len(all_deltas[jet_idx][gwls_fine[0]])
-            all_model_runs = np.array([all_deltas[jet_idx][gwl] for gwl in gwls_fine]).T
-            for model_run in all_model_runs:
-                ax.plot(gwls_fine, model_run, marker='.', linestyle='-', color='darkgray', alpha=0.5, lw=0.8)
+            deltas_by_gwl = all_deltas[jet_idx]
+            gwls_fine = sorted(deltas_by_gwl.keys())
 
-            # Plot percentile spread
-            p10 = [np.percentile(all_deltas[jet_idx][gwl], 10) for gwl in gwls_fine]
-            p90 = [np.percentile(all_deltas[jet_idx][gwl], 90) for gwl in gwls_fine]
-            ax.fill_between(gwls_fine, p10, p90, color='lightcoral', alpha=0.4, label='10-90th Percentile Spread')
+            # --- Plot individual model lines ---
+            # 1. Re-Strukturierung der Daten pro Modell
+            model_runs = {}
+            for gwl, model_deltas_dict in deltas_by_gwl.items():
+                for model_key, delta_val in model_deltas_dict.items():
+                    if model_key not in model_runs:
+                        model_runs[model_key] = []
+                    model_runs[model_key].append((gwl, delta_val))
+
+            # 2. Jede Modell-Linie einzeln plotten
+            for model_key, run_data in model_runs.items():
+                # Sortiere nach GWL, um eine korrekte Linie zu zeichnen
+                run_data.sort()
+                gwls_sorted = [d[0] for d in run_data]
+                values_sorted = [d[1] for d in run_data]
+                if len(gwls_sorted) > 1: # Nur plotten, wenn mehr als ein Punkt vorhanden ist
+                    ax.plot(gwls_sorted, values_sorted, marker='.', linestyle='-', color='darkgray', alpha=0.5, lw=0.8)
+
+            # --- Plot percentile spread (robustly) ---
+            # Extrahiere die Listen der Delta-Werte für jedes GWL
+            delta_values_per_gwl = [list(deltas_by_gwl[gwl].values()) for gwl in gwls_fine]
             
+            # Berechne Perzentile nur dort, wo Daten vorhanden sind
+            p10 = [np.percentile(d, 10) if d else np.nan for d in delta_values_per_gwl]
+            p90 = [np.percentile(d, 90) if d else np.nan for d in delta_values_per_gwl]
+            
+            # Filtere NaNs vor dem Plotten heraus, um Lücken zu vermeiden
+            gwls_plot, p10_plot, p90_plot = [], [], []
+            for i, gwl in enumerate(gwls_fine):
+                if not np.isnan(p10[i]) and not np.isnan(p90[i]):
+                    gwls_plot.append(gwl)
+                    p10_plot.append(p10[i])
+                    p90_plot.append(p90[i])
+
+            if gwls_plot:
+                ax.fill_between(gwls_plot, p10_plot, p90_plot, color='lightcoral', alpha=0.4, label='10-90th Percentile Spread')
+                    
             # Plot MMM
             gwls_main = sorted(mmm_changes.keys())
             mmm_values = [mmm_changes[gwl].get(jet_idx, np.nan) for gwl in gwls_main]

@@ -147,9 +147,10 @@ class Visualizer:
     def plot_jet_changes_vs_gwl(cmip6_results, filename="cmip6_jet_changes_vs_gwl.png"):
         """
         Plots CMIP6 jet index changes vs GWL, with percentile spread.
-        This function was moved from StorylineAnalyzer to separate calculation from visualization.
+        MODIFIZIERT, um eine gemeinsame Legende und spezifische Storyline-Marker zu verwenden,
+        ähnlich dem Stil des ursprünglichen Codes.
         """
-        logging.info("Plotting Jet Changes vs GWL (with calculated spread)...")
+        logging.info("Plotting Jet Changes vs GWL (with shared legend and custom markers)...")
         Visualizer.ensure_plot_dir_exists()
 
         if not cmip6_results or 'all_individual_model_deltas_for_plot' not in cmip6_results:
@@ -163,8 +164,45 @@ class Visualizer:
         n_indices = len(jet_indices_to_plot)
         if n_indices == 0: return
 
-        fig, axs = plt.subplots(1, n_indices, figsize=(7 * n_indices, 6), sharey=False, squeeze=False)
+        # GEÄNDERT: Höhe für Legende unten angepasst
+        fig, axs = plt.subplots(1, n_indices, figsize=(7 * n_indices, 6.5), sharey=False, squeeze=False)
         axs = axs.flatten()
+
+        # NEU: Definition der Legenden-Elemente vor der Schleife für eine gemeinsame Legende
+        master_legend_handles = [
+            plt.Line2D([0], [0], color='darkgray', lw=0.8, marker='.', markersize=4, linestyle='-'),
+            mpatches.Patch(color='lightcoral', alpha=0.4),
+            plt.Line2D([0], [0], color='black', lw=2.5, marker='o', markersize=7, linestyle='-')
+        ]
+        master_legend_labels = [
+            'Individual CMIP6 Models',
+            '10-90th Percentile Spread',
+            'Multi-Model Mean'
+        ]
+
+        # NEU: Definition von Farben und Markern für die Storylines
+        storyline_styles = {
+            'Core Mean':    {'color': '#1f77b4', 'marker': 'X', 's': 60}, # Blau
+            'Core High':    {'color': '#ff7f0e', 'marker': 'X', 's': 60}, # Orange
+            'Extreme Low':  {'color': '#2ca02c', 'marker': 'P', 's': 70}, # Grün
+            'Extreme High': {'color': '#d62728', 'marker': 'P', 's': 70}  # Rot
+        }
+
+        # Dynamisch Legenden-Handles für die tatsächlich vorhandenen Storyline-Typen hinzufügen
+        used_storyline_types = set()
+        for jet_idx in jet_indices_to_plot:
+            for gwl in Config.STORYLINE_JET_CHANGES.get(jet_idx, {}):
+                for storyline_type in Config.STORYLINE_JET_CHANGES[jet_idx][gwl]:
+                    used_storyline_types.add(storyline_type)
+
+        for storyline_type in storyline_styles:
+            if storyline_type in used_storyline_types:
+                style = storyline_styles[storyline_type]
+                master_legend_handles.append(
+                    plt.Line2D([0], [0], marker=style['marker'], color='w',
+                               markerfacecolor=style['color'], markeredgecolor='k', markersize=9)
+                )
+                master_legend_labels.append(f'Storyline: {storyline_type}')
 
         for i, jet_idx in enumerate(jet_indices_to_plot):
             ax = axs[i]
@@ -173,7 +211,6 @@ class Visualizer:
             gwls_fine = sorted(deltas_by_gwl.keys())
 
             # --- Plot individual model lines ---
-            # 1. Re-Strukturierung der Daten pro Modell
             model_runs = {}
             for gwl, model_deltas_dict in deltas_by_gwl.items():
                 for model_key, delta_val in model_deltas_dict.items():
@@ -181,43 +218,42 @@ class Visualizer:
                         model_runs[model_key] = []
                     model_runs[model_key].append((gwl, delta_val))
 
-            # 2. Jede Modell-Linie einzeln plotten
             for model_key, run_data in model_runs.items():
-                # Sortiere nach GWL, um eine korrekte Linie zu zeichnen
                 run_data.sort()
                 gwls_sorted = [d[0] for d in run_data]
                 values_sorted = [d[1] for d in run_data]
-                if len(gwls_sorted) > 1: # Nur plotten, wenn mehr als ein Punkt vorhanden ist
+                if len(gwls_sorted) > 1:
                     ax.plot(gwls_sorted, values_sorted, marker='.', linestyle='-', color='darkgray', alpha=0.5, lw=0.8)
 
             # --- Plot percentile spread (robustly) ---
-            # Extrahiere die Listen der Delta-Werte für jedes GWL
             delta_values_per_gwl = [list(deltas_by_gwl[gwl].values()) for gwl in gwls_fine]
-            
-            # Berechne Perzentile nur dort, wo Daten vorhanden sind
             p10 = [np.percentile(d, 10) if d else np.nan for d in delta_values_per_gwl]
             p90 = [np.percentile(d, 90) if d else np.nan for d in delta_values_per_gwl]
             
-            # Filtere NaNs vor dem Plotten heraus, um Lücken zu vermeiden
-            gwls_plot, p10_plot, p90_plot = [], [], []
-            for i, gwl in enumerate(gwls_fine):
-                if not np.isnan(p10[i]) and not np.isnan(p90[i]):
-                    gwls_plot.append(gwl)
-                    p10_plot.append(p10[i])
-                    p90_plot.append(p90[i])
-
-            if gwls_plot:
-                ax.fill_between(gwls_plot, p10_plot, p90_plot, color='lightcoral', alpha=0.4, label='10-90th Percentile Spread')
+            valid_indices = [i for i, (p10_val, p90_val) in enumerate(zip(p10, p90)) if not np.isnan(p10_val) and not np.isnan(p90_val)]
+            if valid_indices:
+                gwls_plot = [gwls_fine[i] for i in valid_indices]
+                p10_plot = [p10[i] for i in valid_indices]
+                p90_plot = [p90[i] for i in valid_indices]
+                ax.fill_between(gwls_plot, p10_plot, p90_plot, color='lightcoral', alpha=0.4)
                     
             # Plot MMM
             gwls_main = sorted(mmm_changes.keys())
             mmm_values = [mmm_changes[gwl].get(jet_idx, np.nan) for gwl in gwls_main]
-            ax.plot(gwls_main, mmm_values, marker='o', linestyle='-', color='black', lw=2.5, markersize=7, label='Multi-Model Mean')
+            ax.plot(gwls_main, mmm_values, marker='o', linestyle='-', color='black', lw=2.5, markersize=7)
 
-            # Plot Storyline markers
+            # GEÄNDERT: Plot Storyline markers mit spezifischen Farben und Symbolen
             for gwl, storylines in Config.STORYLINE_JET_CHANGES.get(jet_idx, {}).items():
                 for name, value in storylines.items():
-                    ax.plot(gwl, value, marker='X', markersize=10, linestyle='none', label=f'Storyline: {name}')
+                    if name in storyline_styles:
+                        style = storyline_styles[name]
+                        ax.scatter(gwl, value,
+                                   marker=style['marker'],
+                                   color=style['color'],
+                                   s=style['s'],  # Größe des Markers
+                                   edgecolor='black',
+                                   linewidth=0.8,
+                                   zorder=5) # zorder stellt sicher, dass sie obenauf liegen
 
             # Formatting
             ylabel = f'Change in {jet_idx.replace("_", " ")}'
@@ -229,9 +265,20 @@ class Visualizer:
             ax.set_title(f'Projected Change in {jet_idx.replace("_", " ")}')
             ax.grid(True, linestyle=':', alpha=0.6)
             ax.axhline(0, color='grey', lw=0.8)
-            ax.legend(fontsize=8)
             
-        plt.tight_layout(rect=[0, 0, 1, 0.95])
+            # ENTFERNT: Die individuelle Legende pro Subplot wird entfernt
+            # ax.legend(fontsize=8)
+        
+        # NEU: Fügt die gemeinsame Legende unterhalb der Plots hinzu
+        fig.legend(handles=master_legend_handles, labels=master_legend_labels,
+                   loc='lower center',
+                   bbox_to_anchor=(0.5, -0.01), # Positionierung unterhalb der Achsen
+                   ncol=4, # Anzahl der Spalten in der Legende
+                   fontsize=10,
+                   frameon=True)
+
+        # GEÄNDERT: Anpassung des Layouts für die Legende
+        plt.tight_layout(rect=[0, 0.08, 1, 0.95]) # rect=[left, bottom, right, top]
         fig.suptitle("CMIP6 Projected Jet Changes vs. Global Warming Level", fontsize=16, weight='bold')
         filepath = os.path.join(Config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')

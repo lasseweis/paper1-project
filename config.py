@@ -79,14 +79,14 @@ class Config:
     # Format: {'IndexName': {GWL: {'StorylineType': Value}}}
     STORYLINE_JET_CHANGES = {
         'DJF_JetSpeed': {
-            2.0: {'Core Mean': 0.4, 'Core High': 0.7, 'Extreme Low': -0.8, 'Extreme High': 1.5},
-            3.0: {'Core Mean': 0.5, 'Core High': 1.0, 'Extreme Low': -0.6, 'Extreme High': 1.7},
-            4.0: {'Core Mean': 0.6, 'Core High': 1.3, 'Extreme Low': -0.4, 'Extreme High': 1.9},
+            2.0: {'Core Mean': 0.25, 'Core High': 0.8, 'Extreme Low': -0.8, 'Extreme High': 1.5},
+            3.0: {'Core Mean': 0.4, 'Core High': 1.0, 'Extreme Low': -0.6, 'Extreme High': 1.7},
+            4.0: {'Core Mean': 0.5, 'Core High': 1.1, 'Extreme Low': -0.4, 'Extreme High': 1.9},
         },
         'JJA_JetLat': {
-            2.0: {'Core Mean': 0.5, 'Core High': 2.0, 'Extreme Low': -1.0, 'Extreme High': 3.0},
-            3.0: {'Core Mean': 1.0, 'Core High': 2.2, 'Extreme Low': -0.5, 'Extreme High': 3.3},
-            4.0: {'Core Mean': 1.2, 'Core High': 2.4, 'Extreme Low':  0.0, 'Extreme High': 3.6},
+            2.0: {'Core Mean': 0.5, 'Core High': 1.9, 'Extreme Low': -1.5, 'Extreme High': 3.0},
+            3.0: {'Core Mean': 1.2, 'Core High': 2.2, 'Extreme Low': -1.0, 'Extreme High': 3.3},
+            4.0: {'Core Mean': 1.3, 'Core High': 2.4, 'Extreme Low': -0.5, 'Extreme High': 3.6},
         }
     }
 

@@ -8,6 +8,9 @@ resulting plots and data.
 To run the full analysis, execute this script from the command line:
 $ python main.py
 """
+import pandas as pd
+import xarray as xr
+import numpy as np
 import logging
 import sys
 import multiprocessing

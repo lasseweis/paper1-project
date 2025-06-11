@@ -294,13 +294,12 @@ class Visualizer:
             logging.warning(f"Skipping jet impact plot for {dataset_key}: No data provided.")
             return
 
-        # Setup figure: 2 seasons (rows) x 2 jet types (cols)
         fig, axs = plt.subplots(2, 2, figsize=(14, 10),
                                 subplot_kw={'projection': ccrs.PlateCarree()})
         
         plot_configs = {
-            'tas': {'cmap': 'coolwarm', 'vmin': -1.0, 'vmax': 1.0, 'label': 'TAS Slope (°C per std. dev. of Jet Index)'},
-            'pr':  {'cmap': 'BrBG', 'vmin': -0.5, 'vmax': 0.5, 'label': 'PR Slope (mm/day per std. dev. of Jet Index)'}
+            'tas': {'cmap': 'coolwarm', 'vmin': -1.0, 'vmax': 1.0, 'base_label': 'TAS Slope (°C per std. dev. of Jet Index)'},
+            'pr':  {'cmap': 'BrBG', 'vmin': -0.5, 'vmax': 0.5, 'base_label': 'PR Slope (mm/day per std. dev. of Jet Index)'}
         }
         
         row_map = {'Winter': 0, 'Summer': 1}
@@ -308,7 +307,30 @@ class Visualizer:
         title_map = {'speed': 'Speed', 'lat': 'Latitude'}
 
         conf = plot_configs[variable_to_plot]
-        mappable = None # To store the pcolormesh object for the colorbar
+        mappable = None
+        
+        # --- Create the colorbar label with an example std. dev. ---
+        label = conf['base_label']
+        try:
+            # Use Winter Jet Speed as a representative example for the label
+            winter_impacts = impact_data.get('Winter', {})
+            winter_speed_key = f'jet_speed_{variable_to_plot}'
+            winter_lat_key = f'jet_lat_{variable_to_plot}'
+
+            if winter_impacts:
+                # Get std dev for speed
+                std_dev_speed = winter_impacts.get(winter_speed_key, {}).get('std_dev_predictor')
+                if std_dev_speed is not None:
+                    label += f'\n(DJF Speed 1 std. dev. = {std_dev_speed:.2f} m/s)'
+                
+                # Get std dev for latitude
+                std_dev_lat = winter_impacts.get(winter_lat_key, {}).get('std_dev_predictor')
+                if std_dev_lat is not None:
+                    label += f'\n(DJF Lat 1 std. dev. = {std_dev_lat:.2f} °Lat)'
+
+        except Exception as e:
+            logging.warning(f"Could not retrieve example std dev for colorbar label: {e}")
+        # --- End of label creation ---
 
         for season, season_impacts in impact_data.items():
             row = row_map.get(season)
@@ -316,8 +338,6 @@ class Visualizer:
 
             for jet_type, col in col_map.items():
                 ax = axs[row, col]
-                
-                # Construct the correct key for the data dictionary
                 impact_key = f'jet_{jet_type}_{variable_to_plot}'
                 data = season_impacts.get(impact_key)
 
@@ -339,7 +359,7 @@ class Visualizer:
                     cf = ax.pcolormesh(lons_plot, lats_plot, data['slopes'], shading='auto',
                                        cmap=conf['cmap'], vmin=conf['vmin'], vmax=conf['vmax'],
                                        transform=ccrs.PlateCarree())
-                    mappable = cf # Store the mappable object
+                    mappable = cf
 
                     if data.get('p_values') is not None:
                         sig_mask = (data['p_values'] < 0.05) & np.isfinite(data['slopes'])
@@ -349,11 +369,10 @@ class Visualizer:
                 else:
                     ax.text(0.5, 0.5, "Data not available", transform=ax.transAxes, ha='center', va='center')
 
-        # Add a single, shared colorbar for the entire figure
         if mappable:
             fig.subplots_adjust(left=0.05, right=0.88, bottom=0.05, top=0.9)
-            cbar_ax = fig.add_axes([0.9, 0.25, 0.02, 0.5]) # [left, bottom, width, height]
-            fig.colorbar(mappable, cax=cbar_ax, extend='both', label=conf['label'])
+            cbar_ax = fig.add_axes([0.9, 0.25, 0.02, 0.5])
+            fig.colorbar(mappable, cax=cbar_ax, extend='both', label=label) # Use the updated label
 
         plt.suptitle(f"{dataset_key}: Impact of Jet Variations on {variable_to_plot.upper()}", fontsize=16, weight='bold')
         filename = os.path.join(Config.PLOT_DIR, f'jet_impact_maps_{variable_to_plot.upper()}_{dataset_key}.png')

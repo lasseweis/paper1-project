@@ -292,7 +292,10 @@ class AdvancedAnalyzer:
 
     @staticmethod
     def calculate_jet_impact_maps(datasets, jet_data, dataset_key, season):
-        """Calculate regression maps showing the impact of jet indices on PR and TAS."""
+        """
+        Calculate regression maps showing the impact of jet indices on PR and TAS.
+        The jet index (predictor) is normalized, so the slope is per std. dev.
+        """
         logging.info(f"Calculating jet impact maps for {dataset_key} ({season})...")
         impact_maps = {season: {}}
         
@@ -300,14 +303,19 @@ class AdvancedAnalyzer:
         pr_seasonal = datasets[f'{dataset_key}_pr_seasonal']
         
         for jet_type in ['speed', 'lat']:
-            # Corrected logic to look up the jet data with the simpler key
             jet_data_key = f'{dataset_key}_{season.lower()}_{jet_type}_data'
             jet_bundle = jet_data.get(jet_data_key)
             if jet_bundle is None or 'jet' not in jet_bundle or jet_bundle['jet'] is None:
                 logging.warning(f"No valid jet data found for key: {jet_data_key}")
-                continue # Skip if no jet data is available
+                continue
 
-            jet_index = jet_bundle['jet']
+            jet_index_detrended = jet_bundle['jet']
+            
+            # Normalize the predictor for the regression
+            jet_index_normalized = StatsAnalyzer.normalize(jet_index_detrended)
+            
+            # Get the standard deviation of the original (detrended) predictor for the plot label
+            std_dev_predictor = jet_index_detrended.std().item()
 
             for var_name, var_data in [('tas', tas_seasonal), ('pr', pr_seasonal)]:
                 var_data_season = DataProcessor.filter_by_season(var_data, season)
@@ -316,15 +324,18 @@ class AdvancedAnalyzer:
                 if var_data_detrended is None:
                     continue
 
-                slopes, p_values = AdvancedAnalyzer._calculate_regression_for_variable(jet_index, var_data_detrended)
+                # Use the NORMALIZED jet index for the regression
+                slopes, p_values = AdvancedAnalyzer._calculate_regression_for_variable(jet_index_normalized, var_data_detrended)
                 
-                # Ensure we have valid results before adding them
                 if slopes is not None and p_values is not None:
                     impact_key = f'jet_{jet_type}_{var_name}'
                     impact_maps[season][impact_key] = {
-                        'slopes': slopes, 'p_values': p_values,
-                        'lons': var_data.lon.values, 'lats': var_data.lat.values,
-                        'common_years': np.intersect1d(jet_index.season_year.values, var_data_detrended.season_year.values)
+                        'slopes': slopes,
+                        'p_values': p_values,
+                        'lons': var_data.lon.values,
+                        'lats': var_data.lat.values,
+                        'std_dev_predictor': std_dev_predictor,  # Store the std dev for the plot
+                        'common_years': np.intersect1d(jet_index_normalized.season_year.values, var_data_detrended.season_year.values)
                     }
         return impact_maps
 

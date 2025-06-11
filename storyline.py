@@ -205,11 +205,8 @@ class StorylineAnalyzer:
         """The main workflow for analyzing CMIP6 data at specific GWLs."""
         logging.info("\n--- Starting CMIP6 Analysis at Global Warming Levels ---")
         
-        # **FIX:** Determine the list of models to run *before* the loop.
-        # If models_to_run is None, find all available models instead of using a wildcard '*'.
         if models_to_run is None:
             logging.info("No model list provided, scanning for available models...")
-            # Scan for models based on a primary variable like 'ua'
             base_path_scan = self.config.CMIP6_VAR_PATH.format(variable='ua')
             if not os.path.exists(base_path_scan): base_path_scan = self.config.CMIP6_DATA_BASE_PATH
             
@@ -225,7 +222,9 @@ class StorylineAnalyzer:
             logging.error("No models to run for CMIP6 analysis. Aborting.")
             return {}
 
-        # Step 1: Load data for all specified models and variables
+        all_models_attempted = set(models_to_run)
+
+        # Step 1: Load data
         all_vars = self.config.CMIP6_VARIABLES_TO_LOAD + [self.config.CMIP6_GLOBAL_TAS_VAR]
         model_data = {}
         for model in models_to_run:
@@ -233,10 +232,9 @@ class StorylineAnalyzer:
                 key = self.get_model_scenario_key(model, scenario)
                 model_data[key] = {}
                 
-                # --- Lade alle regionalen Variablen ---
                 is_valid_model = True
                 for var in self.config.CMIP6_VARIABLES_TO_LOAD:
-                    force_regional = (var == 'tas') # Regionales 'tas' laden
+                    force_regional = (var == 'tas')
                     data = self._load_and_preprocess_model_data(model, [scenario], var, force_regional=force_regional)
                     if data is None:
                         logging.warning(f"Skipping model {key} due to missing regional variable: {var}")
@@ -245,28 +243,26 @@ class StorylineAnalyzer:
                     model_data[key][var] = data
                 
                 if not is_valid_model:
-                    model_data.pop(key, None) # Modell aus der Liste entfernen
-                    continue # Nächstes Modell/Szenario bearbeiten
+                    model_data.pop(key, None)
+                    continue
 
-                # --- Lade die globale 'tas' Variable separat ---
                 global_tas_var = self.config.CMIP6_GLOBAL_TAS_VAR
                 data = self._load_and_preprocess_model_data(model, [scenario], global_tas_var, force_regional=False)
                 if data is None:
                     logging.warning(f"Skipping model {key} due to missing global variable: {global_tas_var}")
-                    model_data.pop(key, None) # Modell aus der Liste entfernen
-                    continue # Nächstes Modell/Szenario bearbeiten
+                    model_data.pop(key, None)
+                    continue
                 
-                # Speichere die globale Variable unter einem eindeutigen Namen, um Konflikte zu vermeiden
                 model_data[key][f"{global_tas_var}_global"] = data
 
         if not model_data:
             logging.error("No CMIP6 models were successfully loaded. Aborting analysis.")
             return {}
             
-        # Step 2: Calculate GWL threshold years for each model
+        # Steps 2-5... (Diese Schritte bleiben unverändert und werden hier zur Kürze weggelassen)
+        # Step 2: Calculate GWL threshold years
         gwl_thresholds = {}
         for key, data in model_data.items():
-            # Verwende den neuen, eindeutigen Namen für die globale Temperatur
             global_tas_key = f"{self.config.CMIP6_GLOBAL_TAS_VAR}_global"
             if global_tas_key in data and data[global_tas_key] is not None:
                 thresholds = self.calculate_gwl_thresholds(
@@ -280,7 +276,7 @@ class StorylineAnalyzer:
             else:
                 logging.warning(f"Global TAS variable '{global_tas_key}' not found for {key}. Cannot calculate GWL thresholds.")
 
-        # Step 3: Calculate time series of all metrics (jet indices, box means)
+        # Step 3: Calculate time series of all metrics
         metric_timeseries = {}
         box_coords = (self.config.BOX_LAT_MIN, self.config.BOX_LAT_MAX, self.config.BOX_LON_MIN, self.config.BOX_LON_MAX)
         for key, data in model_data.items():
@@ -323,8 +319,7 @@ class StorylineAnalyzer:
                     }
                 }
         
-        # Step 5: Calculate deltas (GWL - historical ref) and MMM changes
-        # ÄNDERUNG: Speichere Deltas in einem Dictionary {model_key: delta}, nicht in einer Liste
+        # Step 5: Calculate deltas and MMM changes
         all_deltas = {met: {gwl: {} for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT} for met in metrics_list}
         for key in model_abs_means_at_gwl:
             if key in model_abs_means_at_hist_ref:
@@ -336,10 +331,8 @@ class StorylineAnalyzer:
                             delta = gwl_val - hist_val
                             if '_pr' in met and abs(hist_val) > 1e-9:
                                 delta = (delta / hist_val) * 100.0
-                            # ÄNDERUNG: Speichere das Delta mit dem Modell-Key
                             all_deltas[met][gwl][key] = delta
 
-        # Die MMM-Berechnung muss ebenfalls angepasst werden, um die Werte aus dem Dictionary zu extrahieren
         mmm_changes = {
             gwl: {
                 met: np.mean(list(all_deltas[met][gwl].values())) if all_deltas[met][gwl] else np.nan
@@ -348,6 +341,29 @@ class StorylineAnalyzer:
             for gwl in self.config.GLOBAL_WARMING_LEVELS
         }
         
+        # Create model run summary
+        models_per_gwl = {}
+        all_models_in_deltas = set()
+        if metrics_list:
+            primary_metric_data = all_deltas.get(metrics_list[0], {})
+            for gwl, model_deltas in primary_metric_data.items():
+                model_names = {key.split('_')[0] for key in model_deltas.keys()}
+                models_per_gwl[gwl] = sorted(list(model_names))
+                all_models_in_deltas.update(model_names)
+
+        final_failed_models = sorted(list(all_models_attempted - all_models_in_deltas))
+        
+        model_run_status = {
+            'successful_models_per_gwl': models_per_gwl,
+            'failed_models': final_failed_models
+        }
+
+        # --- NEU: Klassifiziere Modelle in Storylines ---
+        storyline_classification = self.classify_models_into_storylines(
+            all_deltas, self.config.STORYLINE_JET_CHANGES
+        )
+        # --- ENDE NEU ---
+
         return {
             'gwl_threshold_years': gwl_thresholds,
             'cmip6_model_data_loaded': model_data,
@@ -355,7 +371,9 @@ class StorylineAnalyzer:
             'model_data_at_hist_reference': model_abs_means_at_hist_ref,
             'model_data_at_gwl': model_abs_means_at_gwl,
             'all_individual_model_deltas_for_plot': all_deltas,
-            'mmm_changes': mmm_changes
+            'mmm_changes': mmm_changes,
+            'model_run_status': model_run_status,
+            'storyline_classification': storyline_classification # Hinzugefügter Wert
         }
     
     def calculate_storyline_impacts(self, cmip6_results, beta_obs_slopes):
@@ -400,3 +418,57 @@ class StorylineAnalyzer:
                     logging.info(f"      {storyline_type:<12}: Total Change = {impact_change:+.2f}")
 
         return {gwl: impacts for gwl, impacts in storyline_impacts.items() if impacts}
+    
+    @staticmethod
+    def classify_models_into_storylines(all_deltas, storyline_defs):
+        """
+        Classifies individual CMIP6 models into storylines based on their jet index changes.
+
+        Parameters:
+        -----------
+        all_deltas : dict
+            Dictionary containing the calculated changes (deltas) for each model, metric, and GWL.
+            Format: {metric: {gwl: {model_key: delta}}}
+        storyline_defs : dict
+            The storyline definitions from the Config class.
+            Format: {'IndexName': {GWL: {'StorylineType': Value}}}
+
+        Returns:
+        --------
+        dict
+            A nested dictionary with the classification results.
+            Format: {gwl: {jet_index: {storyline_type: [list_of_models]}}}
+        """
+        logging.info("Classifying CMIP6 models into defined storylines...")
+        classification_results = {}
+        
+        for jet_index, gwl_storylines in storyline_defs.items():
+            # Bestimme die Toleranz basierend auf dem Indexnamen
+            tolerance = 0.25 if 'Speed' in jet_index else 0.35
+            logging.info(f"  Processing '{jet_index}' with tolerance ±{tolerance}")
+            
+            for gwl, storylines in gwl_storylines.items():
+                if gwl not in classification_results:
+                    classification_results[gwl] = {}
+                if jet_index not in classification_results[gwl]:
+                    classification_results[gwl][jet_index] = {}
+
+                # Hole die individuellen Modelldeltas für diesen spezifischen Jet-Index und GWL
+                model_deltas = all_deltas.get(jet_index, {}).get(gwl, {})
+                if not model_deltas:
+                    logging.warning(f"    No model delta data found for '{jet_index}' at GWL {gwl}. Skipping.")
+                    continue
+
+                for storyline_type, storyline_value in storylines.items():
+                    lower_bound = storyline_value - tolerance
+                    upper_bound = storyline_value + tolerance
+                    
+                    models_in_storyline = []
+                    for model_key, delta_val in model_deltas.items():
+                        if lower_bound <= delta_val <= upper_bound:
+                            # Extrahiere den Modellnamen aus dem Schlüssel (z.B. aus 'ACCESS-CM2_ssp585')
+                            model_name = model_key.split('_')[0]
+                            models_in_storyline.append(model_name)
+                    
+                    classification_results[gwl][jet_index][storyline_type] = sorted(models_in_storyline)
+        return classification_results

@@ -125,6 +125,7 @@ class ClimateAnalysis:
         logging.info("=====================================================\n")
 
         Visualizer.ensure_plot_dir_exists()
+        cmip6_results = None
 
         # --- PART 1: REANALYSIS DATA PROCESSING AND ANALYSIS ---
         logging.info("\n--- Processing Reanalysis Datasets ---")
@@ -138,7 +139,6 @@ class ClimateAnalysis:
             logging.critical("Failed to process reanalysis datasets. Aborting.")
             return None
 
-        # The original code for regression analysis remains unchanged
         logging.info("\n--- Calculating and Plotting Reanalysis Regression Maps ---")
         regression_results = {}
         regression_period = (1981, 2010) 
@@ -159,12 +159,8 @@ class ClimateAnalysis:
             else:
                 logging.warning(f"Could not calculate or plot regression for {dset_key}. Results were empty.")
         
-        # =========================================================================
-        # === NEW SECTION: CALLING DORMANT JET AND CORRELATION ANALYSIS FUNCTIONS ===
-        # =========================================================================
         logging.info("\n\n--- Analyzing Jet Impacts and Correlations for Reanalysis Data ---")
         
-        # First, calculate the jet indices which are needed for the analyses
         jet_data_reanalysis = {}
         for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
             ua850_seasonal = datasets_reanalysis[f'{dset_key}_ua850_seasonal']
@@ -172,7 +168,6 @@ class ClimateAnalysis:
                  ua_season = DataProcessor.filter_by_season(ua850_seasonal, season)
                  season_lower = season.lower()
                  
-                 # Calculate and store jet indices with corrected, simpler keys
                  jet_speed = JetStreamAnalyzer.calculate_jet_speed_index(ua_season)
                  if jet_speed is not None:
                      jet_data_reanalysis[f'{dset_key}_{season_lower}_speed_data'] = {'jet': DataProcessor.detrend_data(jet_speed)}
@@ -181,13 +176,11 @@ class ClimateAnalysis:
                  if jet_lat is not None:
                      jet_data_reanalysis[f'{dset_key}_{season_lower}_lat_data'] = {'jet': DataProcessor.detrend_data(jet_lat)}
 
-        # Now, loop through datasets to call the analysis and new plotting functions
         for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
             logging.info(f"\n--> Processing jet impact analysis for {dset_key}")
             
             jet_impact_results = {}
             for season in ['Winter', 'Summer']:
-                # Call the dormant jet impact map calculation
                 impact_maps = AdvancedAnalyzer.calculate_jet_impact_maps(
                     datasets=datasets_reanalysis,
                     jet_data=jet_data_reanalysis,
@@ -197,20 +190,17 @@ class ClimateAnalysis:
                 if impact_maps and season in impact_maps:
                     jet_impact_results[season] = impact_maps[season]
 
-            # Call the new plotting function
             if jet_impact_results:
                  logging.info(f"--> Plotting jet impact maps for {dset_key}")
-                 # Call the plotter twice, once for each variable
                  Visualizer.plot_jet_impact_maps(jet_impact_results, dset_key, 'tas')
                  Visualizer.plot_jet_impact_maps(jet_impact_results, dset_key, 'pr')
             else:
                  logging.warning(f"Could not calculate or plot jet impact maps for {dset_key}.")
 
-        # --- PART 2: CMIP6 AND STORYLINE ANALYSIS --- (This part remains unchanged)
+        # --- PART 2: CMIP6 AND STORYLINE ANALYSIS ---
         logging.info("\n\n--- Analyzing CMIP6 Data and Storylines ---")
         try:
             storyline_analyzer = StorylineAnalyzer(config=Config)
-            
             cmip6_results = storyline_analyzer.analyze_cmip6_changes_at_gwl()
             
             if cmip6_results:
@@ -223,7 +213,45 @@ class ClimateAnalysis:
             logging.error(f"A critical error occurred during the CMIP6/Storyline analysis phase: {e}")
             logging.error(traceback.format_exc())
 
+        # --- FINALE ZUSAMMENFASSUNGEN ---
 
+        # Modell-Lauf-Zusammenfassung
+        if cmip6_results:
+            model_status = cmip6_results.get('model_run_status')
+            if model_status:
+                logging.info("\n\n--- CMIP6 Model Run Summary ---")
+                failed_models = model_status.get('failed_models')
+                if failed_models:
+                    logging.info(f"\nModels that failed or were excluded ({len(failed_models)}):")
+                    logging.info(f"  {', '.join(failed_models)}")
+                else:
+                    logging.info("\nAll attempted models were successfully included in the final analysis.")
+                successful_models = model_status.get('successful_models_per_gwl')
+                if successful_models:
+                    logging.info("\nModels used for analysis per Global Warming Level:")
+                    for gwl, models in sorted(successful_models.items()):
+                        if gwl in Config.GLOBAL_WARMING_LEVELS:
+                            logging.info(f"  - GWL {gwl}°C ({len(models)} models): {', '.join(models)}")
+                logging.info("-----------------------------")
+
+        # NEU: Storyline-Klassifizierungs-Zusammenfassung
+        if cmip6_results:
+            storyline_classification = cmip6_results.get('storyline_classification')
+            if storyline_classification:
+                logging.info("\n\n--- CMIP6 Model Storyline Classification ---")
+                for gwl, jet_indices in sorted(storyline_classification.items()):
+                    if gwl not in Config.GLOBAL_WARMING_LEVELS:
+                        continue
+                    logging.info(f"\nGWL {gwl}°C:")
+                    for jet_index, storylines in jet_indices.items():
+                        logging.info(f"  Classification for '{jet_index}' (Tolerance: ±{0.2 if 'Speed' in jet_index else 0.3}):")
+                        for storyline_type, models in sorted(storylines.items()):
+                            if models:
+                                logging.info(f"    - {storyline_type}: {', '.join(models)} ({len(models)})")
+                            else:
+                                logging.info(f"    - {storyline_type}: No models in range.")
+                logging.info("------------------------------------------")
+        
         logging.info("\n\n=====================================================")
         logging.info("=== FULL ANALYSIS COMPLETED ===")
         logging.info(f"All plots saved to: {Config.PLOT_DIR}")
@@ -231,7 +259,7 @@ class ClimateAnalysis:
         logging.info("=====================================================\n")
         
         return regression_results
-
+    
 def main():
     """Main entry point for the program."""
     logging.info("Initializing climate analysis tool...")

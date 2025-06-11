@@ -113,9 +113,31 @@ class ClimateAnalysis:
             
     @staticmethod
     def load_amo_index(file_path):
-        """Loads and processes the AMO index from a CSV file for winter and summer."""
-        # This is a simplified placeholder. The full logic from your original script would be here.
-        pass
+        """Loads and processes the AMO index from a CSV file."""
+        try:
+            amo_df = pd.read_csv(file_path, header=0)
+            amo_long = amo_df.melt(id_vars="Year", var_name="Month", value_name="AMO")
+            month_map = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6, "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
+            amo_long["Month"] = amo_long["Month"].map(month_map)
+            
+            # Winter
+            amo_winter_raw = amo_long[amo_long["Month"].isin([12, 1, 2])].copy()
+            amo_winter_raw.loc[amo_winter_raw["Month"] == 12, "season_year"] = amo_winter_raw["Year"] + 1
+            amo_winter_raw.loc[amo_winter_raw["Month"] != 12, "season_year"] = amo_winter_raw["Year"]
+            amo_winter_mean = amo_winter_raw.groupby("season_year")["AMO"].mean()
+            amo_winter_da = xr.DataArray(amo_winter_mean, name='AMO_winter')
+            
+            # Summer
+            amo_summer_raw = amo_long[amo_long["Month"].isin([6, 7, 8])].copy()
+            amo_summer_mean = amo_summer_raw.groupby("Year")["AMO"].mean()
+            amo_summer_da = xr.DataArray(amo_summer_mean.rename_axis('season_year'), name='AMO_summer')
+            
+            return {
+                'amo_winter_detrended': DataProcessor.detrend_data(amo_winter_da),
+                'amo_summer_detrended': DataProcessor.detrend_data(amo_summer_da)
+            }
+        except Exception:
+            return {}
 
     @staticmethod
     def run_full_analysis():
@@ -128,66 +150,89 @@ class ClimateAnalysis:
 
         # --- PART 1: REANALYSIS DATA PROCESSING AND ANALYSIS ---
         logging.info("\n--- Processing Reanalysis Datasets ---")
-        
         datasets_reanalysis = {
             **ClimateAnalysis.process_20crv3_data(),
             **ClimateAnalysis.process_era5_data()
         }
-        
-        if not datasets_reanalysis:
-            logging.critical("Failed to process reanalysis datasets. Aborting.")
+        if not datasets_reanalysis.get('20CRV3_pr_seasonal') or not datasets_reanalysis.get('ERA5_pr_seasonal'):
+            logging.critical("Failed to process one or both reanalysis datasets. Aborting.")
             return None
-
-        logging.info("\n--- Calculating and Plotting Reanalysis Regression Maps ---")
-        regression_results = {}
-        regression_period = (1981, 2010) 
-
-        for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
-            logging.info(f"\n--> Processing regression analysis for {dset_key}")
-            
-            results = AdvancedAnalyzer.calculate_regression_maps(
-                datasets=datasets_reanalysis,
-                dataset_key=dset_key,
-                regression_period=regression_period
-            )
-            
-            if results:
-                regression_results[dset_key] = results
-                logging.info(f"--> Plotting regression maps for {dset_key}")
-                Visualizer.plot_regression_analysis(results, dset_key)
-            else:
-                logging.warning(f"Could not calculate or plot regression for {dset_key}. Results were empty.")
         
+        # Load external indices
+        amo_data = ClimateAnalysis.load_amo_index(Config.AMO_INDEX_FILE)
+
+        # --- Analyze Jet Indices, Correlations, etc. for Reanalysis ---
+        jet_data_reanalysis = {}
+        all_correlations_reanalysis = {}
+        jet_impact_maps_reanalysis = {}
+        beta_obs_slopes = {}
+
+        for dataset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
+            logging.info(f"\n--- Analyzing Indices and Correlations for: {dataset_key} ---")
+            
+            jet_data_ds = AdvancedAnalyzer.analyze_jet_indices(datasets_reanalysis, dataset_key)
+            if jet_data_ds: jet_data_reanalysis.update(jet_data_ds)
+            
+            correlations_ds = AdvancedAnalyzer.analyze_correlations(datasets_reanalysis, {}, jet_data_reanalysis, dataset_key)
+            all_correlations_reanalysis[dataset_key] = correlations_ds
+
+            if dataset_key == Config.DATASET_ERA5 and correlations_ds:
+                logging.info("Extracting Beta_obs slopes from ERA5 correlations...")
+                required_beta_keys = [
+                    ('tas', 'winter', 'speed', 'DJF_JetSpeed_vs_tas'), ('tas', 'winter', 'lat', 'DJF_JetLat_vs_tas'),
+                    ('pr', 'winter', 'speed', 'DJF_JetSpeed_vs_pr'), ('pr', 'winter', 'lat', 'DJF_JetLat_vs_pr'),
+                    ('tas', 'summer', 'speed', 'JJA_JetSpeed_vs_tas'), ('tas', 'summer', 'lat', 'JJA_JetLat_vs_tas'),
+                    ('pr', 'summer', 'speed', 'JJA_JetSpeed_vs_pr'), ('pr', 'summer', 'lat', 'JJA_JetLat_vs_pr')
+                ]
+                for var_type, season, jet_dim, beta_key_name in required_beta_keys:
+                    slope = correlations_ds.get(var_type, {}).get(season, {}).get(jet_dim, {}).get('slope')
+                    beta_obs_slopes[beta_key_name] = slope
+
+            jet_impact_maps_reanalysis[dataset_key] = {
+                'Winter': AdvancedAnalyzer.calculate_jet_impact_maps(datasets_reanalysis, jet_data_reanalysis, dataset_key, 'Winter'),
+                'Summer': AdvancedAnalyzer.calculate_jet_impact_maps(datasets_reanalysis, jet_data_reanalysis, dataset_key, 'Summer')
+            }
+        
+        # --- U850 vs Box-Index Regressionen für Reanalyse ---
+        logging.info("\n--- Calculating Reanalysis Regression Maps ---")
+        regression_period = (1981, 2010) 
+        regression_results_reanalysis = {}
+        for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
+            results = AdvancedAnalyzer.calculate_regression_maps(datasets_reanalysis, dset_key, regression_period)
+            regression_results_reanalysis[dset_key] = results
+
+        # --- VISUALIZATION (Reanalysis) ---
+        logging.info("\n--- PLOTTING REANALYSIS RESULTS ---")
+        Visualizer.plot_jet_indices_timeseries(jet_data_reanalysis)
+        Visualizer.plot_seasonal_correlation_matrix(all_correlations_reanalysis.get('20CRV3',{}), all_correlations_reanalysis.get('ERA5',{}), 'Winter')
+        Visualizer.plot_seasonal_correlation_matrix(all_correlations_reanalysis.get('20CRV3',{}), all_correlations_reanalysis.get('ERA5',{}), 'Summer')
+        Visualizer.plot_jet_impact_maps(jet_impact_maps_reanalysis.get('20CRV3',{}).get('Winter',{}), jet_impact_maps_reanalysis.get('ERA5',{}).get('Winter',{}), 'Winter')
+        Visualizer.plot_jet_impact_maps(jet_impact_maps_reanalysis.get('20CRV3',{}).get('Summer',{}), jet_impact_maps_reanalysis.get('ERA5',{}).get('Summer',{}), 'Summer')
+        
+        if regression_results_reanalysis.get(Config.DATASET_20CRV3):
+             Visualizer.plot_regression_analysis(regression_results_reanalysis[Config.DATASET_20CRV3], Config.DATASET_20CRV3)
+        if regression_results_reanalysis.get(Config.DATASET_ERA5):
+             Visualizer.plot_regression_analysis(regression_results_reanalysis[Config.DATASET_ERA5], Config.DATASET_ERA5)
+
+
         # --- PART 2: CMIP6 AND STORYLINE ANALYSIS ---
         logging.info("\n\n--- Analyzing CMIP6 Data and Storylines ---")
-        try:
-            storyline_analyzer = StorylineAnalyzer(config=Config)
-            
-            # This function performs the heavy lifting of loading CMIP6 data,
-            # calculating GWL thresholds, and analyzing changes.
-            cmip6_results = storyline_analyzer.analyze_cmip6_changes_at_gwl()
-            
-            if cmip6_results:
-                logging.info("--> Plotting CMIP6 jet changes vs. Global Warming Level...")
-                Visualizer.plot_jet_changes_vs_gwl(cmip6_results)
-                
-                # The following steps are placeholders for the final storyline calculation.
-                # To run this, you would first need to calculate the observed regression
-                # slopes (beta_obs) from the reanalysis data.
-                #
-                # logging.info("--> Calculating historical slopes for comparison...")
-                # beta_obs_slopes = {} # Placeholder for calculated observational constraints
-                # storyline_impacts = storyline_analyzer.calculate_storyline_impacts(cmip6_results, beta_obs_slopes)
-                # if storyline_impacts:
-                #     logging.info("--> Plotting final storyline impacts...")
-                #     # Visualizer.plot_storyline_impacts(storyline_impacts) # A new plot function would be needed
-            else:
-                logging.warning("CMIP6 analysis did not produce results. Skipping subsequent plots.")
-                
-        except Exception as e:
-            logging.error(f"A critical error occurred during the CMIP6/Storyline analysis phase: {e}")
-            logging.error(traceback.format_exc())
+        storyline_analyzer = StorylineAnalyzer(config=Config)
+        cmip6_results = storyline_analyzer.analyze_cmip6_changes_at_gwl()
 
+        if cmip6_results:
+            logging.info("\n--- PLOTTING CMIP6 RESULTS ---")
+            Visualizer.plot_jet_changes_vs_gwl(cmip6_results)
+            logging.warning("\n>>> ACTION REQUIRED: Examine 'cmip6_jet_changes_vs_gwl.png' and update placeholders in Config.STORYLINE_JET_CHANGES if necessary! <<<")
+
+            cmip6_hist_slopes = AdvancedAnalyzer.calculate_historical_slopes_comparison(beta_obs_slopes, cmip6_results['cmip6_model_data_loaded'], jet_data_reanalysis, regression_period)
+            Visualizer.plot_beta_obs_comparison(beta_obs_slopes, cmip6_hist_slopes)
+
+            storyline_impacts = storyline_analyzer.calculate_storyline_impacts(cmip6_results, beta_obs_slopes)
+            if storyline_impacts:
+                Visualizer.plot_storyline_impacts(storyline_impacts)
+        else:
+            logging.warning("CMIP6 analysis did not produce results. Skipping subsequent plots.")
 
         logging.info("\n\n=====================================================")
         logging.info("=== FULL ANALYSIS COMPLETED ===")
@@ -195,7 +240,7 @@ class ClimateAnalysis:
         logging.info(f"Log file saved to: {log_filename}")
         logging.info("=====================================================\n")
         
-        return regression_results 
+        return {} # Return empty dict for now
 
 def main():
     """Main entry point for the program."""

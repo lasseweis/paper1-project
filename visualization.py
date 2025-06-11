@@ -236,3 +236,88 @@ class Visualizer:
         filepath = os.path.join(Config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
+        
+    @staticmethod
+    def plot_cmip6_delta_impact_vs_delta_jet_at_gwl(cmip6_results, beta_obs_slopes, gwl_to_plot,
+                                                jet_index_key, impact_variable_key,
+                                                beta_obs_dict_key, ax, title_part):
+        """Plots CMIP6 delta impact vs delta jet for a specific GWL."""
+        individual_deltas = cmip6_results['all_individual_model_deltas_for_plot']
+        mmm_changes = cmip6_results['mmm_changes']
+
+        if jet_index_key not in individual_deltas or impact_variable_key not in individual_deltas:
+            ax.text(0.5, 0.5, "Data Missing", transform=ax.transAxes, ha='center'); return
+
+        delta_jet_values = np.array(list(individual_deltas[jet_index_key][gwl_to_plot].values()))
+        delta_impact_values = np.array(list(individual_deltas[impact_variable_key][gwl_to_plot].values()))
+        
+        valid_mask = ~np.isnan(delta_jet_values) & ~np.isnan(delta_impact_values)
+        if np.sum(valid_mask) < 5:
+            ax.text(0.5, 0.5, f"Not Enough Data ({np.sum(valid_mask)})", transform=ax.transAxes, ha='center'); return
+            
+        slope_cmip6, intercept_cmip6, r_cmip6, p_cmip6, _ = StatsAnalyzer.calculate_regression(delta_jet_values[valid_mask], delta_impact_values[valid_mask])
+        
+        ax.scatter(delta_jet_values, delta_impact_values, color='grey', alpha=0.6, label=f'CMIP6 Members (N={len(delta_jet_values)})')
+        x_fit = np.array([np.nanmin(delta_jet_values), np.nanmax(delta_jet_values)])
+        ax.plot(x_fit, intercept_cmip6 + slope_cmip6 * x_fit, color='black', label=f'CMIP6 Fit (slope={slope_cmip6:.2f})')
+        
+        beta_obs = beta_obs_slopes.get(beta_obs_dict_key)
+        if beta_obs is not None:
+            delta_j_mmm = mmm_changes[gwl_to_plot][jet_index_key]
+            delta_p_mmm = mmm_changes[gwl_to_plot][impact_variable_key]
+            intercept_iav = delta_p_mmm - beta_obs * delta_j_mmm
+            ax.plot(x_fit, intercept_iav + beta_obs * x_fit, color='red', linestyle='--', label=f'Obs. IAV Slope (β={beta_obs:.2f})')
+
+        ax.set_title(f"{title_part} ({gwl_to_plot}°C GWL)", fontsize=9)
+        ax.set_xlabel(f'Change in {jet_index_key.replace("_", " ")}', fontsize=8)
+        ax.set_ylabel(f'Change in {impact_variable_key.replace("_", " ")}', fontsize=8)
+        ax.grid(True, linestyle=':'); ax.legend(fontsize=7)
+
+    @staticmethod
+    def plot_storyline_impacts(storyline_impacts):
+        """Plots the calculated storyline impacts."""
+        if not storyline_impacts: return
+        gwls = sorted(storyline_impacts.keys())
+        impact_vars = sorted(list(storyline_impacts[gwls[0]].keys()))
+        n_rows, n_cols = len(impact_vars), len(gwls)
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), sharey='row', squeeze=False)
+
+        for r, impact_var in enumerate(impact_vars):
+            for c, gwl in enumerate(gwls):
+                ax = axs[r, c]
+                if gwl in storyline_impacts and impact_var in storyline_impacts[gwl]:
+                    data = storyline_impacts[gwl][impact_var]
+                    labels = list(data.keys())
+                    values = list(data.values())
+                    ax.bar(labels, values)
+                    ax.set_title(f"{impact_var.replace('_', ' ')} @ {gwl}°C")
+                    ax.tick_params(axis='x', rotation=45)
+                    if c == 0: ax.set_ylabel("Change")
+        plt.tight_layout()
+        plt.savefig(os.path.join(Config.PLOT_DIR, 'storyline_impacts.png'), dpi=300)
+        plt.close(fig)
+        
+    @staticmethod
+    def plot_beta_obs_comparison(beta_obs_slopes, cmip6_historical_slopes):
+        """Compares ERA5 beta_obs slopes with the distribution of CMIP6 historical slopes."""
+        if not beta_obs_slopes or not cmip6_historical_slopes: return
+        slope_keys = list(beta_obs_slopes.keys())
+        n_slopes = len(slope_keys)
+        n_cols = min(4, n_slopes)
+        n_rows = (n_slopes + n_cols - 1) // n_cols
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), squeeze=False)
+        axs = axs.flatten()
+
+        for i, key in enumerate(slope_keys):
+            ax = axs[i]
+            era5_slope = beta_obs_slopes[key]
+            cmip_slopes = cmip6_historical_slopes.get(key, [])
+            if cmip_slopes:
+                ax.hist(cmip_slopes, bins=15, density=True, alpha=0.6, label='CMIP6 Hist. Dist.')
+            if era5_slope is not None and not np.isnan(era5_slope):
+                 ax.axvline(era5_slope, color='red', linestyle='--', label=f'ERA5 Slope ({era5_slope:.2f})')
+            ax.set_title(key.replace('_', ' '), fontsize=10)
+            ax.legend(fontsize=8)
+        plt.tight_layout()
+        plt.savefig(os.path.join(Config.PLOT_DIR, "beta_obs_vs_cmip6_hist_comparison.png"), dpi=300)
+        plt.close(fig)

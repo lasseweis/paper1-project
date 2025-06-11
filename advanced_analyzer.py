@@ -301,9 +301,18 @@ class AdvancedAnalyzer:
         
         for jet_type in ['speed', 'lat']:
             for var_name, var_data in [('tas', tas_seasonal), ('pr', pr_seasonal)]:
-                jet_data_key = f'{dataset_key}_{season.lower()}_{jet_type}_{var_name}_data'
+                # Construct the key to find the correct data bundle
+                # Note: The original script had a potential ambiguity here. We assume tas data bundle for speed and pr for lat as a primary lookup.
+                if jet_type == 'speed':
+                    jet_data_key = f'{dataset_key}_{season.lower()}_speed_tas_data'
+                    if jet_data_key not in jet_data: jet_data_key = f'{dataset_key}_{season.lower()}_speed_pr_data' # Fallback
+                else: # jet_type == 'lat'
+                    jet_data_key = f'{dataset_key}_{season.lower()}_lat_pr_data'
+                    if jet_data_key not in jet_data: jet_data_key = f'{dataset_key}_{season.lower()}_lat_tas_data' # Fallback
+
                 jet_bundle = jet_data.get(jet_data_key)
-                if jet_bundle is None:
+                if jet_bundle is None or 'jet' not in jet_bundle or jet_bundle['jet'] is None:
+                    logging.debug(f"Jet bundle or jet data missing for {jet_data_key}")
                     continue
 
                 jet_index = jet_bundle['jet']
@@ -334,7 +343,11 @@ class AdvancedAnalyzer:
                 key = f'{season}_{var}'
                 if discharge_data and key in discharge_data:
                     discharge_ts = discharge_data[key]
-                    jet_speed_bundle = jet_data.get(f'{dataset_key}_{season}_speed_tas_data')
+                    # Assume speed jet is the relevant one for discharge
+                    jet_bundle_key = f'{dataset_key}_{season}_speed_tas_data'
+                    if jet_bundle_key not in jet_data: jet_bundle_key = f'{dataset_key}_{season}_speed_pr_data'
+                    
+                    jet_speed_bundle = jet_data.get(jet_bundle_key)
                     if jet_speed_bundle and 'jet' in jet_speed_bundle:
                         jet_ts = jet_speed_bundle['jet']
                         common_years = np.intersect1d(discharge_ts.season_year, jet_ts.season_year)
@@ -348,13 +361,17 @@ class AdvancedAnalyzer:
 
             for var in ['pr', 'tas']:
                 for jet_type in ['speed', 'lat']:
-                    bundle_key = f'{dataset_key}_{season}_{jet_type}_{var}_data'
+                    # Construct the key to find the correct data bundle
+                    if jet_type == 'speed':
+                        bundle_key = f'{dataset_key}_{season}_speed_{var}_data'
+                    else: # jet_type == 'lat'
+                        bundle_key = f'{dataset_key}_{season}_lat_{var}_data'
+
                     bundle = jet_data.get(bundle_key)
                     if bundle and 'jet' in bundle and var in bundle:
                         s, i, r, p, e = StatsAnalyzer.calculate_regression(bundle['jet'].values, bundle[var].values)
                         if not np.isnan(r):
                             all_correlations[var][season][jet_type] = {'r_value': r, 'p_value': p, 'slope': s, 'intercept': i}
-
         return all_correlations
 
     @staticmethod
@@ -371,7 +388,15 @@ class AdvancedAnalyzer:
         for dataset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
             dataset_correlations = {}
             for jet_type in ['speed', 'lat']:
-                jet_bundle = jet_data.get(f'{dataset_key}_{season_lower}_{jet_type}_tas_data') or jet_data.get(f'{dataset_key}_{season_lower}_{jet_type}_pr_data')
+                # Construct the key to find the correct data bundle
+                if jet_type == 'speed':
+                    jet_bundle_key = f'{dataset_key}_{season_lower}_speed_tas_data'
+                    if jet_bundle_key not in jet_data: jet_bundle_key = f'{dataset_key}_{season_lower}_speed_pr_data'
+                else: # jet_type == 'lat'
+                    jet_bundle_key = f'{dataset_key}_{season_lower}_lat_pr_data'
+                    if jet_bundle_key not in jet_data: jet_bundle_key = f'{dataset_key}_{season_lower}_lat_tas_data'
+
+                jet_bundle = jet_data.get(jet_bundle_key)
                 if jet_bundle and 'jet' in jet_bundle:
                     jet_detrended = jet_bundle['jet']
                     jet_smooth = StatsAnalyzer.calculate_rolling_mean(jet_detrended, window=window_size)

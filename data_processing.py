@@ -123,10 +123,34 @@ class DataProcessor:
 
             ds.close()
             
-            if var_name == 'pr' and ds_filtered[actual_var].attrs.get('units', '').lower() == 'kg/m^2/s':
-                logging.info(f"Converting precipitation units to mm/day for {os.path.basename(file)}")
-                ds_filtered[actual_var] *= 86400.0
-                ds_filtered[actual_var].attrs['units'] = 'mm/day'
+            # --- START: VERBESSERTER BLOCK ZUR EINHEITENUMRECHNUNG ---
+            if var_name == 'pr':
+                data_var = ds_filtered[actual_var]
+                if data_var.size > 0:
+                    unit_str = data_var.attrs.get('units', '').lower()
+                    conversion_factor = None
+
+                    # 1. Prüft auf 'kg/m^2/s', was mm/s entspricht. Umrechnung zu mm/Tag.
+                    if ('kg' in unit_str and 'm-2' in unit_str and 's-1' in unit_str) or ('kg/m^2/s' in unit_str):
+                        conversion_factor = 86400.0
+                        logging.info(f"Converting 20CRv3 precipitation from '{unit_str}' to 'mm/day' for {os.path.basename(file)}.")
+
+                    # 2. Prüft auf 'm' (Meter). Umrechnung zu mm.
+                    elif unit_str == 'm':
+                        conversion_factor = 1000.0
+                        logging.info(f"Converting 20CRv3 precipitation from 'm' to 'mm/day' for {os.path.basename(file)}.")
+                    
+                    # 3. Fallback-Prüfung anhand der Daten-Größenordnung, falls Einheit fehlt.
+                    elif not unit_str or unit_str in ['unknown', '']:
+                        if data_var.max() < 1.0:
+                            conversion_factor = 1000.0
+                            logging.warning(f"Unit attribute missing for 20CRv3. Converting precipitation based on data magnitude, assuming 'm' to 'mm/day' for {os.path.basename(file)}.")
+                    
+                    # Wenn ein Umrechnungsfaktor gefunden wurde, anwenden und Einheit anpassen.
+                    if conversion_factor is not None:
+                        ds_filtered[actual_var] *= conversion_factor
+                        ds_filtered[actual_var].attrs['units'] = 'mm/day'
+            # --- ENDE: VERBESSERTER BLOCK ---
             
             da_to_return = ds_filtered[actual_var]
             da_to_return.attrs['dataset'] = Config.DATASET_20CRV3
@@ -178,6 +202,35 @@ class DataProcessor:
             
             ds_filtered = ds_monthly.sel(time=((ds_monthly.year >= Config.ANALYSIS_START_YEAR) & (ds_monthly.year <= Config.ANALYSIS_END_YEAR)))
             
+            # --- START: VERBESSERTER BLOCK ZUR EINHEITENUMRECHNUNG ---
+            if var_in_file == 'pr':
+                data_var = ds_filtered[var_name_used]
+                if data_var.size > 0:
+                    unit_str = data_var.attrs.get('units', '').lower()
+                    conversion_factor = None
+                    
+                    # 1. Prüft auf 'kg m-2 s-1', was mm/s entspricht. Umrechnung zu mm/Tag.
+                    if 'kg' in unit_str and 'm-2' in unit_str and 's-1' in unit_str:
+                        conversion_factor = 86400.0
+                        logging.info(f"Converting ERA5 precipitation from 'kg m-2 s-1' to 'mm/day' for {os.path.basename(file)}.")
+                    
+                    # 2. Prüft auf 'm' (Meter), typisch für ERA5-Tagesgesamtniederschlag. Umrechnung zu mm.
+                    elif unit_str == 'm':
+                        conversion_factor = 1000.0
+                        logging.info(f"Converting ERA5 precipitation from 'm' to 'mm/day' for {os.path.basename(file)}.")
+                    
+                    # 3. Fallback-Prüfung anhand der Daten-Größenordnung, falls Einheit fehlt oder unbekannt ist.
+                    elif not unit_str or unit_str in ['unknown', '']:
+                        if data_var.max() < 1.0:
+                            conversion_factor = 1000.0
+                            logging.warning(f"Unit attribute missing. Converting ERA5 precipitation based on data magnitude, assuming 'm' to 'mm/day' for {os.path.basename(file)}.")
+
+                    # Wenn ein Umrechnungsfaktor gefunden wurde, anwenden und Einheit anpassen.
+                    if conversion_factor is not None:
+                        ds_filtered[var_name_used] = ds_filtered[var_name_used] * conversion_factor
+                        ds_filtered[var_name_used].attrs['units'] = 'mm/day'
+            # --- ENDE: VERBESSERTER BLOCK ---
+
             da_to_return = ds_filtered[var_name_used]
             da_to_return.attrs['dataset'] = Config.DATASET_ERA5
             return da_to_return

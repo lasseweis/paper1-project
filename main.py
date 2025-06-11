@@ -200,7 +200,9 @@ class ClimateAnalysis:
             # Call the new plotting function
             if jet_impact_results:
                  logging.info(f"--> Plotting jet impact maps for {dset_key}")
-                 Visualizer.plot_jet_impact_maps(jet_impact_results, dset_key)
+                 # Call the plotter twice, once for each variable
+                 Visualizer.plot_jet_impact_maps(jet_impact_results, dset_key, 'tas')
+                 Visualizer.plot_jet_impact_maps(jet_impact_results, dset_key, 'pr')
             else:
                  logging.warning(f"Could not calculate or plot jet impact maps for {dset_key}.")
 

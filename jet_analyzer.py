@@ -29,19 +29,23 @@ class JetStreamAnalyzer:
             lat_min, lat_max = Config.JET_SPEED_BOX_LAT_MIN, Config.JET_SPEED_BOX_LAT_MAX
             lon_min, lon_max = Config.JET_SPEED_BOX_LON_MIN, Config.JET_SPEED_BOX_LON_MAX
             
-            # Check for valid coordinates
             if not all(hasattr(da_season, c) and da_season[c].size > 0 for c in ['lat', 'lon']):
                 logging.warning(f"JetSpeed: da_season lacks lat/lon coordinates or they are empty.")
                 return None
 
-            # Select domain and calculate weighted mean
-            domain = da_season.sel(lat=slice(lat_min, lat_max), lon=slice(lon_min, lon_max))
+            # === KORREKTUR START ===
+            # This logic checks if latitude is descending and reverses the slice if needed.
+            lat_slice = slice(lat_min, lat_max)
+            if da_season.lat.size > 1 and da_season.lat.values[0] > da_season.lat.values[-1]:
+                lat_slice = slice(lat_max, lat_min)
+            # === KORREKTUR ENDE ===
+
+            domain = da_season.sel(lat=lat_slice, lon=slice(lon_min, lon_max))
             if domain.lat.size > 0 and domain.lon.size > 0:
                 weights = np.cos(np.deg2rad(domain.lat))
                 weights.name = "weights"
                 weighted_mean = domain.weighted(weights).mean(dim=["lat", "lon"], skipna=True)
                 
-                # Ensure the result is a 1D time series
                 if weighted_mean.ndim > 1:
                     time_dim = next((d for d in ['season_year', 'year', 'time'] if d in weighted_mean.dims), None)
                     if time_dim:
@@ -50,7 +54,7 @@ class JetStreamAnalyzer:
 
                 if weighted_mean.ndim > 1:
                      logging.error(f"JetSpeed Index is still >1D after squeeze: Dims {weighted_mean.dims}.")
-                     return None # Fail if we can't get a 1D series
+                     return None
                 
                 weighted_mean.name = "jet_speed_index"
                 if 'dataset' in da_season.attrs:
@@ -81,26 +85,28 @@ class JetStreamAnalyzer:
             if not all(hasattr(da_season, c) and da_season[c].size > 0 for c in ['lat', 'lon']):
                 logging.warning(f"JetLat: da_season lacks lat/lon coordinates or they are empty.")
                 return None
+            
+            # === KORREKTUR START ===
+            lat_slice = slice(lat_min, lat_max)
+            if da_season.lat.size > 1 and da_season.lat.values[0] > da_season.lat.values[-1]:
+                lat_slice = slice(lat_max, lat_min)
+            # === KORREKTUR ENDE ===
 
-            domain = da_season.sel(lat=slice(lat_min, lat_max), lon=slice(lon_min, lon_max))
+            domain = da_season.sel(lat=lat_slice, lon=slice(lon_min, lon_max))
             
             if domain.lat.size > 0 and domain.lon.size > 0:
-                # Average over longitude to get u(phi)
                 zonal_avg_u = domain.mean(dim="lon", skipna=True)
                 
-                # Weighting: sum(phi * u^2) / sum(u^2) for westerly winds only (u > 0)
                 u_westerly = zonal_avg_u.where(zonal_avg_u > 0, 0)
                 u_squared = u_westerly**2
                 
-                lat_coord_da = u_squared.lat # The latitude coordinate itself
+                lat_coord_da = u_squared.lat
                 
                 numerator = (lat_coord_da * u_squared).sum(dim='lat', skipna=True)
                 denominator = u_squared.sum(dim='lat', skipna=True)
 
-                # Avoid division by zero
                 jet_latitude = xr.where(abs(denominator) > 1e-9, numerator / denominator, np.nan)
                 
-                # Ensure the result is a 1D time series
                 if jet_latitude.ndim > 1:
                     time_dim = next((d for d in ['season_year', 'year', 'time'] if d in jet_latitude.dims), None)
                     if time_dim:

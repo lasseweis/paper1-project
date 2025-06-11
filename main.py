@@ -172,12 +172,12 @@ class ClimateAnalysis:
                  ua_season = DataProcessor.filter_by_season(ua850_seasonal, season)
                  season_lower = season.lower()
                  
+                 # Calculate and store jet indices with corrected, simpler keys
                  jet_speed = JetStreamAnalyzer.calculate_jet_speed_index(ua_season)
-                 jet_lat = JetStreamAnalyzer.calculate_jet_lat_index(ua_season)
-
-                 # Store detrended jet indices for the analysis functions
                  if jet_speed is not None:
                      jet_data_reanalysis[f'{dset_key}_{season_lower}_speed_data'] = {'jet': DataProcessor.detrend_data(jet_speed)}
+
+                 jet_lat = JetStreamAnalyzer.calculate_jet_lat_index(ua_season)
                  if jet_lat is not None:
                      jet_data_reanalysis[f'{dset_key}_{season_lower}_lat_data'] = {'jet': DataProcessor.detrend_data(jet_lat)}
 

@@ -300,13 +300,16 @@ class AdvancedAnalyzer:
         pr_seasonal = datasets[f'{dataset_key}_pr_seasonal']
         
         for jet_type in ['speed', 'lat']:
-            for var_name, var_data in [('tas', tas_seasonal), ('pr', pr_seasonal)]:
-                jet_data_key = f'{dataset_key}_{season.lower()}_{jet_type}_{var_name}_data'
-                jet_bundle = jet_data.get(jet_data_key)
-                if jet_bundle is None:
-                    continue
+            # Corrected logic to look up the jet data with the simpler key
+            jet_data_key = f'{dataset_key}_{season.lower()}_{jet_type}_data'
+            jet_bundle = jet_data.get(jet_data_key)
+            if jet_bundle is None or 'jet' not in jet_bundle or jet_bundle['jet'] is None:
+                logging.warning(f"No valid jet data found for key: {jet_data_key}")
+                continue # Skip if no jet data is available
 
-                jet_index = jet_bundle['jet']
+            jet_index = jet_bundle['jet']
+
+            for var_name, var_data in [('tas', tas_seasonal), ('pr', pr_seasonal)]:
                 var_data_season = DataProcessor.filter_by_season(var_data, season)
                 var_data_detrended = DataProcessor.detrend_data(var_data_season)
                 
@@ -315,12 +318,14 @@ class AdvancedAnalyzer:
 
                 slopes, p_values = AdvancedAnalyzer._calculate_regression_for_variable(jet_index, var_data_detrended)
                 
-                impact_key = f'jet_{jet_type}_{var_name}'
-                impact_maps[season][impact_key] = {
-                    'slopes': slopes, 'p_values': p_values,
-                    'lons': var_data.lon.values, 'lats': var_data.lat.values,
-                    'common_years': np.intersect1d(jet_index.season_year.values, var_data_detrended.season_year.values)
-                }
+                # Ensure we have valid results before adding them
+                if slopes is not None and p_values is not None:
+                    impact_key = f'jet_{jet_type}_{var_name}'
+                    impact_maps[season][impact_key] = {
+                        'slopes': slopes, 'p_values': p_values,
+                        'lons': var_data.lon.values, 'lats': var_data.lat.values,
+                        'common_years': np.intersect1d(jet_index.season_year.values, var_data_detrended.season_year.values)
+                    }
         return impact_maps
 
     @staticmethod

@@ -138,6 +138,7 @@ class ClimateAnalysis:
             logging.critical("Failed to process reanalysis datasets. Aborting.")
             return None
 
+        # The original code for regression analysis remains unchanged
         logging.info("\n--- Calculating and Plotting Reanalysis Regression Maps ---")
         regression_results = {}
         regression_period = (1981, 2010) 
@@ -158,29 +159,61 @@ class ClimateAnalysis:
             else:
                 logging.warning(f"Could not calculate or plot regression for {dset_key}. Results were empty.")
         
-        # --- PART 2: CMIP6 AND STORYLINE ANALYSIS ---
+        # =========================================================================
+        # === NEW SECTION: CALLING DORMANT JET AND CORRELATION ANALYSIS FUNCTIONS ===
+        # =========================================================================
+        logging.info("\n\n--- Analyzing Jet Impacts and Correlations for Reanalysis Data ---")
+        
+        # First, calculate the jet indices which are needed for the analyses
+        jet_data_reanalysis = {}
+        for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
+            ua850_seasonal = datasets_reanalysis[f'{dset_key}_ua850_seasonal']
+            for season in ['Winter', 'Summer']:
+                 ua_season = DataProcessor.filter_by_season(ua850_seasonal, season)
+                 season_lower = season.lower()
+                 
+                 jet_speed = JetStreamAnalyzer.calculate_jet_speed_index(ua_season)
+                 jet_lat = JetStreamAnalyzer.calculate_jet_lat_index(ua_season)
+
+                 # Store detrended jet indices for the analysis functions
+                 if jet_speed is not None:
+                     jet_data_reanalysis[f'{dset_key}_{season_lower}_speed_data'] = {'jet': DataProcessor.detrend_data(jet_speed)}
+                 if jet_lat is not None:
+                     jet_data_reanalysis[f'{dset_key}_{season_lower}_lat_data'] = {'jet': DataProcessor.detrend_data(jet_lat)}
+
+        # Now, loop through datasets to call the analysis and new plotting functions
+        for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
+            logging.info(f"\n--> Processing jet impact analysis for {dset_key}")
+            
+            jet_impact_results = {}
+            for season in ['Winter', 'Summer']:
+                # Call the dormant jet impact map calculation
+                impact_maps = AdvancedAnalyzer.calculate_jet_impact_maps(
+                    datasets=datasets_reanalysis,
+                    jet_data=jet_data_reanalysis,
+                    dataset_key=dset_key,
+                    season=season
+                )
+                if impact_maps and season in impact_maps:
+                    jet_impact_results[season] = impact_maps[season]
+
+            # Call the new plotting function
+            if jet_impact_results:
+                 logging.info(f"--> Plotting jet impact maps for {dset_key}")
+                 Visualizer.plot_jet_impact_maps(jet_impact_results, dset_key)
+            else:
+                 logging.warning(f"Could not calculate or plot jet impact maps for {dset_key}.")
+
+        # --- PART 2: CMIP6 AND STORYLINE ANALYSIS --- (This part remains unchanged)
         logging.info("\n\n--- Analyzing CMIP6 Data and Storylines ---")
         try:
             storyline_analyzer = StorylineAnalyzer(config=Config)
             
-            # This function performs the heavy lifting of loading CMIP6 data,
-            # calculating GWL thresholds, and analyzing changes.
             cmip6_results = storyline_analyzer.analyze_cmip6_changes_at_gwl()
             
             if cmip6_results:
                 logging.info("--> Plotting CMIP6 jet changes vs. Global Warming Level...")
                 Visualizer.plot_jet_changes_vs_gwl(cmip6_results)
-                
-                # The following steps are placeholders for the final storyline calculation.
-                # To run this, you would first need to calculate the observed regression
-                # slopes (beta_obs) from the reanalysis data.
-                #
-                # logging.info("--> Calculating historical slopes for comparison...")
-                # beta_obs_slopes = {} # Placeholder for calculated observational constraints
-                # storyline_impacts = storyline_analyzer.calculate_storyline_impacts(cmip6_results, beta_obs_slopes)
-                # if storyline_impacts:
-                #     logging.info("--> Plotting final storyline impacts...")
-                #     # Visualizer.plot_storyline_impacts(storyline_impacts) # A new plot function would be needed
             else:
                 logging.warning("CMIP6 analysis did not produce results. Skipping subsequent plots.")
                 
@@ -195,7 +228,7 @@ class ClimateAnalysis:
         logging.info(f"Log file saved to: {log_filename}")
         logging.info("=====================================================\n")
         
-        return regression_results 
+        return regression_results
 
 def main():
     """Main entry point for the program."""

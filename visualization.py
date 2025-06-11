@@ -236,3 +236,84 @@ class Visualizer:
         filepath = os.path.join(Config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
+        
+    @staticmethod
+    def plot_jet_impact_maps(impact_data, dataset_key):
+        """Creates a panel plot for jet impact regression maps (Jet vs PR/TAS)."""
+        logging.info(f"Plotting Jet Impact maps for {dataset_key}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        if not impact_data or not any(impact_data.values()):
+            logging.warning(f"Skipping jet impact plot for {dataset_key}: No data provided.")
+            return
+
+        # Setup figure: 2 seasons (rows) x 2 jet types (cols)
+        fig, axs = plt.subplots(2, 2, figsize=(14, 10),
+                                subplot_kw={'projection': ccrs.PlateCarree()})
+        fig.subplots_adjust(hspace=0.4, wspace=0.3, top=0.9)
+        
+        plot_configs = {
+            'tas': {'cmap': 'coolwarm', 'vmin': -1.0, 'vmax': 1.0, 'label': 'TAS Slope (°C per std. dev. of Jet Index)'},
+            'pr':  {'cmap': 'BrBG', 'vmin': -0.5, 'vmax': 0.5, 'label': 'PR Slope (mm/day per std. dev. of Jet Index)'}
+        }
+
+        row_map = {'Winter': 0, 'Summer': 1}
+        col_map = {'speed': 0, 'lat': 1}
+        title_map = {'speed': 'Speed', 'lat': 'Latitude'}
+
+        mappables = {}
+
+        for season, season_impacts in impact_data.items():
+            if not season_impacts: continue
+            row = row_map.get(season)
+
+            for impact_key, data in season_impacts.items():
+                _, jet_type, var_name = impact_key.split('_')
+                if var_name not in plot_configs: continue
+                col = col_map.get(jet_type)
+                ax = axs[row, col]
+
+                conf = plot_configs[var_name]
+                
+                # Directly plot the map data
+                ax.set_extent(Config.PLOT_MAP_EXTENT, crs=ccrs.PlateCarree())
+                ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=0)
+                ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
+                ax.add_feature(cfeature.BORDERS, linestyle=':', linewidth=0.5)
+                gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+                gl.top_labels = gl.right_labels = False
+                gl.xlabel_style = {'size': 8}; gl.ylabel_style = {'size': 8}
+
+                lons, lats = data['lons'], data['lats']
+                if lons is None or lats is None: continue
+                lons_plot, lats_plot = np.meshgrid(lons, lats) if lons.ndim == 1 else (lons, lats)
+
+                cf = ax.pcolormesh(lons_plot, lats_plot, data['slopes'], shading='auto',
+                                   cmap=conf['cmap'], vmin=conf['vmin'], vmax=conf['vmax'],
+                                   transform=ccrs.PlateCarree())
+
+                # Add significance hatching
+                if data['p_values'] is not None and data['slopes'] is not None:
+                    sig_mask = (data['p_values'] < 0.05) & np.isfinite(data['slopes'])
+                    if np.any(sig_mask):
+                         ax.scatter(lons_plot[sig_mask], lats_plot[sig_mask], s=0.5, color='dimgray', marker='.',
+                                    alpha=0.4, transform=ccrs.PlateCarree())
+
+                ax.set_title(f"{season}: Jet {title_map[jet_type]} vs. {var_name.upper()}", fontsize=10)
+                
+                if var_name not in mappables:
+                    mappables[var_name] = cf
+
+        # Add shared colorbars for tas and pr
+        if 'tas' in mappables:
+            cbar_tas = fig.add_axes([0.92, 0.55, 0.02, 0.35])
+            fig.colorbar(mappables['tas'], cax=cbar_tas, extend='both', label=plot_configs['tas']['label'])
+
+        if 'pr' in mappables:
+            cbar_pr = fig.add_axes([0.92, 0.1, 0.02, 0.35])
+            fig.colorbar(mappables['pr'], cax=cbar_pr, extend='both', label=plot_configs['pr']['label'])
+
+        plt.suptitle(f"{dataset_key}: Impact of Jet Variations on Temperature and Precipitation", fontsize=16, weight='bold')
+        filename = os.path.join(Config.PLOT_DIR, f'jet_impact_maps_{dataset_key}.png')
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)

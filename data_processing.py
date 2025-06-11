@@ -164,8 +164,10 @@ class DataProcessor:
             if 'lon' in ds.coords and np.any(ds.lon > 180):
                 ds = ds.assign_coords(lon=(((ds.lon + 180) % 360) - 180)).sortby('lon')
             
-            if level_val is not None and 'level' in ds.dims:
-                ds = ds.sel(level=level_val)
+            if level_val is not None:
+                level_dim_name = next((name for name in ['level', 'plev', 'lev'] if name in ds.dims), None)
+                if level_dim_name:
+                    ds = ds.sel({level_dim_name: level_val}, method='nearest')
             
             if var_out_name and var_out_name != var_name_used:
                 ds = ds.rename({var_name_used: var_out_name})

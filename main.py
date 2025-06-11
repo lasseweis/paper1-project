@@ -59,7 +59,7 @@ class ClimateAnalysis:
     @staticmethod
     @lru_cache(maxsize=1)
     def process_20crv3_data():
-        """Load and process all 20CRv3 climate data."""
+        """Load and process 20CRv3 climate data."""
         logging.info("Loading and processing 20CRv3 climate data...")
         try:
             pr_monthly = DataProcessor.process_ncfile(Config.PR_FILE_20CRV3, 'pr')
@@ -68,50 +68,68 @@ class ClimateAnalysis:
             
             if pr_monthly is None or tas_monthly is None or ua850_monthly is None:
                 raise IOError("One or more 20CRv3 data files could not be processed.")
-
-            pr_seasonal = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(pr_monthly))
-            tas_seasonal = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(tas_monthly))
-            ua850_seasonal = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(ua850_monthly))
-
+            
+            pr_anom = DataProcessor.calculate_anomalies(pr_monthly, as_percentage=True)
+            tas_anom = DataProcessor.calculate_anomalies(tas_monthly, as_percentage=False)
+            
+            pr_anom_seasonal = DataProcessor.assign_season_to_dataarray(pr_anom)
+            tas_anom_seasonal = DataProcessor.assign_season_to_dataarray(tas_anom)
+            ua850_seasonal_full = DataProcessor.assign_season_to_dataarray(ua850_monthly)
+            
+            pr_seasonal = DataProcessor.calculate_seasonal_means(pr_anom_seasonal)
+            tas_seasonal = DataProcessor.calculate_seasonal_means(tas_anom_seasonal)
+            ua850_seasonal = DataProcessor.calculate_seasonal_means(ua850_seasonal_full)
+            
             pr_box_mean = DataProcessor.calculate_spatial_mean(pr_seasonal, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
             tas_box_mean = DataProcessor.calculate_spatial_mean(tas_seasonal, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
-
+            
             return {
-                '20CRv3_pr_seasonal': pr_seasonal, '20CRv3_tas_seasonal': tas_seasonal,
-                '20CRv3_ua850_seasonal': ua850_seasonal, '20CRv3_pr_box_mean': pr_box_mean,
-                '20CRv3_tas_box_mean': tas_box_mean, '20CRv3_tas_monthly': tas_monthly
+                '20CRv3_pr_monthly': pr_monthly, '20CRv3_tas_monthly': tas_monthly, 
+                '20CRv3_ua850_monthly': ua850_monthly, '20CRv3_pr_seasonal': pr_seasonal, 
+                '20CRv3_tas_seasonal': tas_seasonal, '20CRv3_ua850_seasonal': ua850_seasonal,
+                '20CRv3_pr_box_mean': pr_box_mean, '20CRv3_tas_box_mean': tas_box_mean
             }
         except Exception as e:
             logging.error(f"Error in process_20crv3_data: {e}")
+            traceback.print_exc()
             return {}
 
     @staticmethod
     @lru_cache(maxsize=1)
     def process_era5_data():
-        """Load and process all ERA5 climate data."""
+        """Load and process ERA5 climate data."""
         logging.info("Loading and processing ERA5 climate data...")
         try:
             pr_monthly = DataProcessor.process_era5_file(Config.ERA5_PR_FILE, 'pr')
             tas_monthly = DataProcessor.process_era5_file(Config.ERA5_TAS_FILE, 'tas')
             ua850_monthly = DataProcessor.process_era5_file(Config.ERA5_UA_FILE, 'u', 'ua', level_val=Config.WIND_LEVEL)
-
+            
             if pr_monthly is None or tas_monthly is None or ua850_monthly is None:
                 raise IOError("One or more ERA5 data files could not be processed.")
 
-            pr_seasonal = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(pr_monthly))
-            tas_seasonal = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(tas_monthly))
-            ua850_seasonal = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(ua850_monthly))
+            pr_anom = DataProcessor.calculate_anomalies(pr_monthly, as_percentage=True)
+            tas_anom = DataProcessor.calculate_anomalies(tas_monthly, as_percentage=False)
+            
+            pr_anom_seasonal = DataProcessor.assign_season_to_dataarray(pr_anom)
+            tas_anom_seasonal = DataProcessor.assign_season_to_dataarray(tas_anom)
+            ua850_seasonal_full = DataProcessor.assign_season_to_dataarray(ua850_monthly)
+
+            pr_seasonal = DataProcessor.calculate_seasonal_means(pr_anom_seasonal)
+            tas_seasonal = DataProcessor.calculate_seasonal_means(tas_anom_seasonal)
+            ua850_seasonal = DataProcessor.calculate_seasonal_means(ua850_seasonal_full)
             
             pr_box_mean = DataProcessor.calculate_spatial_mean(pr_seasonal, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
             tas_box_mean = DataProcessor.calculate_spatial_mean(tas_seasonal, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
 
             return {
-                'ERA5_pr_seasonal': pr_seasonal, 'ERA5_tas_seasonal': tas_seasonal,
-                'ERA5_ua850_seasonal': ua850_seasonal, 'ERA5_pr_box_mean': pr_box_mean,
-                'ERA5_tas_box_mean': tas_box_mean, 'ERA5_tas_monthly': tas_monthly
+                'ERA5_pr_monthly': pr_monthly, 'ERA5_tas_monthly': tas_monthly, 
+                'ERA5_ua850_monthly': ua850_monthly, 'ERA5_pr_seasonal': pr_seasonal, 
+                'ERA5_tas_seasonal': tas_seasonal, 'ERA5_ua850_seasonal': ua850_seasonal,
+                'ERA5_pr_box_mean': pr_box_mean, 'ERA5_tas_box_mean': tas_box_mean
             }
         except Exception as e:
             logging.error(f"Error in process_era5_data: {e}")
+            traceback.print_exc()
             return {}
             
     @staticmethod

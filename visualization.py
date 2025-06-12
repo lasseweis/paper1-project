@@ -349,6 +349,26 @@ class Visualizer:
                 gl.top_labels = gl.right_labels = False
                 gl.xlabel_style = {'size': 8}; gl.ylabel_style = {'size': 8}
                 
+                # MODIFICATION START: Add the corresponding jet box for context
+                if jet_type == 'speed':
+                    box_coords = (Config.JET_SPEED_BOX_LON_MIN, Config.JET_SPEED_BOX_LON_MAX,
+                                  Config.JET_SPEED_BOX_LAT_MIN, Config.JET_SPEED_BOX_LAT_MAX)
+                    box_edgecolor = 'blue'
+                elif jet_type == 'lat':
+                    box_coords = (Config.JET_LAT_BOX_LON_MIN, Config.JET_LAT_BOX_LON_MAX,
+                                  Config.JET_LAT_BOX_LAT_MIN, Config.JET_LAT_BOX_LAT_MAX)
+                    box_edgecolor = 'red'
+                else:
+                    box_coords = None
+
+                if box_coords:
+                    box_lon_min, box_lon_max, box_lat_min, box_lat_max = box_coords
+                    jet_box = mpatches.Rectangle((box_lon_min, box_lat_min), box_lon_max - box_lon_min, box_lat_max - box_lat_min,
+                                                 fill=False, edgecolor=box_edgecolor, linewidth=2, linestyle='--',
+                                                 zorder=10, transform=ccrs.PlateCarree())
+                    ax.add_patch(jet_box)
+                # MODIFICATION END
+
                 title = f"{season}: Jet {title_map[jet_type]} vs. {variable_to_plot.upper()}"
                 ax.set_title(title, fontsize=10)
 

@@ -389,109 +389,137 @@ class Visualizer:
         plt.close(fig)
 
     @staticmethod
-    def plot_jet_impact_maps(impact_data, dataset_key, variable_to_plot):
-        """Creates a 2x2 panel plot for the impact of jet variations on a SINGLE variable (TAS or PR)."""
-        logging.info(f"Plotting Jet Impact maps for {dataset_key} (Variable: {variable_to_plot.upper()})...")
+    def plot_jet_impact_comparison_maps(impact_data_20crv3, impact_data_era5, season):
+        """
+        Creates a comparison plot (8 subplots) for jet impact regressions for a given season.
+        Compares 20CRv3 and ERA5 side-by-side for different jet indices and variables.
+        """
+        logging.info(f"Plotting combined jet impact regression maps for {season}...")
         Visualizer.ensure_plot_dir_exists()
 
-        if not impact_data or not any(impact_data.values()):
-            logging.warning(f"Skipping jet impact plot for {dataset_key}: No data provided.")
+        if not impact_data_20crv3 or not impact_data_era5:
+            logging.warning(f"Skipping combined jet impact maps for {season} due to missing data.")
             return
 
-        fig, axs = plt.subplots(2, 2, figsize=(14, 10),
-                                subplot_kw={'projection': ccrs.PlateCarree()})
-        
         plot_configs = {
-            'tas': {'cmap': 'coolwarm', 'vmin': -1.0, 'vmax': 1.0, 'base_label': 'TAS Slope (°C per std. dev. of Jet Index)'},
-            'pr':  {'cmap': 'BrBG', 'vmin': -0.5, 'vmax': 0.5, 'base_label': 'PR Slope (mm/day per std. dev. of Jet Index)'}
+            'jet_speed_tas': {'title': 'Jet Speed vs. Temperature', 'cmap': 'coolwarm', 'vmin': -1.0, 'vmax': 1.0, 'base_label': 'TAS Slope (°C per std. dev. of Jet Speed)'},
+            'jet_speed_pr':  {'title': 'Jet Speed vs. Precipitation', 'cmap': 'BrBG', 'vmin': -0.5, 'vmax': 0.5, 'base_label': 'PR Slope (mm/day per std. dev. of Jet Speed)'},
+            'jet_lat_tas':   {'title': 'Jet Latitude vs. Temperature', 'cmap': 'coolwarm', 'vmin': -1.0, 'vmax': 1.0, 'base_label': 'TAS Slope (°C per std. dev. of Jet Lat.)'},
+            'jet_lat_pr':    {'title': 'Jet Latitude vs. Precipitation', 'cmap': 'BrBG', 'vmin': -0.5, 'vmax': 0.5, 'base_label': 'PR Slope (mm/day per std. dev. of Jet Lat.)'}
         }
-        
-        row_map = {'Winter': 0, 'Summer': 1}
-        col_map = {'speed': 0, 'lat': 1}
-        title_map = {'speed': 'Speed', 'lat': 'Latitude'}
 
-        conf = plot_configs[variable_to_plot]
-        mappable = None
-        
-        label = conf['base_label']
-        try:
-            winter_impacts = impact_data.get('Winter', {})
-            winter_speed_key = f'jet_speed_{variable_to_plot}'
-            winter_lat_key = f'jet_lat_{variable_to_plot}'
+        fig = plt.figure(figsize=(12, 18))
+        gs = gridspec.GridSpec(len(plot_configs), 3, width_ratios=[10, 10, 1], wspace=0.1, hspace=0.3)
 
-            if winter_impacts:
-                std_dev_speed = winter_impacts.get(winter_speed_key, {}).get('std_dev_predictor')
-                if std_dev_speed is not None:
-                    label += f'\n(DJF Speed 1 std. dev. = {std_dev_speed:.2f} m/s)'
+        row_idx = 0
+        for key, config in plot_configs.items():
+            # Define jet and analysis box properties
+            if 'speed' in key:
+                jet_box_coords = (Config.JET_SPEED_BOX_LON_MIN, Config.JET_SPEED_BOX_LON_MAX,
+                                  Config.JET_SPEED_BOX_LAT_MIN, Config.JET_SPEED_BOX_LAT_MAX)
+                jet_box_edgecolor = 'blue'
+            elif 'lat' in key:
+                jet_box_coords = (Config.JET_LAT_BOX_LON_MIN, Config.JET_LAT_BOX_LON_MAX,
+                                  Config.JET_LAT_BOX_LAT_MIN, Config.JET_LAT_BOX_LAT_MAX)
+                jet_box_edgecolor = 'red'
+            
+            analysis_box_coords = (Config.BOX_LON_MIN, Config.BOX_LON_MAX, 
+                                   Config.BOX_LAT_MIN, Config.BOX_LAT_MAX)
+
+            # --- Subplot for 20CRv3 ---
+            data_20crv3 = impact_data_20crv3.get(key)
+            ax1 = fig.add_subplot(gs[row_idx, 0], projection=ccrs.PlateCarree())
+            ax1.set_title(f"20CRv3: {config['title']}", fontsize=10)
+            
+            cf = None # Initialize cf to handle cases where data is missing
+            if data_20crv3 and data_20crv3.get('slopes') is not None:
+                lons, lats = data_20crv3['lons'], data_20crv3['lats']
+                lons_plot, lats_plot = np.meshgrid(lons, lats) if lons.ndim == 1 else (lons, lats)
                 
-                std_dev_lat = winter_impacts.get(winter_lat_key, {}).get('std_dev_predictor')
-                if std_dev_lat is not None:
-                    label += f'\n(DJF Lat 1 std. dev. = {std_dev_lat:.2f} °Lat)'
-
-        except Exception as e:
-            logging.warning(f"Could not retrieve example std dev for colorbar label: {e}")
-
-        for season, season_impacts in impact_data.items():
-            row = row_map.get(season)
-            if row is None or not season_impacts: continue
-
-            for jet_type, col in col_map.items():
-                ax = axs[row, col]
-                impact_key = f'jet_{jet_type}_{variable_to_plot}'
-                data = season_impacts.get(impact_key)
-
-                ax.set_extent(Config.PLOT_MAP_EXTENT, crs=ccrs.PlateCarree())
-                ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=0)
-                ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
-                ax.add_feature(cfeature.BORDERS, linestyle=':', linewidth=0.5)
-                gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+                ax1.set_extent(Config.PLOT_MAP_EXTENT, crs=ccrs.PlateCarree())
+                ax1.add_feature(cfeature.COASTLINE, linewidth=0.5); ax1.add_feature(cfeature.BORDERS, linestyle=':', linewidth=0.5)
+                gl = ax1.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
                 gl.top_labels = gl.right_labels = False
                 gl.xlabel_style = {'size': 8}; gl.ylabel_style = {'size': 8}
+
+                cf = ax1.pcolormesh(lons_plot, lats_plot, data_20crv3['slopes'], shading='auto',
+                                    cmap=config['cmap'], vmin=config['vmin'], vmax=config['vmax'],
+                                    transform=ccrs.PlateCarree())
                 
-                if jet_type == 'speed':
-                    box_coords = (Config.JET_SPEED_BOX_LON_MIN, Config.JET_SPEED_BOX_LON_MAX,
-                                  Config.JET_SPEED_BOX_LAT_MIN, Config.JET_SPEED_BOX_LAT_MAX)
-                    box_edgecolor = 'blue'
-                elif jet_type == 'lat':
-                    box_coords = (Config.JET_LAT_BOX_LON_MIN, Config.JET_LAT_BOX_LON_MAX,
-                                  Config.JET_LAT_BOX_LAT_MIN, Config.JET_LAT_BOX_LAT_MAX)
-                    box_edgecolor = 'red'
-                else:
-                    box_coords = None
+                if 'p_values' in data_20crv3:
+                    sig_mask = (data_20crv3['p_values'] < 0.05) & np.isfinite(data_20crv3['slopes'])
+                    if np.any(sig_mask):
+                        ax1.scatter(lons_plot[sig_mask], lats_plot[sig_mask], s=0.5, color='dimgray', marker='.',
+                                    alpha=0.4, transform=ccrs.PlateCarree())
+                
+                # Draw boxes
+                lon_min, lon_max, lat_min, lat_max = jet_box_coords
+                ax1.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
+                                  fill=False, edgecolor=jet_box_edgecolor, linewidth=1.5, linestyle='--',
+                                  zorder=10, transform=ccrs.PlateCarree()))
+                lon_min, lon_max, lat_min, lat_max = analysis_box_coords
+                ax1.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
+                                             fill=False, edgecolor='lime', linewidth=2, linestyle='-',
+                                             zorder=10, transform=ccrs.PlateCarree()))
+            else:
+                ax1.text(0.5, 0.5, "Data not available", transform=ax1.transAxes, ha='center', va='center')
 
-                if box_coords:
-                    box_lon_min, box_lon_max, box_lat_min, box_lat_max = box_coords
-                    jet_box = mpatches.Rectangle((box_lon_min, box_lat_min), box_lon_max - box_lon_min, box_lat_max - box_lat_min,
-                                                 fill=False, edgecolor=box_edgecolor, linewidth=2, linestyle='--',
-                                                 zorder=10, transform=ccrs.PlateCarree())
-                    ax.add_patch(jet_box)
+            # --- Subplot for ERA5 ---
+            data_era5 = impact_data_era5.get(key)
+            ax2 = fig.add_subplot(gs[row_idx, 1], projection=ccrs.PlateCarree())
+            ax2.set_title(f"ERA5: {config['title']}", fontsize=10)
 
-                title = f"{season}: Jet {title_map[jet_type]} vs. {variable_to_plot.upper()}"
-                ax.set_title(title, fontsize=10)
+            if data_era5 and data_era5.get('slopes') is not None:
+                lons, lats = data_era5['lons'], data_era5['lats']
+                lons_plot, lats_plot = np.meshgrid(lons, lats) if lons.ndim == 1 else (lons, lats)
 
-                if data and data.get('slopes') is not None:
-                    lons, lats = data['lons'], data['lats']
-                    lons_plot, lats_plot = np.meshgrid(lons, lats) if lons.ndim == 1 else (lons, lats)
+                ax2.set_extent(Config.PLOT_MAP_EXTENT, crs=ccrs.PlateCarree())
+                ax2.add_feature(cfeature.COASTLINE, linewidth=0.5); ax2.add_feature(cfeature.BORDERS, linestyle=':', linewidth=0.5)
+                gl = ax2.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+                gl.top_labels = gl.right_labels = False; gl.left_labels = False
+                gl.xlabel_style = {'size': 8}; gl.ylabel_style = {'size': 8}
 
-                    cf = ax.pcolormesh(lons_plot, lats_plot, data['slopes'], shading='auto',
-                                       cmap=conf['cmap'], vmin=conf['vmin'], vmax=conf['vmax'],
-                                       transform=ccrs.PlateCarree())
-                    mappable = cf
+                # Use the same mappable for the colorbar, even if it's from the other plot
+                cf_era5 = ax2.pcolormesh(lons_plot, lats_plot, data_era5['slopes'], shading='auto',
+                                    cmap=config['cmap'], vmin=config['vmin'], vmax=config['vmax'],
+                                    transform=ccrs.PlateCarree())
+                if cf is None: cf = cf_era5 # Fallback if 20CRv3 data was missing
 
-                    if data.get('p_values') is not None:
-                        sig_mask = (data['p_values'] < 0.05) & np.isfinite(data['slopes'])
-                        if np.any(sig_mask):
-                             ax.scatter(lons_plot[sig_mask], lats_plot[sig_mask], s=0.5, color='dimgray', marker='.',
-                                        alpha=0.4, transform=ccrs.PlateCarree())
-                else:
-                    ax.text(0.5, 0.5, "Data not available", transform=ax.transAxes, ha='center', va='center')
+                if 'p_values' in data_era5:
+                    sig_mask = (data_era5['p_values'] < 0.05) & np.isfinite(data_era5['slopes'])
+                    if np.any(sig_mask):
+                        ax2.scatter(lons_plot[sig_mask], lats_plot[sig_mask], s=0.5, color='dimgray', marker='.',
+                                    alpha=0.4, transform=ccrs.PlateCarree())
+                
+                # Draw boxes
+                lon_min, lon_max, lat_min, lat_max = jet_box_coords
+                ax2.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
+                                                 fill=False, edgecolor=jet_box_edgecolor, linewidth=1.5, linestyle='--',
+                                                 zorder=10, transform=ccrs.PlateCarree()))
+                lon_min, lon_max, lat_min, lat_max = analysis_box_coords
+                ax2.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
+                                             fill=False, edgecolor='lime', linewidth=2, linestyle='-',
+                                             zorder=10, transform=ccrs.PlateCarree()))
+            else:
+                ax2.text(0.5, 0.5, "Data not available", transform=ax2.transAxes, ha='center', va='center')
 
-        if mappable:
-            fig.subplots_adjust(left=0.05, right=0.88, bottom=0.05, top=0.9)
-            cbar_ax = fig.add_axes([0.9, 0.25, 0.02, 0.5])
-            fig.colorbar(mappable, cax=cbar_ax, extend='both', label=label)
+            # --- Colorbar ---
+            if cf:
+                cax = fig.add_subplot(gs[row_idx, 2])
+                final_label = config['base_label']
+                std_dev_val = data_era5.get('std_dev_predictor') if data_era5 and data_era5.get('std_dev_predictor') is not None else (data_20crv3.get('std_dev_predictor') if data_20crv3 else None)
 
-        plt.suptitle(f"{dataset_key}: Impact of Jet Variations on {variable_to_plot.upper()}", fontsize=16, weight='bold')
-        filename = os.path.join(Config.PLOT_DIR, f'jet_impact_maps_{variable_to_plot.upper()}_{dataset_key}.png')
+                if std_dev_val is not None and not np.isnan(std_dev_val):
+                    unit = "m/s" if "Speed" in config['title'] else "°Lat"
+                    final_label += f'\n(1 std. dev. = {std_dev_val:.2f} {unit})'
+                
+                fig.colorbar(cf, cax=cax, extend='both', label=final_label)
+
+            row_idx += 1
+        
+        plt.suptitle(f"Regression of Climate Variables on Jet Variations ({season}, Detrended)", fontsize=16, weight='bold')
+        plt.tight_layout(rect=[0, 0, 0.95, 0.96])
+        # [MODIFIED] Changed the filename to match the user's request
+        filename = os.path.join(Config.PLOT_DIR, f'jet_impact_regression_maps_{season.lower()}.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)

@@ -523,3 +523,97 @@ class Visualizer:
         filename = os.path.join(Config.PLOT_DIR, f'jet_impact_regression_maps_{season.lower()}.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
+
+    @staticmethod
+    def plot_jet_indices_comparison(jet_data_reanalysis, filename="jet_indices_comparison_seasonal_detrended.png"):
+        """
+        Plots a comparison of detrended jet speed and latitude indices for Winter and Summer.
+        Compares 20CRv3 and ERA5 reanalysis datasets and calculates the correlation
+        between them in their overlapping period.
+        """
+        logging.info("Plotting comparison of detrended jet indices (Speed vs. Latitude)...")
+        Visualizer.ensure_plot_dir_exists()
+
+        fig, axs = plt.subplots(2, 2, figsize=(16, 10), sharex=True, tight_layout=True)
+        plot_configs = [
+            {'ax': axs[0, 0], 'season': 'Winter', 'index_type': 'speed', 'ylabel': 'Jet Speed Anomaly (m/s)'},
+            {'ax': axs[0, 1], 'season': 'Summer', 'index_type': 'speed', 'ylabel': 'Jet Speed Anomaly (m/s)'},
+            {'ax': axs[1, 0], 'season': 'Winter', 'index_type': 'lat', 'ylabel': 'Jet Latitude Anomaly (°N)'},
+            {'ax': axs[1, 1], 'season': 'Summer', 'index_type': 'lat', 'ylabel': 'Jet Latitude Anomaly (°N)'},
+        ]
+        
+        all_years = []
+        
+        for config in plot_configs:
+            ax = config['ax']
+            season_lower = config['season'].lower()
+            
+            # Store data for correlation calculation
+            ts_data = {}
+            
+            for dataset_key, color in [(Config.DATASET_20CRV3, 'royalblue'), (Config.DATASET_ERA5, 'crimson')]:
+                data_key = f"{dataset_key}_{season_lower}_{config['index_type']}_data"
+                jet_bundle = jet_data_reanalysis.get(data_key)
+                
+                if jet_bundle and 'jet' in jet_bundle and jet_bundle['jet'] is not None:
+                    jet_ts = jet_bundle['jet']
+                    if 'season_year' in jet_ts.coords and jet_ts.size > 0:
+                        years = jet_ts.season_year.values
+                        values = jet_ts.values
+                        all_years.extend(years)
+                        
+                        # Store for correlation
+                        ts_data[dataset_key] = {'years': years, 'values': values}
+                        
+                        # Plot the timeseries
+                        ax.plot(years, values, '-', color=color, linewidth=1.5, label=dataset_key)
+            
+            # --- Calculate and plot correlation for the overlap ---
+            if Config.DATASET_20CRV3 in ts_data and Config.DATASET_ERA5 in ts_data:
+                data_20crv3 = ts_data[Config.DATASET_20CRV3]
+                data_era5 = ts_data[Config.DATASET_ERA5]
+                
+                # Find common years
+                common_years, idx1, idx2 = np.intersect1d(data_20crv3['years'], data_era5['years'], return_indices=True)
+                
+                if len(common_years) > 5: # Require at least 5 years of overlap
+                    values1 = data_20crv3['values'][idx1]
+                    values2 = data_era5['values'][idx2]
+                    
+                    # Calculate regression to get r and p values
+                    slope, intercept, r_value, p_value, std_err = StatsAnalyzer.calculate_regression(values1, values2)
+                    
+                    if not np.isnan(r_value):
+                        # Add significance stars to p-value
+                        if p_value < 0.01:
+                            p_str = "***"
+                        elif p_value < 0.05:
+                            p_str = "**"
+                        elif p_value < 0.1:
+                            p_str = "*"
+                        else:
+                            p_str = ""
+                            
+                        corr_text = f"Overlap Corr: r = {r_value:.2f}{p_str}"
+                        # Add text to the plot
+                        ax.text(0.04, 0.92, corr_text, transform=ax.transAxes, fontsize=10,
+                                bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.7))
+
+            ax.set_title(f"{config['season']} Jet {config['index_type'].capitalize()} Index (Detrended)")
+            ax.set_ylabel(config['ylabel'])
+            ax.grid(True, linestyle=':', alpha=0.7)
+            ax.legend(loc='lower left')
+
+        if all_years:
+            fig.suptitle(f"Jet Stream Indices Comparison (Detrended)\n({int(min(all_years))}-{int(max(all_years))})", fontsize=16, weight='bold')
+        else:
+            fig.suptitle("Jet Stream Indices Comparison (Detrended)", fontsize=16, weight='bold')
+            
+        # Add X-axis labels to bottom plots
+        axs[1, 0].set_xlabel("Year")
+        axs[1, 1].set_xlabel("Year")
+
+        filepath = os.path.join(Config.PLOT_DIR, filename)
+        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved detrended jet indices comparison plot to {filepath}")

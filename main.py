@@ -176,6 +176,14 @@ class ClimateAnalysis:
                  if jet_lat is not None:
                      jet_data_reanalysis[f'{dset_key}_{season_lower}_lat_data'] = {'jet': DataProcessor.detrend_data(jet_lat)}
 
+        # --- INSERTED PLOT CALL ---
+        logging.info("\n\n--- Plotting Reanalysis Jet Index Comparison Timeseries ---")
+        if jet_data_reanalysis:
+            Visualizer.plot_jet_indices_comparison(jet_data_reanalysis)
+        else:
+            logging.warning("Skipping jet index comparison plot, no data was generated.")
+        # --- END OF INSERTION ---
+
         # [MODIFIED] New section for calculating and plotting combined Jet Impact Maps
         logging.info("\n\n--- Calculating Reanalysis Jet Impact Maps ---")
         jet_impact_all_results = {}

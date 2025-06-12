@@ -81,12 +81,10 @@ class Config:
         'DJF_JetSpeed': {
             2.0: {'Core Mean': 0.25, 'Core High': 0.8, 'Extreme Low': -0.8, 'Extreme High': 1.2},
             3.0: {'Core Mean': 0.4, 'Core High': 1.0, 'Extreme Low': -0.6, 'Extreme High': 1.5},
-            4.0: {'Core Mean': 0.5, 'Core High': 1.1, 'Extreme Low': -0.4, 'Extreme High': 1.7},
         },
         'JJA_JetLat': {
             2.0: {'Core Mean': 0.5, 'Core High': 1.8, 'Extreme Low': -1.5, 'Extreme High': 2.5},
             3.0: {'Core Mean': 1.2, 'Core High': 2.2, 'Extreme Low': -1.0, 'Extreme High': 3.0},
-            4.0: {'Core Mean': 1.3, 'Core High': 2.4, 'Extreme Low': -0.5, 'Extreme High': 3.2},
         }
     }
 

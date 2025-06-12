@@ -338,7 +338,7 @@ class StorylineAnalyzer:
                 met: np.mean(list(all_deltas[met][gwl].values())) if all_deltas[met][gwl] else np.nan
                 for met in metrics_list
             }
-            for gwl in self.config.GLOBAL_WARMING_LEVELS
+            for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT
         }
         
         # Create model run summary
@@ -466,9 +466,8 @@ class StorylineAnalyzer:
                     models_in_storyline = []
                     for model_key, delta_val in model_deltas.items():
                         if lower_bound <= delta_val <= upper_bound:
-                            # Extrahiere den Modellnamen aus dem Schlüssel (z.B. aus 'ACCESS-CM2_ssp585')
-                            model_name = model_key.split('_')[0]
-                            models_in_storyline.append(model_name)
+                            # Behalte den kompletten Schlüssel (z.B. 'ACCESS-CM2_ssp585')
+                            models_in_storyline.append(model_key)
                     
                     classification_results[gwl][jet_index][storyline_type] = sorted(models_in_storyline)
         return classification_results

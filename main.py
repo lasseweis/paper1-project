@@ -257,19 +257,19 @@ class ClimateAnalysis:
                             # MODIFIZIERTER BLOCK START
                             if models:
                                 models_with_timings = []
-                                for model_name in models:
-                                    # Der Schlüssel im gwl_years_data-Dict ist z.B. 'ACCESS-CM2_ssp585'
-                                    model_key = f"{model_name}_{scenario}"
+                                # Die Variable `models` enthält jetzt die vollen Schlüssel
+                                for model_key in models:
+                                    # Der Schlüssel ist bereits korrekt (z.B. 'ACCESS-CM2_ssp585')
                                     threshold_year = gwl_years_data.get(model_key, {}).get(gwl)
                                     
                                     if threshold_year:
                                         window = Config.GWL_YEARS_WINDOW
                                         start_year = threshold_year - window // 2
                                         end_year = threshold_year + (window - 1) // 2
-                                        models_with_timings.append(f"{model_name} ({start_year}-{end_year})")
+                                        models_with_timings.append(f"{model_key} ({start_year}-{end_year})")
                                     else:
                                         # Fallback, falls für ein Modell kein Jahr gefunden wird
-                                        models_with_timings.append(model_name)
+                                        models_with_timings.append(model_key)
                                 
                                 logging.info(f"    - {storyline_type}: {', '.join(models_with_timings)} ({len(models)})")
                             else:

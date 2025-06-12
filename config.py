@@ -55,7 +55,7 @@ class Config:
     CMIP6_DATA_BASE_PATH = '/data/users/vlw/paper1-cmip-data'
     CMIP6_VAR_PATH = os.path.join(CMIP6_DATA_BASE_PATH, '{variable}_regrid')
     CMIP6_FILE_PATTERN = '{variable}_Amon_{model}_{experiment}_{member}_{grid}_*_regridded.nc'
-    CMIP6_SCENARIOS = ['ssp585']
+    CMIP6_SCENARIOS = ['ssp585', 'ssp245']
     CMIP6_HISTORICAL_EXPERIMENT_NAME = 'historical'
     CMIP6_MEMBER_ID = 'r1i1p1f1'
     CMIP6_VARIABLES_TO_LOAD = ['ua', 'pr', 'tas']
@@ -69,8 +69,8 @@ class Config:
     CMIP6_ANOMALY_REF_END = 2014
 
     # Global Warming Level (GWL) parameters
-    GLOBAL_WARMING_LEVELS = [2.0, 3.0, 4.0]
-    GWL_FINE_STEPS_FOR_PLOT = np.arange(1.5, 4.51, 0.5).tolist() # Yields [1.5, 2.0, ..., 4.5]
+    GLOBAL_WARMING_LEVELS = [2.0, 3.0]
+    GWL_FINE_STEPS_FOR_PLOT = np.arange(1.5, 3.51, 0.5).tolist() # Yields [1.5, 2.0, ..., 4.5]
     GWL_YEARS_WINDOW = 20
     GWL_TEMP_SMOOTHING_WINDOW = 20
 

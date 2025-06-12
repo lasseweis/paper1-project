@@ -340,6 +340,79 @@ class AdvancedAnalyzer:
         return impact_maps
 
     @staticmethod
+    def calculate_jet_correlation_maps(datasets, jet_data, dataset_key, season):
+        """
+        Calculate grid-cell correlations between jet indices and climate variables.
+        This function handles the computation, returning data ready for plotting.
+        """
+        logging.info(f"Calculating jet correlation maps for {dataset_key} ({season})...")
+        correlation_results = {}
+        season_lower = season.lower()
+
+        # Define the combinations of jet indices and variables to correlate
+        correlation_configs = [
+            {'jet_type': 'speed', 'var_type': 'tas'},
+            {'jet_type': 'speed', 'var_type': 'pr'},
+            {'jet_type': 'lat',   'var_type': 'tas'},
+            {'jet_type': 'lat',   'var_type': 'pr'}
+        ]
+
+        # Get the base seasonal data fields for the dataset
+        tas_seasonal = datasets.get(f'{dataset_key}_tas_seasonal')
+        pr_seasonal = datasets.get(f'{dataset_key}_pr_seasonal')
+        if tas_seasonal is None or pr_seasonal is None:
+            logging.error(f"Missing seasonal TAS or PR data for {dataset_key}. Cannot calculate correlation maps.")
+            return {}
+
+        # Filter and detrend the data for the specified season
+        var_data_detrended = {
+            'tas': DataProcessor.detrend_data(DataProcessor.filter_by_season(tas_seasonal, season)),
+            'pr': DataProcessor.detrend_data(DataProcessor.filter_by_season(pr_seasonal, season))
+        }
+
+        for config in correlation_configs:
+            jet_type = config['jet_type']
+            var_type = config['var_type']
+            result_key = f"jet_{jet_type}_{var_type}"
+            logging.debug(f"  Processing: {dataset_key} {season} - Jet {jet_type} vs. {var_type.upper()}")
+
+            # Get the corresponding detrended jet index data
+            jet_data_key = f'{dataset_key}_{season_lower}_{jet_type}_data'
+            jet_bundle = jet_data.get(jet_data_key)
+            var_field = var_data_detrended.get(var_type)
+
+            if jet_bundle is None or 'jet' not in jet_bundle or jet_bundle['jet'] is None or var_field is None:
+                logging.warning(f"    Skipping {result_key}: Missing jet data or variable field.")
+                continue
+
+            jet_index_ts = jet_bundle['jet']
+            jet_index_normalized = StatsAnalyzer.normalize(jet_index_ts)
+            std_dev_jet = jet_index_ts.std().item()
+
+            # Find common years for the regression
+            common_years = np.intersect1d(jet_index_normalized.season_year.values, var_field.season_year.values)
+            if len(common_years) < 5:
+                logging.warning(f"    Skipping {result_key}: Not enough common years ({len(common_years)}).")
+                continue
+
+            # Select data for common years
+            jet_index_common = jet_index_normalized.sel(season_year=common_years)
+            var_field_common = var_field.sel(season_year=common_years)
+            
+            # Use the helper to calculate regression slopes using the normalized predictor
+            slopes, p_values = AdvancedAnalyzer._calculate_regression_for_variable(jet_index_common, var_field_common)
+
+            if slopes is not None and p_values is not None:
+                correlation_results[result_key] = {
+                    'slopes': slopes,
+                    'p_values': p_values,
+                    'lons': var_field.lon.values,
+                    'lats': var_field.lat.values,
+                    'std_dev_jet': std_dev_jet
+                }
+        return correlation_results
+
+    @staticmethod
     def analyze_correlations(datasets, discharge_data, jet_data, dataset_key):
         """Analyze specific correlations between climate indices and target variables."""
         logging.info(f"Analyzing selected correlations for {dataset_key} (Winter & Summer)...")

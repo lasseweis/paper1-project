@@ -132,17 +132,135 @@ class Visualizer:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
 
-    # All other plotting functions from your original script go here...
-    # For example:
-    # @staticmethod
-    # def plot_seasonal_correlation_matrix(...):
-    #
-    # @staticmethod
-    # def plot_jet_indices_timeseries(...):
-    #
-    # @staticmethod
-    # def plot_cmip6_delta_impact_vs_delta_jet_at_gwl(...):
-    
+    @staticmethod
+    def plot_jet_correlation_maps(correlation_data_20crv3, correlation_data_era5, season):
+        """Plots pre-calculated jet correlation/regression slope maps for a given season."""
+        logging.info(f"Plotting jet correlation maps for {season}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        if not correlation_data_20crv3 or not correlation_data_era5:
+            logging.warning(f"Skipping jet correlation maps for {season} due to missing data for one or both datasets.")
+            return
+
+        plot_configs = {
+            'jet_speed_tas': {'title': f'{season} Jet Speed vs. Temperature', 'cmap': 'coolwarm', 'vmin': -1.0, 'vmax': 1.0, 'base_label': 'TAS Slope (°C per std. dev. of Jet Speed)'},
+            'jet_speed_pr':  {'title': f'{season} Jet Speed vs. Precipitation', 'cmap': 'BrBG', 'vmin': -0.5, 'vmax': 0.5, 'base_label': 'PR Slope (mm/day per std. dev. of Jet Speed)'},
+            'jet_lat_tas':   {'title': f'{season} Jet Latitude vs. Temperature', 'cmap': 'coolwarm', 'vmin': -1.0, 'vmax': 1.0, 'base_label': 'TAS Slope (°C per std. dev. of Jet Lat.)'},
+            'jet_lat_pr':    {'title': f'{season} Jet Latitude vs. Precipitation', 'cmap': 'BrBG', 'vmin': -0.5, 'vmax': 0.5, 'base_label': 'PR Slope (mm/day per std. dev. of Jet Lat.)'}
+        }
+
+        fig = plt.figure(figsize=(12, 18))
+        gs = gridspec.GridSpec(len(plot_configs), 3, width_ratios=[10, 10, 1], wspace=0.1, hspace=0.3)
+
+        row_idx = 0
+        for key, config in plot_configs.items():
+            if 'speed' in key:
+                jet_box_coords = (Config.JET_SPEED_BOX_LON_MIN, Config.JET_SPEED_BOX_LON_MAX,
+                                  Config.JET_SPEED_BOX_LAT_MIN, Config.JET_SPEED_BOX_LAT_MAX)
+                jet_box_edgecolor = 'blue'
+            elif 'lat' in key:
+                jet_box_coords = (Config.JET_LAT_BOX_LON_MIN, Config.JET_LAT_BOX_LON_MAX,
+                                  Config.JET_LAT_BOX_LAT_MIN, Config.JET_LAT_BOX_LAT_MAX)
+                jet_box_edgecolor = 'red'
+            else:
+                jet_box_coords = None
+            
+            analysis_box_coords = (Config.BOX_LON_MIN, Config.BOX_LON_MAX, 
+                                   Config.BOX_LAT_MIN, Config.BOX_LAT_MAX)
+
+            # --- Data for 20CRv3 ---
+            data_20crv3 = correlation_data_20crv3.get(key)
+            ax1 = fig.add_subplot(gs[row_idx, 0], projection=ccrs.PlateCarree())
+            ax1.set_title(f"20CRv3: {config['title']}", fontsize=10)
+            
+            if data_20crv3 and data_20crv3.get('slopes') is not None:
+                lons, lats = data_20crv3['lons'], data_20crv3['lats']
+                lons_plot, lats_plot = np.meshgrid(lons, lats) if lons.ndim == 1 else (lons, lats)
+                
+                ax1.set_extent(Config.PLOT_MAP_EXTENT, crs=ccrs.PlateCarree())
+                ax1.add_feature(cfeature.COASTLINE, linewidth=0.5); ax1.add_feature(cfeature.BORDERS, linestyle=':', linewidth=0.5)
+                gl = ax1.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+                gl.top_labels = gl.right_labels = False
+                gl.xlabel_style = {'size': 8}; gl.ylabel_style = {'size': 8}
+
+                cf = ax1.pcolormesh(lons_plot, lats_plot, data_20crv3['slopes'], shading='auto',
+                                    cmap=config['cmap'], vmin=config['vmin'], vmax=config['vmax'],
+                                    transform=ccrs.PlateCarree())
+                
+                sig_mask = (data_20crv3['p_values'] < 0.05) & np.isfinite(data_20crv3['slopes'])
+                if np.any(sig_mask):
+                    ax1.scatter(lons_plot[sig_mask], lats_plot[sig_mask], s=0.5, color='dimgray', marker='.',
+                                alpha=0.4, transform=ccrs.PlateCarree())
+                
+                if jet_box_coords:
+                    lon_min, lon_max, lat_min, lat_max = jet_box_coords
+                    ax1.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
+                                  fill=False, edgecolor=jet_box_edgecolor, linewidth=1.5, linestyle='--',
+                                  zorder=10, transform=ccrs.PlateCarree()))
+                
+                lon_min, lon_max, lat_min, lat_max = analysis_box_coords
+                ax1.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
+                                             fill=False, edgecolor='lime', linewidth=2, linestyle='-',
+                                             zorder=10, transform=ccrs.PlateCarree()))
+            else:
+                ax1.text(0.5, 0.5, "Data not available", transform=ax1.transAxes, ha='center', va='center')
+
+            # --- Data for ERA5 ---
+            data_era5 = correlation_data_era5.get(key)
+            ax2 = fig.add_subplot(gs[row_idx, 1], projection=ccrs.PlateCarree())
+            ax2.set_title(f"ERA5: {config['title']}", fontsize=10)
+
+            if data_era5 and data_era5.get('slopes') is not None:
+                lons, lats = data_era5['lons'], data_era5['lats']
+                lons_plot, lats_plot = np.meshgrid(lons, lats) if lons.ndim == 1 else (lons, lats)
+
+                ax2.set_extent(Config.PLOT_MAP_EXTENT, crs=ccrs.PlateCarree())
+                ax2.add_feature(cfeature.COASTLINE, linewidth=0.5); ax2.add_feature(cfeature.BORDERS, linestyle=':', linewidth=0.5)
+                gl = ax2.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+                gl.top_labels = gl.right_labels = False; gl.left_labels = False
+                gl.xlabel_style = {'size': 8}; gl.ylabel_style = {'size': 8}
+
+                cf = ax2.pcolormesh(lons_plot, lats_plot, data_era5['slopes'], shading='auto',
+                                    cmap=config['cmap'], vmin=config['vmin'], vmax=config['vmax'],
+                                    transform=ccrs.PlateCarree())
+                
+                sig_mask = (data_era5['p_values'] < 0.05) & np.isfinite(data_era5['slopes'])
+                if np.any(sig_mask):
+                    ax2.scatter(lons_plot[sig_mask], lats_plot[sig_mask], s=0.5, color='dimgray', marker='.',
+                                alpha=0.4, transform=ccrs.PlateCarree())
+                                
+                if jet_box_coords:
+                    lon_min, lon_max, lat_min, lat_max = jet_box_coords
+                    ax2.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
+                                                 fill=False, edgecolor=jet_box_edgecolor, linewidth=1.5, linestyle='--',
+                                                 zorder=10, transform=ccrs.PlateCarree()))
+                
+                lon_min, lon_max, lat_min, lat_max = analysis_box_coords
+                ax2.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
+                                             fill=False, edgecolor='lime', linewidth=2, linestyle='-',
+                                             zorder=10, transform=ccrs.PlateCarree()))
+            else:
+                ax2.text(0.5, 0.5, "Data not available", transform=ax2.transAxes, ha='center', va='center')
+
+            # --- Colorbar ---
+            cax = fig.add_subplot(gs[row_idx, 2])
+            
+            final_label = config['base_label']
+            std_dev_val = data_era5.get('std_dev_jet') if data_era5 else data_20crv3.get('std_dev_jet')
+            if std_dev_val is not None and not np.isnan(std_dev_val):
+                unit = "m/s" if "Speed" in config['title'] else "°Lat"
+                final_label += f'\n(1 std. dev. = {std_dev_val:.2f} {unit})'
+            
+            fig.colorbar(cf, cax=cax, extend='both', label=final_label)
+
+            row_idx += 1
+        
+        plt.suptitle(f"Correlation Maps of Jet Variations and Climate ({season}, Detrended)", fontsize=16, weight='bold')
+        plt.tight_layout(rect=[0, 0, 0.95, 0.96])
+        filename = os.path.join(Config.PLOT_DIR, f'jet_correlation_maps_{season.lower()}.png')
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
     @staticmethod
     def plot_jet_changes_vs_gwl(cmip6_results, filename="cmip6_jet_changes_vs_gwl.png"):
         """
@@ -164,11 +282,9 @@ class Visualizer:
         n_indices = len(jet_indices_to_plot)
         if n_indices == 0: return
 
-        # GEÄNDERT: Höhe für Legende unten angepasst
         fig, axs = plt.subplots(1, n_indices, figsize=(7 * n_indices, 6.5), sharey=False, squeeze=False)
         axs = axs.flatten()
 
-        # NEU: Definition der Legenden-Elemente vor der Schleife für eine gemeinsame Legende
         master_legend_handles = [
             plt.Line2D([0], [0], color='darkgray', lw=0.8, marker='.', markersize=4, linestyle='-'),
             mpatches.Patch(color='lightcoral', alpha=0.4),
@@ -180,15 +296,13 @@ class Visualizer:
             'Multi-Model Mean'
         ]
 
-        # NEU: Definition von Farben und Markern für die Storylines
         storyline_styles = {
-            'Core Mean':    {'color': '#1f77b4', 'marker': 'X', 's': 60}, # Blau
-            'Core High':    {'color': '#ff7f0e', 'marker': 'X', 's': 60}, # Orange
-            'Extreme Low':  {'color': '#2ca02c', 'marker': 'P', 's': 70}, # Grün
-            'Extreme High': {'color': '#d62728', 'marker': 'P', 's': 70}  # Rot
+            'Core Mean':    {'color': '#1f77b4', 'marker': 'X', 's': 60}, 
+            'Core High':    {'color': '#ff7f0e', 'marker': 'X', 's': 60},
+            'Extreme Low':  {'color': '#2ca02c', 'marker': 'P', 's': 70},
+            'Extreme High': {'color': '#d62728', 'marker': 'P', 's': 70}
         }
 
-        # Dynamisch Legenden-Handles für die tatsächlich vorhandenen Storyline-Typen hinzufügen
         used_storyline_types = set()
         for jet_idx in jet_indices_to_plot:
             for gwl in Config.STORYLINE_JET_CHANGES.get(jet_idx, {}):
@@ -210,7 +324,6 @@ class Visualizer:
             deltas_by_gwl = all_deltas[jet_idx]
             gwls_fine = sorted(deltas_by_gwl.keys())
 
-            # --- Plot individual model lines ---
             model_runs = {}
             for gwl, model_deltas_dict in deltas_by_gwl.items():
                 for model_key, delta_val in model_deltas_dict.items():
@@ -225,7 +338,6 @@ class Visualizer:
                 if len(gwls_sorted) > 1:
                     ax.plot(gwls_sorted, values_sorted, marker='.', linestyle='-', color='darkgray', alpha=0.5, lw=0.8)
 
-            # --- Plot percentile spread (robustly) ---
             delta_values_per_gwl = [list(deltas_by_gwl[gwl].values()) for gwl in gwls_fine]
             p10 = [np.percentile(d, 10) if d else np.nan for d in delta_values_per_gwl]
             p90 = [np.percentile(d, 90) if d else np.nan for d in delta_values_per_gwl]
@@ -237,12 +349,10 @@ class Visualizer:
                 p90_plot = [p90[i] for i in valid_indices]
                 ax.fill_between(gwls_plot, p10_plot, p90_plot, color='lightcoral', alpha=0.4)
                     
-            # Plot MMM
             gwls_main = sorted(mmm_changes.keys())
             mmm_values = [mmm_changes[gwl].get(jet_idx, np.nan) for gwl in gwls_main]
             ax.plot(gwls_main, mmm_values, marker='o', linestyle='-', color='black', lw=2.5, markersize=7)
 
-            # GEÄNDERT: Plot Storyline markers mit spezifischen Farben und Symbolen
             for gwl, storylines in Config.STORYLINE_JET_CHANGES.get(jet_idx, {}).items():
                 for name, value in storylines.items():
                     if name in storyline_styles:
@@ -250,12 +360,11 @@ class Visualizer:
                         ax.scatter(gwl, value,
                                    marker=style['marker'],
                                    color=style['color'],
-                                   s=style['s'],  # Größe des Markers
+                                   s=style['s'],
                                    edgecolor='black',
                                    linewidth=0.8,
-                                   zorder=5) # zorder stellt sicher, dass sie obenauf liegen
+                                   zorder=5)
 
-            # Formatting
             ylabel = f'Change in {jet_idx.replace("_", " ")}'
             if '_pr' in jet_idx: ylabel += ' (%)'
             elif 'Lat' in jet_idx: ylabel += ' (°Lat)'
@@ -265,20 +374,15 @@ class Visualizer:
             ax.set_title(f'Projected Change in {jet_idx.replace("_", " ")}')
             ax.grid(True, linestyle=':', alpha=0.6)
             ax.axhline(0, color='grey', lw=0.8)
-            
-            # ENTFERNT: Die individuelle Legende pro Subplot wird entfernt
-            # ax.legend(fontsize=8)
         
-        # NEU: Fügt die gemeinsame Legende unterhalb der Plots hinzu
         fig.legend(handles=master_legend_handles, labels=master_legend_labels,
                    loc='lower center',
-                   bbox_to_anchor=(0.5, -0.01), # Positionierung unterhalb der Achsen
-                   ncol=4, # Anzahl der Spalten in der Legende
+                   bbox_to_anchor=(0.5, -0.01),
+                   ncol=4,
                    fontsize=10,
                    frameon=True)
 
-        # GEÄNDERT: Anpassung des Layouts für die Legende
-        plt.tight_layout(rect=[0, 0.08, 1, 0.95]) # rect=[left, bottom, right, top]
+        plt.tight_layout(rect=[0, 0.08, 1, 0.95])
         fig.suptitle("CMIP6 Projected Jet Changes vs. Global Warming Level", fontsize=16, weight='bold')
         filepath = os.path.join(Config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
@@ -309,28 +413,23 @@ class Visualizer:
         conf = plot_configs[variable_to_plot]
         mappable = None
         
-        # --- Create the colorbar label with an example std. dev. ---
         label = conf['base_label']
         try:
-            # Use Winter Jet Speed as a representative example for the label
             winter_impacts = impact_data.get('Winter', {})
             winter_speed_key = f'jet_speed_{variable_to_plot}'
             winter_lat_key = f'jet_lat_{variable_to_plot}'
 
             if winter_impacts:
-                # Get std dev for speed
                 std_dev_speed = winter_impacts.get(winter_speed_key, {}).get('std_dev_predictor')
                 if std_dev_speed is not None:
                     label += f'\n(DJF Speed 1 std. dev. = {std_dev_speed:.2f} m/s)'
                 
-                # Get std dev for latitude
                 std_dev_lat = winter_impacts.get(winter_lat_key, {}).get('std_dev_predictor')
                 if std_dev_lat is not None:
                     label += f'\n(DJF Lat 1 std. dev. = {std_dev_lat:.2f} °Lat)'
 
         except Exception as e:
             logging.warning(f"Could not retrieve example std dev for colorbar label: {e}")
-        # --- End of label creation ---
 
         for season, season_impacts in impact_data.items():
             row = row_map.get(season)
@@ -349,7 +448,6 @@ class Visualizer:
                 gl.top_labels = gl.right_labels = False
                 gl.xlabel_style = {'size': 8}; gl.ylabel_style = {'size': 8}
                 
-                # MODIFICATION START: Add the corresponding jet box for context
                 if jet_type == 'speed':
                     box_coords = (Config.JET_SPEED_BOX_LON_MIN, Config.JET_SPEED_BOX_LON_MAX,
                                   Config.JET_SPEED_BOX_LAT_MIN, Config.JET_SPEED_BOX_LAT_MAX)
@@ -367,7 +465,6 @@ class Visualizer:
                                                  fill=False, edgecolor=box_edgecolor, linewidth=2, linestyle='--',
                                                  zorder=10, transform=ccrs.PlateCarree())
                     ax.add_patch(jet_box)
-                # MODIFICATION END
 
                 title = f"{season}: Jet {title_map[jet_type]} vs. {variable_to_plot.upper()}"
                 ax.set_title(title, fontsize=10)
@@ -392,7 +489,7 @@ class Visualizer:
         if mappable:
             fig.subplots_adjust(left=0.05, right=0.88, bottom=0.05, top=0.9)
             cbar_ax = fig.add_axes([0.9, 0.25, 0.02, 0.5])
-            fig.colorbar(mappable, cax=cbar_ax, extend='both', label=label) # Use the updated label
+            fig.colorbar(mappable, cax=cbar_ax, extend='both', label=label)
 
         plt.suptitle(f"{dataset_key}: Impact of Jet Variations on {variable_to_plot.upper()}", fontsize=16, weight='bold')
         filename = os.path.join(Config.PLOT_DIR, f'jet_impact_maps_{variable_to_plot.upper()}_{dataset_key}.png')

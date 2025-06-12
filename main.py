@@ -197,6 +197,34 @@ class ClimateAnalysis:
             else:
                  logging.warning(f"Could not calculate or plot jet impact maps for {dset_key}.")
 
+        # --- ADD THIS NEW SECTION FOR JET CORRELATION MAPS ---
+        logging.info("\n\n--- Calculating and Plotting Reanalysis Jet Correlation Maps ---")
+        jet_corr_results = {}
+        for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
+            jet_corr_results[dset_key] = {}
+            for season in ['Winter', 'Summer']:
+                logging.info(f"--> Calculating jet correlation maps for {dset_key} ({season})")
+                season_results = AdvancedAnalyzer.calculate_jet_correlation_maps(
+                    datasets=datasets_reanalysis,
+                    jet_data=jet_data_reanalysis,
+                    dataset_key=dset_key,
+                    season=season
+                )
+                if season_results:
+                    jet_corr_results[dset_key][season] = season_results
+        
+        # Now plot for each season, comparing the two datasets
+        for season in ['Winter', 'Summer']:
+            data_20crv3 = jet_corr_results.get(Config.DATASET_20CRV3, {}).get(season)
+            data_era5 = jet_corr_results.get(Config.DATASET_ERA5, {}).get(season)
+            if data_20crv3 and data_era5:
+                logging.info(f"--> Plotting jet correlation maps for {season}")
+                Visualizer.plot_jet_correlation_maps(data_20crv3, data_era5, season)
+            else:
+                logging.warning(f"Skipping jet correlation plot for {season}, data missing for one or both reanalyses.")
+        # --- END OF NEW SECTION ---
+
+
         # --- PART 2: CMIP6 AND STORYLINE ANALYSIS ---
         logging.info("\n\n--- Analyzing CMIP6 Data and Storylines ---")
         try:

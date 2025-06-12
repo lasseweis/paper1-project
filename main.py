@@ -237,19 +237,44 @@ class ClimateAnalysis:
         # NEU: Storyline-Klassifizierungs-Zusammenfassung
         if cmip6_results:
             storyline_classification = cmip6_results.get('storyline_classification')
-            if storyline_classification:
+            # HINZUGEFÜGT: Zugriff auf die GWL-Jahre erhalten
+            gwl_years_data = cmip6_results.get('gwl_threshold_years')
+
+            if storyline_classification and gwl_years_data:
                 logging.info("\n\n--- CMIP6 Model Storyline Classification ---")
+                # HINZUGEFÜGT: Szenario-Namen für die Erstellung des Dictionary-Schlüssels holen
+                scenario = Config.CMIP6_SCENARIOS[0] if Config.CMIP6_SCENARIOS else ''
+
                 for gwl, jet_indices in sorted(storyline_classification.items()):
                     if gwl not in Config.GLOBAL_WARMING_LEVELS:
                         continue
                     logging.info(f"\nGWL {gwl}°C:")
                     for jet_index, storylines in jet_indices.items():
-                        logging.info(f"  Classification for '{jet_index}' (Tolerance: ±{0.2 if 'Speed' in jet_index else 0.3}):")
+                        # KORRIGIERT: Toleranz-Logik aus storyline.py übernommen
+                        tolerance = 0.25 if 'Speed' in jet_index else 0.35
+                        logging.info(f"  Classification for '{jet_index}' (Tolerance: ±{tolerance}):")
                         for storyline_type, models in sorted(storylines.items()):
+                            # MODIFIZIERTER BLOCK START
                             if models:
-                                logging.info(f"    - {storyline_type}: {', '.join(models)} ({len(models)})")
+                                models_with_timings = []
+                                for model_name in models:
+                                    # Der Schlüssel im gwl_years_data-Dict ist z.B. 'ACCESS-CM2_ssp585'
+                                    model_key = f"{model_name}_{scenario}"
+                                    threshold_year = gwl_years_data.get(model_key, {}).get(gwl)
+                                    
+                                    if threshold_year:
+                                        window = Config.GWL_YEARS_WINDOW
+                                        start_year = threshold_year - window // 2
+                                        end_year = threshold_year + (window - 1) // 2
+                                        models_with_timings.append(f"{model_name} ({start_year}-{end_year})")
+                                    else:
+                                        # Fallback, falls für ein Modell kein Jahr gefunden wird
+                                        models_with_timings.append(model_name)
+                                
+                                logging.info(f"    - {storyline_type}: {', '.join(models_with_timings)} ({len(models)})")
                             else:
                                 logging.info(f"    - {storyline_type}: No models in range.")
+                            # MODIFIZIERTER BLOCK ENDE
                 logging.info("------------------------------------------")
         
         logging.info("\n\n=====================================================")

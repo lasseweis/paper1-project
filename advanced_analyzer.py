@@ -461,7 +461,9 @@ class AdvancedAnalyzer:
         for dataset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
             dataset_correlations = {}
             for jet_type in ['speed', 'lat']:
-                jet_bundle = jet_data.get(f'{dataset_key}_{season_lower}_{jet_type}_tas_data') or jet_data.get(f'{dataset_key}_{season_lower}_{jet_type}_pr_data')
+                # This is the line corrected in the previous step
+                jet_bundle = jet_data.get(f'{dataset_key}_{season_lower}_{jet_type}_data')
+                
                 if jet_bundle and 'jet' in jet_bundle:
                     jet_detrended = jet_bundle['jet']
                     jet_smooth = StatsAnalyzer.calculate_rolling_mean(jet_detrended, window=window_size)
@@ -473,12 +475,24 @@ class AdvancedAnalyzer:
                             jet_smooth.sel(season_year=common_years).values
                         )
                         if not np.isnan(r):
-                            dataset_correlations[jet_type] = {'r_value': r, 'p_value': p, 'window_size': window_size}
+                            # --- START MODIFICATION ---
+                            # Use 'latitude' as the key to match the plotting function's expectation
+                            result_key = 'latitude' if jet_type == 'lat' else 'speed'
+                            
+                            # Store the actual data needed for the plot, not just the result
+                            dataset_correlations[result_key] = {
+                                'r_value': r, 
+                                'p_value': p, 
+                                'window_size': window_size,
+                                'common_years': common_years,
+                                'amo_values': amo_smooth.sel(season_year=common_years).values,
+                                'jet_values': jet_smooth.sel(season_year=common_years).values
+                            }
+                            # --- END MODIFICATION ---
+
             if dataset_correlations:
                 correlations[dataset_key] = dataset_correlations
         return correlations
-    
-    # In die Datei lasseweis/paper1-project/paper1-project-plot/advanced_analyzer.py einfügen
 
     @staticmethod
     def analyze_all_correlations_for_bar_chart(datasets_reanalysis, jet_data_reanalysis, discharge_data, season):

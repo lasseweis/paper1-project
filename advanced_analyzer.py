@@ -11,6 +11,7 @@ import xarray as xr
 import logging
 import traceback
 import os
+import pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # Import local modules
@@ -476,3 +477,71 @@ class AdvancedAnalyzer:
             if dataset_correlations:
                 correlations[dataset_key] = dataset_correlations
         return correlations
+    
+    # In die Datei lasseweis/paper1-project/paper1-project-plot/advanced_analyzer.py einfügen
+
+    @staticmethod
+    def analyze_all_correlations_for_bar_chart(datasets_reanalysis, jet_data_reanalysis, discharge_data, season):
+        """
+        Analyzes all required correlations for the summary bar chart plot for a specific season.
+        This method gathers data, calculates correlations, and returns a structured DataFrame.
+        """
+        logging.info(f"Gathering all correlation data for summary bar chart ({season})...")
+        all_results = []
+        season_lower = season.lower()
+
+        # Defines all correlation pairs to be calculated and plotted
+        plot_configs = [
+            {'title': f'{season} Temp vs Jet Speed',       'var1_key': 'tas',          'var2_key': 'speed', 'category': 'Temperature'},
+            {'title': f'{season} Precip vs Jet Lat',       'var1_key': 'pr',           'var2_key': 'lat',   'category': 'Precipitation'},
+            {'title': f'{season} Temp vs Jet Lat',         'var1_key': 'tas',          'var2_key': 'lat',   'category': 'Temperature'},
+            {'title': f'{season} Discharge vs Jet Speed',  'var1_key': 'discharge',    'var2_key': 'speed', 'category': 'Discharge'},
+            {'title': f'{season} Extreme Flow vs Jet Speed', 'var1_key': 'extreme_flow', 'var2_key': 'speed', 'category': 'Discharge'},
+            {'title': f'{season} Precip vs Jet Speed',     'var1_key': 'pr',           'var2_key': 'speed', 'category': 'Precipitation'},
+        ]
+
+        for dataset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
+            for config in plot_configs:
+                # 1. Get the first timeseries (impact variable)
+                var1_ts = None
+                if config['var1_key'] in ['discharge', 'extreme_flow']:
+                    if discharge_data:
+                        var1_ts = discharge_data.get(f"{season_lower}_{config['var1_key']}")
+                else:  # 'pr' or 'tas'
+                    pr_tas_seasonal = datasets_reanalysis.get(f"{dataset_key}_{config['var1_key']}_box_mean")
+                    if pr_tas_seasonal is not None:
+                        var1_ts = DataProcessor.detrend_data(DataProcessor.filter_by_season(pr_tas_seasonal, season))
+
+                # 2. Get the second timeseries (jet index)
+                jet_data_key = f"{dataset_key}_{season_lower}_{config['var2_key']}_data"
+                var2_ts = jet_data_reanalysis.get(jet_data_key, {}).get('jet')
+
+                if var1_ts is None or var2_ts is None or var1_ts.size == 0 or var2_ts.size == 0:
+                    continue
+
+                # 3. Find common years and calculate correlation
+                common_years, idx1, idx2 = np.intersect1d(var1_ts.season_year.values, var2_ts.season_year.values, return_indices=True)
+                if len(common_years) < 5:
+                    continue
+
+                vals1 = var1_ts.values[idx1]
+                vals2 = var2_ts.values[idx2]
+
+                _, _, r_val, p_val, _ = StatsAnalyzer.calculate_regression(vals2, vals1) # Predictor (jet) is X, Impact is Y
+
+                if not np.isnan(r_val):
+                    # Create a descriptive label for the plot
+                    base_label = config['title'].replace(f"{season} ", "").replace("vs", "vs.").replace("Jet", "Jet Index")
+                    
+                    all_results.append({
+                        'correlation': r_val,
+                        'p_value': p_val,
+                        'base_label': base_label,
+                        'dataset': dataset_key,
+                        'category': config['category']
+                    })
+        
+        if not all_results:
+            return pd.DataFrame()
+            
+        return pd.DataFrame(all_results)

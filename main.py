@@ -307,6 +307,34 @@ class ClimateAnalysis:
                     discharge_data=discharge_data_loaded,
                     season=season
                 )
+
+                # ######################################
+                # ### START: HINZUGEFÜGTER CODEBLOCK ###
+                # ######################################
+
+                # 1. Analysiere die Korrelationen und erhalte einen DataFrame für den Bar-Chart
+                logging.info(f"\n--- Analyzing Correlations for {season} Bar Chart ---")
+                correlation_data_for_bar_chart = AdvancedAnalyzer.analyze_all_correlations_for_bar_chart(
+                    datasets_reanalysis=datasets_reanalysis,
+                    jet_data_reanalysis=jet_data_reanalysis,
+                    discharge_data=discharge_data_loaded,
+                    season=season
+                )
+
+                # 2. Erstelle den Plot, wenn die Analyse Daten geliefert hat
+                if not correlation_data_for_bar_chart.empty:
+                    logging.info(f"\n--- Plotting Correlation Bar Chart for {season} ---")
+                    Visualizer.plot_correlation_bar_chart(
+                        correlation_df=correlation_data_for_bar_chart,
+                        season=season
+                    )
+                else:
+                    logging.warning(f"No correlation data generated for {season} bar chart, skipping plot.")
+                
+                # ####################################
+                # ### ENDE: HINZUGEFÜGTER CODEBLOCK ###
+                # ####################################
+
         except Exception as e:
             logging.error(f"Fehler beim Erstellen der Korrelations-Zeitreihenplots: {e}")
             logging.error(traceback.format_exc())
@@ -384,7 +412,7 @@ class ClimateAnalysis:
                 logging.info("\nErläuterung zum Format:")
                 logging.info("  - Jede Zeile listet die Modelle auf, deren projizierte Änderung einem bestimmten Storyline-Typ entspricht.")
                 logging.info("  - Beispiel: 'Modell-XYZ_ssp585 (2040-2059)'")
-                logging.info("    - 'Modell-XYZ_ssp585': Name des Klimamodells und das verwendete Szenario.")
+                logging.info(f"    - 'Modell-XYZ_ssp585': Name des Klimamodells und das verwendete Szenario.")
                 logging.info(f"    - '(2040-2059)': Der {Config.GWL_YEARS_WINDOW}-jährige Analysezeitraum. Dieser Zeitraum ist um das Jahr zentriert, in dem das jeweilige Modell zum ersten Mal das entsprechende Global Warming Level (GWL) erreicht.")
                 logging.info("------------------------------------------")
         

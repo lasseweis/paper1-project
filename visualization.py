@@ -716,3 +716,101 @@ class Visualizer:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Korrelations-Zeitreihenplot für {season} gespeichert unter: {filename}")
+
+    @staticmethod
+    def plot_correlation_bar_chart(correlation_df, season):
+        """
+        Creates a visually improved, grouped horizontal bar chart of correlation coefficients.
+        This version addresses feedback by grouping bars by analysis type for clarity
+        and using color to distinguish datasets.
+        """
+        if correlation_df.empty:
+            logging.warning(f"Cannot plot correlation bar chart for {season}: DataFrame is empty.")
+            return
+
+        logging.info(f"Plotting improved correlation bar chart for {season}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        # --- 1. Datenvorbereitung ---
+        df = correlation_df.copy()
+        df['abs_correlation'] = df['correlation'].abs()
+        
+        # Bestimme die Reihenfolge der Gruppen auf der Y-Achse nach der mittleren Korrelationsstärke
+        group_order = df.groupby('base_label')['abs_correlation'].mean().sort_values(ascending=True).index
+        df['sort_order'] = pd.Categorical(df['base_label'], categories=group_order, ordered=True)
+        df = df.sort_values('sort_order')
+
+        unique_labels = df['base_label'].unique()
+        y_pos = np.arange(len(unique_labels)) # Position für jede Gruppe
+        bar_height = 0.35  # Höhe jedes einzelnen Balkens
+        
+        # --- 2. Plot-Setup ---
+        # Dynamische Höhe basierend auf der Anzahl der Analysen
+        fig_height = len(unique_labels) * 0.7 + 2 
+        fig, ax = plt.subplots(figsize=(12, fig_height))
+        
+        dataset_colors = {Config.DATASET_20CRV3: 'royalblue', Config.DATASET_ERA5: 'crimson'}
+
+        # --- 3. Balken und Text-Labels plotten ---
+        for i, label in enumerate(unique_labels):
+            group_data = df[df['base_label'] == label]
+
+            # Funktion zum Hinzufügen von Text-Labels
+            def add_value_label(dataset_name, y_position, color):
+                data = group_data[group_data['dataset'] == dataset_name]
+                if not data.empty:
+                    corr = data['correlation'].iloc[0]
+                    p_val = data['p_value'].iloc[0]
+                    
+                    # Balken zeichnen
+                    ax.barh(y_position, corr, height=bar_height, color=color, 
+                            edgecolor='black', linewidth=0.5, label=dataset_name)
+                    
+                    # Signifikanz-Sterne
+                    stars = ""
+                    if p_val < 0.001: stars = "***"
+                    elif p_val < 0.01: stars = "**"
+                    elif p_val < 0.05: stars = "*"
+                    
+                    # Text-Positionierung
+                    ha = 'left' if corr >= 0 else 'right'
+                    offset = 0.01
+                    x_pos = corr + offset if corr >= 0 else corr - offset
+                    
+                    ax.text(x_pos, y_position, f" {corr:.2f}{stars}", 
+                            ha=ha, va='center', fontsize=9, weight='bold', color=color)
+
+            # Balken für 20CRv3 (oben in der Gruppe)
+            add_value_label(Config.DATASET_20CRV3, y_pos[i] + bar_height / 2, dataset_colors[Config.DATASET_20CRV3])
+            
+            # Balken für ERA5 (unten in der Gruppe)
+            add_value_label(Config.DATASET_ERA5, y_pos[i] - bar_height / 2, dataset_colors[Config.DATASET_ERA5])
+
+        # --- 4. Achsen, Legende und finale Formatierung ---
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(unique_labels, fontsize=11)
+        ax.set_xlabel('Correlation Coefficient (r)', fontsize=12)
+        ax.set_title(f'{season} Correlation Analysis: 20CRv3 vs ERA5 (Detrended)', fontsize=16, weight='bold', pad=20)
+
+        # Gitternetz und Achsenlinien
+        ax.grid(axis='x', linestyle=':', alpha=0.7)
+        ax.axvline(0, color='black', linewidth=0.8)
+        
+        # X-Achsen-Limits anpassen für mehr Platz
+        current_xlim = ax.get_xlim()
+        new_lim = max(abs(l) for l in current_xlim) * 1.15
+        ax.set_xlim(-new_lim, new_lim)
+
+        # Legende erstellen (ohne Duplikate)
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax.legend(by_label.values(), by_label.keys(), loc='lower right', fontsize=10, title="Datasets", title_fontsize=11)
+        
+        # Signifikanz-Erklärung
+        plt.figtext(0.5, 0.01, "* p < 0.05, ** p < 0.01, *** p < 0.001", ha="center", fontsize=10)
+
+        plt.tight_layout(rect=[0, 0.05, 1, 0.95])
+        filename = os.path.join(Config.PLOT_DIR, f'correlation_matrix_comparison_{season.lower()}_detrended_grouped.png')
+        plt.savefig(filename, dpi=300)
+        plt.close(fig)
+        logging.info(f"Saved improved correlation bar chart for {season} to {filename}")

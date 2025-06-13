@@ -653,7 +653,7 @@ class Visualizer:
             ax.set_xlabel("Year")
             if i % 3 == 0:  # Y-Achsen-Label nur für die linke Spalte
                 ax.set_ylabel("Normalized Value (Detrended)")
-            
+
             # Iteriere durch die Datensätze (20CRv3 und ERA5)
             for dataset_key, color in [(Config.DATASET_20CRV3, 'royalblue'), (Config.DATASET_ERA5, 'crimson')]:
                 # --- Daten für Variable 1 holen ---
@@ -664,7 +664,7 @@ class Visualizer:
                         var1_ts = discharge_data.get(f"{season_lower}_{config['var1_key']}")
                 else:  # pr oder tas
                     pr_tas_seasonal = datasets_reanalysis.get(f"{dataset_key}_{config['var1_key']}_box_mean")
-                    if pr_tas_seasonal:
+                    if pr_tas_seasonal is not None:
                         var1_ts = DataProcessor.detrend_data(DataProcessor.filter_by_season(pr_tas_seasonal, season))
 
                 # --- Daten für Variable 2 (Jet Index) holen ---
@@ -679,14 +679,14 @@ class Visualizer:
                 common_years, idx1, idx2 = np.intersect1d(var1_ts.season_year.values, var2_ts.season_year.values, return_indices=True)
                 if len(common_years) < 5:
                     continue
-                
+
                 vals1 = var1_ts.values[idx1]
                 vals2 = var2_ts.values[idx2]
 
                 # --- Normalisieren und Plotten ---
                 vals1_norm = StatsAnalyzer.normalize(vals1)
                 vals2_norm = StatsAnalyzer.normalize(vals2)
-                
+
                 var1_label = config['var1_key'].replace('_', ' ').title()
                 var2_label = f"Jet {config['var2_key'].title()} Index"
 
@@ -696,8 +696,8 @@ class Visualizer:
                 # Legende dynamisch erstellen, um Duplikate zu vermeiden
                 if i == 0: # Beispielhaft Legende im ersten Plot hinzufügen
                     if dataset_key == Config.DATASET_20CRV3:
-                         ax.legend([line1, line2], [var1_label, var2_label], loc='upper left', ncol=1, fontsize=7)
-                
+                        ax.legend([line1, line2], [var1_label, var2_label], loc='upper left', ncol=1, fontsize=7)
+
                 # --- Korrelation berechnen und anzeigen ---
                 _, _, r_val, p_val, _ = StatsAnalyzer.calculate_regression(vals2, vals1) # Jet (var2) als Prädiktor (X), Impakt (var1) als Y
                 if not np.isnan(r_val):
@@ -705,7 +705,7 @@ class Visualizer:
                     if p_val < 0.01: p_str = "***"
                     elif p_val < 0.05: p_str = "**"
                     elif p_val < 0.1: p_str = "*"
-                    
+
                     text_y = 0.95 if dataset_key == Config.DATASET_20CRV3 else 0.85
                     ax.text(0.03, text_y, f"{dataset_key}: r={r_val:.2f}{p_str}", transform=ax.transAxes,
                             fontsize=9, color=color, weight='bold', bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2'))

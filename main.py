@@ -119,52 +119,44 @@ class ClimateAnalysis:
         """Process discharge data from Excel file and compute metrics."""
         logging.info(f"Processing discharge data from {file_path}...")
         try:
-            # Daten aus Excel laden
+            # Load data from Excel
             data = pd.read_excel(file_path, index_col=None, na_values=['NA'], usecols='A,B,C,H')
             df = pd.DataFrame({
                 'year': data['year'], 'month': data['month'], 'discharge': data['Wien']
             }).dropna()
 
-            # Schwellenwerte für Extremereignisse berechnen
+            # Calculate thresholds for extreme events
             high_flow_threshold = np.percentile(df['discharge'], 90)
             low_flow_threshold = np.percentile(df['discharge'], 10)
             df['extreme_flow'] = np.select(
                 [df['discharge'] > high_flow_threshold, df['discharge'] < low_flow_threshold],
                 [1, -1], default=0
             )
-            
-            # Ein Datetime-Index ist für assign_season_to_dataarray erforderlich
-            datetime_index = pd.to_datetime(df[['year', 'month']].assign(day=15))
-            df_with_time = df.set_index(datetime_index)
 
-            # Saisons zuweisen
-            da_with_seasons = DataProcessor.assign_season_to_dataarray(df_with_time.to_xarray())
-
-            # Saisonale Mittel berechnen
-            seasonal = da_with_seasons.groupby('season_key').mean(dim="time", skipna=True)
-            
-            # In einen DataFrame zurückverwandeln, um die Verarbeitung zu vereinfachen
-            seasonal_df = seasonal.to_dataframe().reset_index()
+            # A datetime index is required for assign_season_to_dataarray
+            df['time'] = pd.to_datetime(df[['year', 'month']].assign(day=15))
+            df = df.set_index('time')
 
             result = {}
-            for season in ['Winter', 'Summer']:
-                season_data = seasonal_df[seasonal_df['season_key'].str.contains(season)]
-                if season_data.empty: continue
-                
-                # Extrahiere das Jahr aus dem season_key
-                season_data['season_year'] = season_data['season_key'].str.split('-').str[0].astype(int)
-                
-                season_lower = season.lower()
-                for metric in ['discharge', 'extreme_flow']:
-                    key = f'{season_lower}_{metric}'
-                    # Erstelle ein sauberes xarray.DataArray für das Detrending
-                    data_array = xr.DataArray(
-                        data=season_data[metric].values,
-                        coords={'season_year': season_data['season_year'].values},
-                        dims='season_year', name=key
-                    ).sortby('season_year')
-                    
-                    result[key] = DataProcessor.detrend_data(data_array)
+            for metric in ['discharge', 'extreme_flow']:
+                # Create a DataArray for the current metric
+                da = df[[metric]].to_xarray()[metric]
+
+                # Assign seasons
+                da_with_seasons = DataProcessor.assign_season_to_dataarray(da)
+
+                # Calculate seasonal means
+                seasonal_means = DataProcessor.calculate_seasonal_means(da_with_seasons)
+
+                if seasonal_means is not None:
+                    for season in ['Winter', 'Summer']:
+                        season_lower = season.lower()
+                        key = f'{season_lower}_{metric}'
+
+                        # Filter by season and detrend
+                        season_data = DataProcessor.filter_by_season(seasonal_means, season)
+                        if season_data is not None:
+                            result[key] = DataProcessor.detrend_data(season_data)
             return result
         except Exception as e:
             logging.error(f"Error processing discharge data: {e}")

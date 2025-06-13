@@ -956,7 +956,7 @@ class Visualizer:
             ax_c.plot(cmip6_plot_data['DJF_JetSpeed']['mmm'].season_year, cmip6_plot_data['DJF_JetSpeed']['mmm'], color='black', linewidth=2.5, label='CMIP6 MMM')
         
         if reanalysis_plot_data['DJF_JetSpeed'].get('20CRv3') is not None:
-            reanalysis_20crv3_spd = reanalysis_plot_data['DJF_JetSpeed']['20CRV3']
+            reanalysis_20crv3_spd = reanalysis_plot_data['DJF_JetSpeed']['20CRv3']
             ax_c.plot(reanalysis_20crv3_spd.season_year, reanalysis_20crv3_spd, color='darkorange', linewidth=2, label='20CRv3')
         if reanalysis_plot_data['DJF_JetSpeed'].get('ERA5') is not None:
             reanalysis_era5_spd = reanalysis_plot_data['DJF_JetSpeed']['ERA5']

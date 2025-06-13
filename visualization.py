@@ -54,7 +54,7 @@ class Visualizer:
         vmin, vmax = (-2.0, 2.0) if variable == 'pr' else (-3.0, 3.0)
         label = f'U850 Slope (m/s per std. dev. of box {variable})'
         if std_dev_predictor is not None and not np.isnan(std_dev_predictor):
-            unit = '%' if variable == 'pr' else '°C'
+            unit = 'mm/day' if variable == 'pr' else '°C'
             label += f'\n(1 std. dev. = {std_dev_predictor:.2f} {unit})'
 
         if lons is None or lats is None or np.all(np.isnan(lons)) or np.all(np.isnan(lats)):

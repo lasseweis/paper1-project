@@ -581,3 +581,119 @@ class AdvancedAnalyzer:
             'Winter': winter_correlations,
             'Summer': summer_correlations
         }
+        
+    @staticmethod
+    def analyze_timeseries_for_projection_plot(cmip6_results, datasets_reanalysis, config):
+        """
+        Prepares CMIP6 and reanalysis data for the climate projection timeseries plot.
+
+        This method calculates anomalies relative to a pre-industrial baseline (or an
+        alternative for ERA5) and applies a rolling mean to the timeseries of
+        global temperature, JJA jet latitude, and DJF jet speed.
+
+        Args:
+            cmip6_results (dict): The output from StorylineAnalyzer.analyze_cmip6_changes_at_gwl.
+            datasets_reanalysis (dict): The dictionary containing processed reanalysis data.
+            config (Config): The configuration object.
+
+        Returns:
+            tuple: A tuple containing two dictionaries:
+                   - cmip6_plot_data (dict): Prepared CMIP6 members and MMM.
+                   - reanalysis_plot_data (dict): Prepared reanalysis data.
+        """
+        logging.info("Preparing data for climate projection timeseries plot...")
+        cmip6_plot_data = {'Global_Tas': {'members': [], 'mmm': None},
+                           'JJA_JetLat': {'members': [], 'mmm': None},
+                           'DJF_JetSpeed': {'members': [], 'mmm': None}}
+        reanalysis_plot_data = {'JJA_JetLat': {}, 'DJF_JetSpeed': {}}
+
+        rolling_window = 20
+        pi_ref_start = config.CMIP6_PRE_INDUSTRIAL_REF_START
+        pi_ref_end = config.CMIP6_PRE_INDUSTRIAL_REF_END
+
+        # Helper to calculate anomaly and smooth
+        def _get_anomaly_and_smooth(data_array, year_coord, ref_start, ref_end, window):
+            if data_array is None or data_array.size == 0:
+                return None
+            try:
+                ref_period_data = data_array.sel({year_coord: slice(ref_start, ref_end)})
+                if ref_period_data.sizes.get(year_coord, 0) == 0:
+                    logging.warning(f"No data in reference period {ref_start}-{ref_end} for {data_array.name}. Cannot calculate anomaly.")
+                    return None
+                
+                ref_mean = ref_period_data.mean(dim=year_coord, skipna=True)
+                anomaly = data_array - ref_mean
+                
+                if anomaly.sizes.get(year_coord, 0) >= window:
+                    smoothed = anomaly.rolling({year_coord: window}, center=True).mean().dropna(dim=year_coord)
+                    return smoothed
+                return anomaly # Return unsmoothed if too short
+            except Exception as e:
+                logging.error(f"Error in _get_anomaly_and_smooth for {data_array.name}: {e}")
+                return None
+
+        # --- 1. Process CMIP6 Data ---
+        if cmip6_results and 'cmip6_model_data_loaded' in cmip6_results and 'model_metric_timeseries' in cmip6_results:
+            cmip6_data = cmip6_results['cmip6_model_data_loaded']
+            cmip6_metrics = cmip6_results['model_metric_timeseries']
+
+            # Process Global Temperature for each model
+            for key, model_data in cmip6_data.items():
+                tas_regional = model_data.get('tas')
+                if tas_regional is not None:
+                    weights = np.cos(np.deg2rad(tas_regional.lat))
+                    tas_global_mean = tas_regional.weighted(weights).mean(dim=('lon', 'lat'), skipna=True)
+                    tas_annual = tas_global_mean.groupby('time.year').mean('time', skipna=True)
+                    tas_annual.name = "Global_Tas"
+                    
+                    processed_tas = _get_anomaly_and_smooth(tas_annual, 'year', pi_ref_start, pi_ref_end, rolling_window)
+                    if processed_tas is not None:
+                        cmip6_plot_data['Global_Tas']['members'].append(processed_tas)
+            
+            # Process Jet Indices for each model
+            for jet_key in ['JJA_JetLat', 'DJF_JetSpeed']:
+                for model_key, metrics in cmip6_metrics.items():
+                    jet_timeseries = metrics.get(jet_key)
+                    if jet_timeseries is not None:
+                        processed_jet = _get_anomaly_and_smooth(jet_timeseries, 'season_year', pi_ref_start, pi_ref_end, rolling_window)
+                        if processed_jet is not None:
+                            cmip6_plot_data[jet_key]['members'].append(processed_jet)
+
+            # Calculate MMM for each variable
+            for key, data in cmip6_plot_data.items():
+                if data['members']:
+                    try:
+                        # Use the appropriate time coordinate for concatenation
+                        time_coord = 'year' if key == 'Global_Tas' else 'season_year'
+                        valid_members = [m for m in data['members'] if m is not None and time_coord in m.dims]
+                        if valid_members:
+                            cmip6_plot_data[key]['mmm'] = xr.concat(valid_members, dim='member').mean('member', skipna=True)
+                    except Exception as e:
+                        logging.error(f"Failed to calculate MMM for CMIP6 {key}: {e}")
+
+        # --- 2. Process Reanalysis Data ---
+        for dset in ["20CRv3", "ERA5"]:
+            ua_seasonal = datasets_reanalysis.get(f'{dset}_ua850_seasonal')
+            if ua_seasonal is None:
+                continue
+
+            # Determine reference period for this dataset
+            if dset == "20CRv3":
+                ref_start, ref_end = pi_ref_start, pi_ref_end
+            else: # ERA5
+                min_year_era5 = ua_seasonal.season_year.min().item()
+                ref_start, ref_end = min_year_era5, min_year_era5 + 29
+            
+            # DJF Jet Speed
+            djf_ua = DataProcessor.filter_by_season(ua_seasonal, 'Winter')
+            djf_jet_speed = JetStreamAnalyzer.calculate_jet_speed_index(djf_ua)
+            djf_jet_speed.name = "DJF_JetSpeed"
+            reanalysis_plot_data['DJF_JetSpeed'][dset] = _get_anomaly_and_smooth(djf_jet_speed, 'season_year', ref_start, ref_end, rolling_window)
+
+            # JJA Jet Latitude
+            jja_ua = DataProcessor.filter_by_season(ua_seasonal, 'Summer')
+            jja_jet_lat = JetStreamAnalyzer.calculate_jet_lat_index(jja_ua)
+            jja_jet_lat.name = "JJA_JetLat"
+            reanalysis_plot_data['JJA_JetLat'][dset] = _get_anomaly_and_smooth(jja_jet_lat, 'season_year', ref_start, ref_end, rolling_window)
+            
+        return cmip6_plot_data, reanalysis_plot_data

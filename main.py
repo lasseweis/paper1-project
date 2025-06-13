@@ -10,6 +10,7 @@ $ python main.py
 """
 import logging
 import sys
+import os 
 import multiprocessing
 import traceback
 import matplotlib
@@ -208,210 +209,188 @@ class ClimateAnalysis:
 
         Visualizer.ensure_plot_dir_exists()
         cmip6_results = None
+        regression_results = {} # Wird nur gefüllt, wenn die Plots tatsächlich erstellt werden.
 
-        # --- PART 1: REANALYSIS DATA PROCESSING AND ANALYSIS ---
+        # --- PART 1: GRUNDLAGEN-BERECHNUNGEN ---
+        # Diese Basis-Daten und Jet-Indizes werden immer geladen/berechnet,
+        # da sie für potenziell mehrere, unterschiedliche Analysen benötigt werden.
         logging.info("\n--- Processing Reanalysis Datasets ---")
-        
         datasets_reanalysis = {
             **ClimateAnalysis.process_20crv3_data(),
             **ClimateAnalysis.process_era5_data()
         }
-        
         if not datasets_reanalysis:
             logging.critical("Failed to process reanalysis datasets. Aborting.")
             return None
-
-        logging.info("\n--- Calculating and Plotting Reanalysis Regression Maps ---")
-        regression_results = {}
-        regression_period = (1981, 2010) 
-
-        for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
-            logging.info(f"\n--> Processing regression analysis for {dset_key}")
-            
-            results = AdvancedAnalyzer.calculate_regression_maps(
-                datasets=datasets_reanalysis,
-                dataset_key=dset_key,
-                regression_period=regression_period
-            )
-            
-            if results:
-                regression_results[dset_key] = results
-                logging.info(f"--> Plotting regression maps for {dset_key}")
-                Visualizer.plot_regression_analysis(results, dset_key)
-            else:
-                logging.warning(f"Could not calculate or plot regression for {dset_key}. Results were empty.")
         
-        logging.info("\n\n--- Analyzing Jet Impacts and Correlations for Reanalysis Data ---")
-        
+        discharge_data_loaded = ClimateAnalysis.process_discharge_data(Config.DISCHARGE_FILE)
+        amo_data_loaded = ClimateAnalysis.load_amo_index(Config.AMO_INDEX_FILE)
+
+        logging.info("\n--- Calculating Base Reanalysis Jet Indices ---")
         jet_data_reanalysis = {}
         for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
             ua850_seasonal = datasets_reanalysis[f'{dset_key}_ua850_seasonal']
             for season in ['Winter', 'Summer']:
-                 ua_season = DataProcessor.filter_by_season(ua850_seasonal, season)
-                 season_lower = season.lower()
-                 
-                 jet_speed = JetStreamAnalyzer.calculate_jet_speed_index(ua_season)
-                 if jet_speed is not None:
-                     jet_data_reanalysis[f'{dset_key}_{season_lower}_speed_data'] = {'jet': DataProcessor.detrend_data(jet_speed)}
+                ua_season = DataProcessor.filter_by_season(ua850_seasonal, season)
+                season_lower = season.lower()
+                jet_speed = JetStreamAnalyzer.calculate_jet_speed_index(ua_season)
+                if jet_speed is not None:
+                    jet_data_reanalysis[f'{dset_key}_{season_lower}_speed_data'] = {'jet': DataProcessor.detrend_data(jet_speed)}
+                jet_lat = JetStreamAnalyzer.calculate_jet_lat_index(ua_season)
+                if jet_lat is not None:
+                    jet_data_reanalysis[f'{dset_key}_{season_lower}_lat_data'] = {'jet': DataProcessor.detrend_data(jet_lat)}
 
-                 jet_lat = JetStreamAnalyzer.calculate_jet_lat_index(ua_season)
-                 if jet_lat is not None:
-                     jet_data_reanalysis[f'{dset_key}_{season_lower}_lat_data'] = {'jet': DataProcessor.detrend_data(jet_lat)}
+        # --- AB HIER: PLOT-SPEZIFISCHE BERECHNUNG UND ERSTELLUNG (PRÜFUNG ZUERST) ---
 
-        # --- Plot der Jet-Index-Zeitreihen ---
-        logging.info("\n\n--- Plotting Reanalysis Jet Index Comparison Timeseries ---")
-        if jet_data_reanalysis:
-            Visualizer.plot_jet_indices_comparison(jet_data_reanalysis)
-        else:
-            logging.warning("Skipping jet index comparison plot, no data was generated.")
-
-        # --- Berechnung der Jet-Impact-Karten ---
-        logging.info("\n\n--- Calculating Reanalysis Jet Impact Maps ---")
-        jet_impact_all_results = {}
+        logging.info("\n--- Checking for Reanalysis Regression Maps ---")
+        regression_period = (1981, 2010)
         for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
-            logging.info(f"\n--> Calculating jet impact maps for {dset_key}")
-            
-            dset_results = {}
-            for season in ['Winter', 'Summer']:
-                impact_maps = AdvancedAnalyzer.calculate_jet_impact_maps(
+            regression_plot_filename = os.path.join(Config.PLOT_DIR, f'regression_maps_norm_{dset_key}.png')
+            if not os.path.exists(regression_plot_filename):
+                logging.info(f"Plot '{regression_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
+                # BERECHNUNG JETZT INNERHALB DER IF-BEDINGUNG
+                results = AdvancedAnalyzer.calculate_regression_maps(
                     datasets=datasets_reanalysis,
-                    jet_data=jet_data_reanalysis,
                     dataset_key=dset_key,
-                    season=season
+                    regression_period=regression_period
                 )
-                if impact_maps:
-                    dset_results.update(impact_maps)
-                    
-            if dset_results:
-                jet_impact_all_results[dset_key] = dset_results
+                if results:
+                    regression_results[dset_key] = results
+                    Visualizer.plot_regression_analysis(results, dset_key)
+                else:
+                    logging.warning(f"Konnte Regression für {dset_key} nicht berechnen.")
             else:
-                logging.warning(f"Could not calculate jet impact maps for {dset_key}.")
-
-        # --- Plot der Jet-Impact-Vergleichskarten ---
-        logging.info("\n\n--- Plotting Reanalysis Jet Impact Comparison Maps ---")
-        for season in ['Winter', 'Summer']:
-            data_20crv3 = jet_impact_all_results.get(Config.DATASET_20CRV3, {}).get(season)
-            data_era5 = jet_impact_all_results.get(Config.DATASET_ERA5, {}).get(season)
-            
-            if data_20crv3 and data_era5:
-                logging.info(f"--> Plotting combined jet impact maps for {season}")
-                Visualizer.plot_jet_impact_comparison_maps(data_20crv3, data_era5, season)
-            else:
-                logging.warning(f"Skipping combined jet impact plot for {season}, data missing for one or both reanalyses.")
-
-        # --- Berechnung und Plot der Jet-Korrelationskarten (räumlich) ---
-        logging.info("\n\n--- Calculating and Plotting Reanalysis Jet Correlation Maps ---")
-        jet_corr_results = {}
-        for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
-            jet_corr_results[dset_key] = {}
-            for season in ['Winter', 'Summer']:
-                logging.info(f"--> Calculating jet correlation maps for {dset_key} ({season})")
-                season_results = AdvancedAnalyzer.calculate_jet_correlation_maps(
-                    datasets=datasets_reanalysis,
-                    jet_data=jet_data_reanalysis,
-                    dataset_key=dset_key,
-                    season=season
-                )
-                if season_results:
-                    jet_corr_results[dset_key][season] = season_results
+                logging.info(f"Plot '{regression_plot_filename}' existiert bereits. Überspringe Berechnung und Erstellung.")
         
-        for season in ['Winter', 'Summer']:
-            data_20crv3 = jet_corr_results.get(Config.DATASET_20CRV3, {}).get(season)
-            data_era5 = jet_corr_results.get(Config.DATASET_ERA5, {}).get(season)
-            if data_20crv3 and data_era5:
-                logging.info(f"--> Plotting jet correlation maps for {season}")
-                Visualizer.plot_jet_correlation_maps(data_20crv3, data_era5, season)
+        logging.info("\n\n--- Checking for Reanalysis Jet Index Comparison Timeseries ---")
+        jet_indices_plot_filename = os.path.join(Config.PLOT_DIR, "jet_indices_comparison_seasonal_detrended.png")
+        if not os.path.exists(jet_indices_plot_filename):
+            if jet_data_reanalysis:
+                logging.info(f"Plot '{jet_indices_plot_filename}' nicht gefunden, wird erstellt...")
+                Visualizer.plot_jet_indices_comparison(jet_data_reanalysis)
             else:
-                logging.warning(f"Skipping jet correlation plot for {season}, data missing for one or both reanalyses.")
+                logging.warning("Skipping jet index comparison plot, no data was generated.")
+        else:
+            logging.info(f"Plot '{jet_indices_plot_filename}' existiert bereits. Überspringe Erstellung.")
 
-        # --- Aufruf für die Zeitreihen-Korrelationsplots, die die angehängten Bilder erzeugen ---
-        logging.info("\n\n--- Plotting Reanalysis Correlation Timeseries Comparison ---")
-        try:
-            # Lade die Abflussdaten einmal, da sie für beide Saisons benötigt werden.
-            # Die Methode muss in der ClimateAnalysis-Klasse existieren.
-            discharge_data_loaded = ClimateAnalysis.process_discharge_data(Config.DISCHARGE_FILE)
-            for season in ['Winter', 'Summer']:
-                Visualizer.plot_correlation_timeseries_comparison(
-                    datasets_reanalysis=datasets_reanalysis,
-                    jet_data_reanalysis=jet_data_reanalysis,
-                    discharge_data=discharge_data_loaded,
-                    season=season
-                )
+        logging.info("\n\n--- Checking for Reanalysis Jet Impact Comparison Maps ---")
+        for season in ['Winter', 'Summer']:
+            jet_impact_plot_filename = os.path.join(Config.PLOT_DIR, f'jet_impact_regression_maps_{season.lower()}.png')
+            if not os.path.exists(jet_impact_plot_filename):
+                logging.info(f"Plot '{jet_impact_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
+                # BERECHNUNG JETZT INNERHALB DER IF-BEDINGUNG
+                impact_20crv3 = AdvancedAnalyzer.calculate_jet_impact_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_20CRV3, season)
+                impact_era5 = AdvancedAnalyzer.calculate_jet_impact_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_ERA5, season)
 
-                # ######################################
-                # ### START: HINZUGEFÜGTER CODEBLOCK ###
-                # ######################################
+                data_20crv3 = impact_20crv3.get(season)
+                data_era5 = impact_era5.get(season)
+                
+                if data_20crv3 and data_era5:
+                    Visualizer.plot_jet_impact_comparison_maps(data_20crv3, data_era5, season)
+                else:
+                    logging.warning(f"Skipping combined jet impact plot for {season}, data missing for one or both reanalyses.")
+            else:
+                logging.info(f"Plot '{jet_impact_plot_filename}' existiert bereits. Überspringe Berechnung und Erstellung.")
 
-                # 1. Analysiere die Korrelationen und erhalte einen DataFrame für den Bar-Chart
-                logging.info(f"\n--- Analyzing Correlations for {season} Bar Chart ---")
+        logging.info("\n\n--- Checking for Reanalysis Jet Correlation Maps ---")
+        for season in ['Winter', 'Summer']:
+            jet_corr_plot_filename = os.path.join(Config.PLOT_DIR, f'jet_correlation_maps_{season.lower()}.png')
+            if not os.path.exists(jet_corr_plot_filename):
+                logging.info(f"Plot '{jet_corr_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
+                # BERECHNUNG JETZT INNERHALB DER IF-BEDINGUNG
+                corr_20crv3 = AdvancedAnalyzer.calculate_jet_correlation_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_20CRV3, season)
+                corr_era5 = AdvancedAnalyzer.calculate_jet_correlation_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_ERA5, season)
+
+                if corr_20crv3 and corr_era5:
+                    Visualizer.plot_jet_correlation_maps(corr_20crv3, corr_era5, season)
+                else:
+                    logging.warning(f"Skipping jet correlation plot for {season}, data missing for one or both reanalyses.")
+            else:
+                logging.info(f"Plot '{jet_corr_plot_filename}' existiert bereits. Überspringe Berechnung und Erstellung.")
+
+        logging.info("\n\n--- Checking for Correlation Timeseries & Bar Charts ---")
+        for season in ['Winter', 'Summer']:
+            season_lower = season.lower()
+            
+            corr_timeseries_filename = os.path.join(Config.PLOT_DIR, f'{season_lower}_correlations_comparison_detrended.png')
+            if not os.path.exists(corr_timeseries_filename):
+                logging.info(f"Plot '{corr_timeseries_filename}' nicht gefunden, wird erstellt...")
+                Visualizer.plot_correlation_timeseries_comparison(datasets_reanalysis, jet_data_reanalysis, discharge_data_loaded, season)
+            else:
+                logging.info(f"Plot '{corr_timeseries_filename}' existiert bereits. Überspringe Erstellung.")
+
+            corr_barchart_filename = os.path.join(Config.PLOT_DIR, f'correlation_matrix_comparison_{season_lower}_detrended_grouped.png')
+            if not os.path.exists(corr_barchart_filename):
+                logging.info(f"Plot '{corr_barchart_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
+                # BERECHNUNG JETZT INNERHALB DER IF-BEDINGUNG
                 correlation_data_for_bar_chart = AdvancedAnalyzer.analyze_all_correlations_for_bar_chart(
-                    datasets_reanalysis=datasets_reanalysis,
-                    jet_data_reanalysis=jet_data_reanalysis,
-                    discharge_data=discharge_data_loaded,
-                    season=season
+                    datasets_reanalysis, jet_data_reanalysis, discharge_data_loaded, season
                 )
-
-                # 2. Erstelle den Plot, wenn die Analyse Daten geliefert hat
                 if not correlation_data_for_bar_chart.empty:
-                    logging.info(f"\n--- Plotting Correlation Bar Chart for {season} ---")
-                    Visualizer.plot_correlation_bar_chart(
-                        correlation_df=correlation_data_for_bar_chart,
-                        season=season
-                    )
+                    Visualizer.plot_correlation_bar_chart(correlation_data_for_bar_chart, season)
                 else:
                     logging.warning(f"No correlation data generated for {season} bar chart, skipping plot.")
-                
-                # ####################################
-                # ### ENDE: HINZUGEFÜGTER CODEBLOCK ###
-                # ####################################
+            else:
+                logging.info(f"Plot '{corr_barchart_filename}' existiert bereits. Überspringe Berechnung und Erstellung.")
 
-        except Exception as e:
-            logging.error(f"Fehler beim Erstellen der Korrelations-Zeitreihenplots: {e}")
-            logging.error(traceback.format_exc())
-
-        # --- Analyzing and Plotting AMO-Jet Correlations ---
-        logging.info("\n\n--- Analyzing and Plotting AMO-Jet Correlations ---")
-        try:
-            # Load the AMO data using the new method
-            amo_data_loaded = ClimateAnalysis.load_amo_index(Config.AMO_INDEX_FILE)
+        logging.info("\n\n--- Checking for AMO-Jet Correlation Plot ---")
+        window_size_amo = 15
+        amo_plot_filename = os.path.join(Config.PLOT_DIR, f'amo_jet_correlations_comparison_rolling_{window_size_amo}yr.png')
+        if not os.path.exists(amo_plot_filename):
+            logging.info(f"Plot '{amo_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
             if amo_data_loaded:
-                # 1. Analyze correlations for Winter and Summer using the new wrapper
-                amo_correlation_data = AdvancedAnalyzer.analyze_amo_jet_correlations_for_plot(
-                    jet_data=jet_data_reanalysis,
-                    amo_data=amo_data_loaded,
-                    window_size=15  # As in the original plot
-                )
-                
-                # 2. Plot the 2x2 comparison figure using the new visualization function
+                # BERECHNUNG JETZT INNERHALB DER IF-BEDINGUNG
+                amo_correlation_data = AdvancedAnalyzer.analyze_amo_jet_correlations_for_plot(jet_data_reanalysis, amo_data_loaded, window_size_amo)
                 if amo_correlation_data and any(amo_correlation_data.values()):
-                    Visualizer.plot_amo_jet_correlation_comparison(
-                        correlation_data=amo_correlation_data,
-                        window_size=15
-                    )
+                    Visualizer.plot_amo_jet_correlation_comparison(amo_correlation_data, window_size_amo)
                 else:
                     logging.warning("No AMO correlation data was generated, skipping the comparison plot.")
             else:
                 logging.warning("AMO data could not be loaded, skipping AMO-Jet correlation analysis and plotting.")
-        except Exception as e:
-            logging.error(f"An error occurred during the AMO-Jet correlation analysis and plotting step: {e}")
-            logging.error(traceback.format_exc())
-
+        else:
+            logging.info(f"Plot '{amo_plot_filename}' existiert bereits. Überspringe Berechnung und Erstellung.")
 
         # --- PART 2: CMIP6 AND STORYLINE ANALYSIS ---
+        # Diese Haupt-Analyse wird immer ausgeführt, da ihre Ergebnisse (cmip6_results) 
+        # für mehrere nachfolgende Plots und Auswertungen benötigt werden.
         logging.info("\n\n--- Analyzing CMIP6 Data and Storylines ---")
         try:
             storyline_analyzer = StorylineAnalyzer(config=Config)
             cmip6_results = storyline_analyzer.analyze_cmip6_changes_at_gwl()
             
             if cmip6_results:
-                logging.info("--> Plotting CMIP6 jet changes vs. Global Warming Level...")
-                Visualizer.plot_jet_changes_vs_gwl(cmip6_results)
+                gwl_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_changes_vs_gwl.png")
+                if not os.path.exists(gwl_plot_filename):
+                    logging.info(f"Plot '{gwl_plot_filename}' nicht gefunden, wird erstellt...")
+                    Visualizer.plot_jet_changes_vs_gwl(cmip6_results)
+                else:
+                    logging.info(f"Plot '{gwl_plot_filename}' existiert bereits. Überspringe Erstellung.")
             else:
                 logging.warning("CMIP6 analysis did not produce results. Skipping subsequent plots.")
-                
         except Exception as e:
             logging.error(f"A critical error occurred during the CMIP6/Storyline analysis phase: {e}")
             logging.error(traceback.format_exc())
+            
+        # --- PART 3: CLIMATE EVOLUTION TIMESERIES PLOT ---
+        logging.info("\n\n--- Checking for Climate Indices Evolution Timeseries ---")
+        evolution_plot_filename = os.path.join(Config.PLOT_DIR, "climate_indices_evolution.png")
+        if not os.path.exists(evolution_plot_filename):
+            logging.info(f"Plot '{evolution_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
+            if cmip6_results and datasets_reanalysis:
+                # BERECHNUNG JETZT INNERHALB DER IF-BEDINGUNG
+                cmip6_plot_data, reanalysis_plot_data = AdvancedAnalyzer.analyze_timeseries_for_projection_plot(
+                    cmip6_results, datasets_reanalysis, Config()
+                )
+                if cmip6_plot_data and reanalysis_plot_data:
+                    Visualizer.plot_climate_projection_timeseries(
+                        cmip6_plot_data, reanalysis_plot_data, Config(), filename=os.path.basename(evolution_plot_filename)
+                    )
+                else:
+                    logging.warning("Skipping climate evolution plot: Data preparation returned empty or None.")
+            else:
+                logging.warning("Skipping climate evolution plot: Missing CMIP6 results or reanalysis data.")
+        else:
+            logging.info(f"Plot '{evolution_plot_filename}' existiert bereits. Überspringe Berechnung und Erstellung.")
 
         # --- FINALE ZUSAMMENFASSUNGEN ---
         if cmip6_results:
@@ -464,7 +443,6 @@ class ClimateAnalysis:
                             else:
                                 logging.info(f"    - {storyline_type}: No models in range.")
                 
-                # *** HINZUGEFÜGTE ERLÄUTERUNG ***
                 logging.info("\n------------------------------------------")
                 logging.info("\nErläuterung zum Format:")
                 logging.info("  - Jede Zeile listet die Modelle auf, deren projizierte Änderung einem bestimmten Storyline-Typ entspricht.")

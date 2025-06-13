@@ -903,3 +903,79 @@ class Visualizer:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved AMO vs Jet correlation comparison plot to {filename}")
+        
+    @staticmethod
+    def plot_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, config, filename="climate_indices_evolution.png"):
+        """
+        Plots CMIP6 and Reanalysis changes over time, showing the evolution of key climate indices.
+        This plot is inspired by Harvey et al. (2023), Fig. 6.
+        """
+        filename = "climate_indices_evolution.png"
+        logging.info(f"Plotting climate projection timeseries comparison to {filename}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        fig, axs = plt.subplots(1, 3, figsize=(21, 6), sharex=True)
+        
+        # --- (a) Global Temperature Anomaly ---
+        ax_a = axs[0]
+        if cmip6_plot_data['Global_Tas']['members']:
+            for member_tas in cmip6_plot_data['Global_Tas']['members']:
+                ax_a.plot(member_tas.year, member_tas, color='grey', alpha=0.3, linewidth=0.7)
+        if cmip6_plot_data['Global_Tas']['mmm'] is not None:
+            ax_a.plot(cmip6_plot_data['Global_Tas']['mmm'].year, cmip6_plot_data['Global_Tas']['mmm'], color='black', linewidth=2.5, label='CMIP6 MMM')
+        
+        ax_a.set_title('(a) Global Temperature Change', fontsize=12)
+        ax_a.set_ylabel(f'Temperature Anomaly (°C relative to {config.CMIP6_PRE_INDUSTRIAL_REF_START}-{config.CMIP6_PRE_INDUSTRIAL_REF_END})', fontsize=10)
+        ax_a.legend(fontsize=9)
+
+        # --- (b) Summer Jet Latitude Anomaly ---
+        ax_b = axs[1]
+        if cmip6_plot_data['JJA_JetLat']['members']:
+            for member_lat in cmip6_plot_data['JJA_JetLat']['members']:
+                ax_b.plot(member_lat.season_year, member_lat, color='grey', alpha=0.3, linewidth=0.7)
+        if cmip6_plot_data['JJA_JetLat']['mmm'] is not None:
+            ax_b.plot(cmip6_plot_data['JJA_JetLat']['mmm'].season_year, cmip6_plot_data['JJA_JetLat']['mmm'], color='black', linewidth=2.5, label='CMIP6 MMM')
+        
+        if reanalysis_plot_data['JJA_JetLat'].get('20CRv3') is not None:
+            reanalysis_20crv3_lat = reanalysis_plot_data['JJA_JetLat']['20CRv3']
+            ax_b.plot(reanalysis_20crv3_lat.season_year, reanalysis_20crv3_lat, color='darkorange', linewidth=2, label='20CRv3')
+        if reanalysis_plot_data['JJA_JetLat'].get('ERA5') is not None:
+            reanalysis_era5_lat = reanalysis_plot_data['JJA_JetLat']['ERA5']
+            ax_b.plot(reanalysis_era5_lat.season_year, reanalysis_era5_lat, color='purple', linewidth=2, label='ERA5')
+
+        ax_b.set_title('(b) Summer (JJA) Jet Latitude Change', fontsize=12)
+        ax_b.set_ylabel('Latitude Anomaly (°)', fontsize=10)
+        ax_b.legend(fontsize=9)
+        
+        # --- (c) Winter Jet Speed Anomaly ---
+        ax_c = axs[2]
+        if cmip6_plot_data['DJF_JetSpeed']['members']:
+            for member_spd in cmip6_plot_data['DJF_JetSpeed']['members']:
+                ax_c.plot(member_spd.season_year, member_spd, color='grey', alpha=0.3, linewidth=0.7)
+        if cmip6_plot_data['DJF_JetSpeed']['mmm'] is not None:
+            ax_c.plot(cmip6_plot_data['DJF_JetSpeed']['mmm'].season_year, cmip6_plot_data['DJF_JetSpeed']['mmm'], color='black', linewidth=2.5, label='CMIP6 MMM')
+        
+        if reanalysis_plot_data['DJF_JetSpeed'].get('20CRv3') is not None:
+            reanalysis_20crv3_spd = reanalysis_plot_data['DJF_JetSpeed']['20CRV3']
+            ax_c.plot(reanalysis_20crv3_spd.season_year, reanalysis_20crv3_spd, color='darkorange', linewidth=2, label='20CRv3')
+        if reanalysis_plot_data['DJF_JetSpeed'].get('ERA5') is not None:
+            reanalysis_era5_spd = reanalysis_plot_data['DJF_JetSpeed']['ERA5']
+            ax_c.plot(reanalysis_era5_spd.season_year, reanalysis_era5_spd, color='purple', linewidth=2, label='ERA5')
+
+        ax_c.set_title('(c) Winter (DJF) Jet Speed Change', fontsize=12)
+        ax_c.set_ylabel('Speed Anomaly (m/s)', fontsize=10)
+        ax_c.legend(fontsize=9)
+
+        # --- Final formatting for all axes ---
+        for ax in axs:
+            ax.grid(True, linestyle=':', alpha=0.7)
+            ax.set_xlabel('Year', fontsize=10)
+            ax.set_xlim(1850, 2100)
+            ax.axhline(0, color='black', linewidth=0.5)
+
+        fig.suptitle('Evolution of Key Climate Indices (20-Year Rolling Mean Anomaly)', fontsize=16, weight='bold')
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        filepath = os.path.join(config.PLOT_DIR, filename)
+        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved climate projection timeseries plot to {filepath}")

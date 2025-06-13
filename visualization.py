@@ -814,3 +814,92 @@ class Visualizer:
         plt.savefig(filename, dpi=300)
         plt.close(fig)
         logging.info(f"Saved improved correlation bar chart for {season} to {filename}")
+
+    @staticmethod
+    def plot_amo_jet_correlation_comparison(correlation_data, window_size=15):
+        """
+        Creates a 2x2 comparison plot of AMO vs Jet Indices for Winter and Summer.
+        """
+        logging.info(f"Plotting 2x2 AMO-Jet correlation comparison ({window_size}-yr rolling mean)...")
+        Visualizer.ensure_plot_dir_exists()
+
+        if not correlation_data or not any(correlation_data.values()):
+            logging.warning("Cannot plot AMO-Jet comparison: correlation_data is empty.")
+            return
+
+        fig, axs = plt.subplots(2, 2, figsize=(18, 10), sharex=True, sharey=True)
+        axs = axs.flatten()
+        
+        plot_configs = [
+            {'ax_idx': 0, 'season': 'Winter', 'jet_type': 'speed', 'title': 'AMO vs Jet Speed Index (Winter)'},
+            {'ax_idx': 1, 'season': 'Winter', 'jet_type': 'lat', 'title': 'AMO vs Jet Latitude Index (Winter)'},
+            {'ax_idx': 2, 'season': 'Summer', 'jet_type': 'speed', 'title': 'AMO vs Jet Speed Index (Summer)'},
+            {'ax_idx': 3, 'season': 'Summer', 'jet_type': 'lat', 'title': 'AMO vs Jet Latitude Index (Summer)'},
+        ]
+
+        colors = {Config.DATASET_20CRV3: 'royalblue', Config.DATASET_ERA5: 'crimson', 'AMO': 'black'}
+        # Map keys from our plot config to the keys in the data dictionary
+        jet_type_map = {'speed': 'speed', 'lat': 'latitude'}
+
+        for config in plot_configs:
+            ax = axs[config['ax_idx']]
+            season_data = correlation_data.get(config['season'])
+            
+            ax.set_title(f"{config['title']}, {window_size}-yr mean")
+            ax.grid(True, linestyle=':', alpha=0.6)
+
+            if not season_data:
+                ax.text(0.5, 0.5, "Data Not Available", transform=ax.transAxes, ha='center', va='center')
+                continue
+
+            plotted_amo = False
+            for dataset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
+                # The data structure from analyze_amo_jet_correlations is {'20CRv3': {'speed': {...}, 'latitude': {...}}}
+                jet_data = season_data.get(dataset_key, {}).get(jet_type_map[config['jet_type']])
+                
+                if jet_data and 'amo_values' in jet_data and 'jet_values' in jet_data:
+                    # Normalize data for consistent plotting scale
+                    amo_norm = StatsAnalyzer.normalize(jet_data['amo_values'])
+                    jet_norm = StatsAnalyzer.normalize(jet_data['jet_values'])
+                    years = jet_data['common_years']
+
+                    # Plot AMO series (only once per subplot)
+                    if not plotted_amo:
+                        ax.plot(years, amo_norm, '-', color=colors['AMO'], linewidth=1.5, label=f'AMO ({window_size}yr)')
+                        plotted_amo = True
+
+                    # Plot jet series
+                    label = f"{dataset_key} Jet {config['jet_type'].capitalize()} ({window_size}yr)"
+                    ax.plot(years, jet_norm, '--', color=colors[dataset_key], linewidth=2.0, label=label)
+
+                    # Add correlation text
+                    r_val, p_val = jet_data.get('r_value'), jet_data.get('p_value')
+                    if r_val is not None:
+                        stars = ""
+                        if p_val is not None:
+                            if p_val < 0.01: stars = "***"
+                            elif p_val < 0.05: stars = "**"
+                            elif p_val < 0.1: stars = "*"
+                        
+                        text_y = 0.95 if dataset_key == Config.DATASET_20CRV3 else 0.85
+                        ax.text(0.03, text_y, f"{dataset_key}: r={r_val:.2f}{stars}",
+                                transform=ax.transAxes, fontsize=10, color=colors[dataset_key],
+                                weight='bold', bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2'))
+
+            # Set labels and legends
+            if config['ax_idx'] in [0, 2]:
+                ax.set_ylabel("Normalized Value (Smoothed, Detrended)")
+            if config['ax_idx'] in [2, 3]:
+                ax.set_xlabel("Year")
+            
+            handles, labels = ax.get_legend_handles_labels()
+            if handles:
+                by_label = dict(zip(labels, handles))
+                ax.legend(by_label.values(), by_label.keys(), loc='lower left', fontsize=8)
+
+        fig.suptitle('Relationship Between AMO Index and Jet Stream Indices (Detrended)', fontsize=16, weight='bold')
+        plt.tight_layout(rect=[0, 0.03, 1, 0.96])
+        filename = os.path.join(Config.PLOT_DIR, f'amo_jet_correlations_comparison_rolling_{window_size}yr.png')
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved AMO vs Jet correlation comparison plot to {filename}")

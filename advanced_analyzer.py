@@ -545,3 +545,25 @@ class AdvancedAnalyzer:
             return pd.DataFrame()
             
         return pd.DataFrame(all_results)
+
+    @staticmethod
+    def analyze_amo_jet_correlations_for_plot(jet_data, amo_data, window_size=15):
+        """
+        Analyzes AMO-Jet correlations for both Winter and Summer and returns a
+        dictionary structured for the comparison plot.
+        """
+        logging.info(f"Analyzing AMO-Jet correlations for Winter and Summer for plotting...")
+        
+        winter_correlations = AdvancedAnalyzer.analyze_amo_jet_correlations(
+            jet_data=jet_data, amo_data=amo_data, season='Winter', window_size=window_size
+        )
+        
+        summer_correlations = AdvancedAnalyzer.analyze_amo_jet_correlations(
+            jet_data=jet_data, amo_data=amo_data, season='Summer', window_size=window_size
+        )
+        
+        # This structure matches what the new plotting function expects
+        return {
+            'Winter': winter_correlations,
+            'Summer': summer_correlations
+        }

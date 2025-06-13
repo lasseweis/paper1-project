@@ -35,11 +35,11 @@ class StatsAnalyzer:
         # For xarray DataArray
         if isinstance(series, xr.DataArray):
             # Use xarray's built-in rolling method, which is more efficient and robust.
-            # It handles NaNs correctly with skipna=True by default in the .mean() step.
             if series.size >= window:
+                # KORREKTUR: Die Dimension und Fenstergröße müssen als Dictionary übergeben werden.
+                dim_name = next(iter(series.dims))
                 smoothed_series = series.rolling(
-                    dim=next(iter(series.dims)), # Assumes the first dimension is the time-like one
-                    window=window,
+                    {dim_name: window},
                     center=True
                 ).mean()
                 # Preserve attributes

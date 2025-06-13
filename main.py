@@ -162,12 +162,42 @@ class ClimateAnalysis:
             logging.error(f"Error processing discharge data: {e}")
             logging.error(traceback.format_exc())
             return {}
-            
+
     @staticmethod
     def load_amo_index(file_path):
         """Loads and processes the AMO index from a CSV file for winter and summer."""
-        # This is a simplified placeholder. The full logic from your original script would be here.
-        pass
+        logging.info(f"Loading and processing AMO index from {file_path}...")
+        try:
+            amo_df = pd.read_csv(file_path, sep=",", header=0)
+            amo_df.replace(-999, np.nan, inplace=True)
+            amo_long = amo_df.melt(id_vars="Year", var_name="Month", value_name="AMO")
+            month_mapping = {"Jan":1, "Feb":2, "Mar":3, "Apr":4, "May":5, "Jun":6,
+                             "Jul":7, "Aug":8, "Sep":9, "Oct":10, "Nov":11, "Dec":12}
+            amo_long["Month"] = amo_long["Month"].map(month_mapping)
+            
+            # Use a datetime index to leverage the robust DataProcessor methods
+            amo_long['time'] = pd.to_datetime(dict(year=amo_long['Year'], month=amo_long['Month'], day=15))
+            da = amo_long.set_index('time')[['AMO']].to_xarray()['AMO'].dropna(dim='time')
+
+            da_with_seasons = DataProcessor.assign_season_to_dataarray(da)
+            seasonal_means = DataProcessor.calculate_seasonal_means(da_with_seasons)
+
+            result = {}
+            if seasonal_means is not None:
+                for season in ['Winter', 'Summer']:
+                    season_lower = season.lower()
+                    season_data = DataProcessor.filter_by_season(seasonal_means, season)
+                    if season_data is not None:
+                        result[f'amo_{season_lower}'] = season_data
+                        result[f'amo_{season_lower}_detrended'] = DataProcessor.detrend_data(season_data)
+            
+            logging.info("AMO index processing finished successfully.")
+            return result
+
+        except Exception as e:
+            logging.error(f"Error processing AMO index file: {e}")
+            logging.error(traceback.format_exc())
+            return {}
 
     @staticmethod
     def run_full_analysis():
@@ -337,6 +367,33 @@ class ClimateAnalysis:
 
         except Exception as e:
             logging.error(f"Fehler beim Erstellen der Korrelations-Zeitreihenplots: {e}")
+            logging.error(traceback.format_exc())
+
+        # --- Analyzing and Plotting AMO-Jet Correlations ---
+        logging.info("\n\n--- Analyzing and Plotting AMO-Jet Correlations ---")
+        try:
+            # Load the AMO data using the new method
+            amo_data_loaded = ClimateAnalysis.load_amo_index(Config.AMO_INDEX_FILE)
+            if amo_data_loaded:
+                # 1. Analyze correlations for Winter and Summer using the new wrapper
+                amo_correlation_data = AdvancedAnalyzer.analyze_amo_jet_correlations_for_plot(
+                    jet_data=jet_data_reanalysis,
+                    amo_data=amo_data_loaded,
+                    window_size=15  # As in the original plot
+                )
+                
+                # 2. Plot the 2x2 comparison figure using the new visualization function
+                if amo_correlation_data and any(amo_correlation_data.values()):
+                    Visualizer.plot_amo_jet_correlation_comparison(
+                        correlation_data=amo_correlation_data,
+                        window_size=15
+                    )
+                else:
+                    logging.warning("No AMO correlation data was generated, skipping the comparison plot.")
+            else:
+                logging.warning("AMO data could not be loaded, skipping AMO-Jet correlation analysis and plotting.")
+        except Exception as e:
+            logging.error(f"An error occurred during the AMO-Jet correlation analysis and plotting step: {e}")
             logging.error(traceback.format_exc())
 
 

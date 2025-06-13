@@ -13,6 +13,9 @@ import sys
 import multiprocessing
 import traceback
 import matplotlib
+import pandas as pd
+import numpy as np
+import array as xr 
 from functools import lru_cache
 
 # Set the backend for matplotlib to 'Agg' to prevent it from trying to open a GUI.
@@ -110,6 +113,63 @@ class ClimateAnalysis:
         except Exception as e:
             logging.error(f"Error in process_era5_data: {e}")
             return {}
+        
+    @staticmethod
+    def process_discharge_data(file_path):
+        """Process discharge data from Excel file and compute metrics."""
+        logging.info(f"Processing discharge data from {file_path}...")
+        try:
+            # Daten aus Excel laden
+            data = pd.read_excel(file_path, index_col=None, na_values=['NA'], usecols='A,B,C,H')
+            df = pd.DataFrame({
+                'year': data['year'], 'month': data['month'], 'discharge': data['Wien']
+            }).dropna()
+
+            # Schwellenwerte für Extremereignisse berechnen
+            high_flow_threshold = np.percentile(df['discharge'], 90)
+            low_flow_threshold = np.percentile(df['discharge'], 10)
+            df['extreme_flow'] = np.select(
+                [df['discharge'] > high_flow_threshold, df['discharge'] < low_flow_threshold],
+                [1, -1], default=0
+            )
+            
+            # Ein Datetime-Index ist für assign_season_to_dataarray erforderlich
+            datetime_index = pd.to_datetime(df[['year', 'month']].assign(day=15))
+            df_with_time = df.set_index(datetime_index)
+
+            # Saisons zuweisen
+            da_with_seasons = DataProcessor.assign_season_to_dataarray(df_with_time.to_xarray())
+
+            # Saisonale Mittel berechnen
+            seasonal = da_with_seasons.groupby('season_key').mean(dim="time", skipna=True)
+            
+            # In einen DataFrame zurückverwandeln, um die Verarbeitung zu vereinfachen
+            seasonal_df = seasonal.to_dataframe().reset_index()
+
+            result = {}
+            for season in ['Winter', 'Summer']:
+                season_data = seasonal_df[seasonal_df['season_key'].str.contains(season)]
+                if season_data.empty: continue
+                
+                # Extrahiere das Jahr aus dem season_key
+                season_data['season_year'] = season_data['season_key'].str.split('-').str[0].astype(int)
+                
+                season_lower = season.lower()
+                for metric in ['discharge', 'extreme_flow']:
+                    key = f'{season_lower}_{metric}'
+                    # Erstelle ein sauberes xarray.DataArray für das Detrending
+                    data_array = xr.DataArray(
+                        data=season_data[metric].values,
+                        coords={'season_year': season_data['season_year'].values},
+                        dims='season_year', name=key
+                    ).sortby('season_year')
+                    
+                    result[key] = DataProcessor.detrend_data(data_array)
+            return result
+        except Exception as e:
+            logging.error(f"Error processing discharge data: {e}")
+            logging.error(traceback.format_exc())
+            return {}
             
     @staticmethod
     def load_amo_index(file_path):
@@ -176,15 +236,14 @@ class ClimateAnalysis:
                  if jet_lat is not None:
                      jet_data_reanalysis[f'{dset_key}_{season_lower}_lat_data'] = {'jet': DataProcessor.detrend_data(jet_lat)}
 
-        # --- INSERTED PLOT CALL ---
+        # --- Plot der Jet-Index-Zeitreihen ---
         logging.info("\n\n--- Plotting Reanalysis Jet Index Comparison Timeseries ---")
         if jet_data_reanalysis:
             Visualizer.plot_jet_indices_comparison(jet_data_reanalysis)
         else:
             logging.warning("Skipping jet index comparison plot, no data was generated.")
-        # --- END OF INSERTION ---
 
-        # [MODIFIED] New section for calculating and plotting combined Jet Impact Maps
+        # --- Berechnung der Jet-Impact-Karten ---
         logging.info("\n\n--- Calculating Reanalysis Jet Impact Maps ---")
         jet_impact_all_results = {}
         for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
@@ -206,6 +265,7 @@ class ClimateAnalysis:
             else:
                 logging.warning(f"Could not calculate jet impact maps for {dset_key}.")
 
+        # --- Plot der Jet-Impact-Vergleichskarten ---
         logging.info("\n\n--- Plotting Reanalysis Jet Impact Comparison Maps ---")
         for season in ['Winter', 'Summer']:
             data_20crv3 = jet_impact_all_results.get(Config.DATASET_20CRV3, {}).get(season)
@@ -217,7 +277,7 @@ class ClimateAnalysis:
             else:
                 logging.warning(f"Skipping combined jet impact plot for {season}, data missing for one or both reanalyses.")
 
-        # Section for Jet Correlation Maps
+        # --- Berechnung und Plot der Jet-Korrelationskarten (räumlich) ---
         logging.info("\n\n--- Calculating and Plotting Reanalysis Jet Correlation Maps ---")
         jet_corr_results = {}
         for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
@@ -233,7 +293,6 @@ class ClimateAnalysis:
                 if season_results:
                     jet_corr_results[dset_key][season] = season_results
         
-        # Now plot for each season, comparing the two datasets
         for season in ['Winter', 'Summer']:
             data_20crv3 = jet_corr_results.get(Config.DATASET_20CRV3, {}).get(season)
             data_era5 = jet_corr_results.get(Config.DATASET_ERA5, {}).get(season)
@@ -242,6 +301,23 @@ class ClimateAnalysis:
                 Visualizer.plot_jet_correlation_maps(data_20crv3, data_era5, season)
             else:
                 logging.warning(f"Skipping jet correlation plot for {season}, data missing for one or both reanalyses.")
+
+        # --- Aufruf für die Zeitreihen-Korrelationsplots, die die angehängten Bilder erzeugen ---
+        logging.info("\n\n--- Plotting Reanalysis Correlation Timeseries Comparison ---")
+        try:
+            # Lade die Abflussdaten einmal, da sie für beide Saisons benötigt werden.
+            # Die Methode muss in der ClimateAnalysis-Klasse existieren.
+            discharge_data_loaded = ClimateAnalysis.process_discharge_data(Config.DISCHARGE_FILE)
+            for season in ['Winter', 'Summer']:
+                Visualizer.plot_correlation_timeseries_comparison(
+                    datasets_reanalysis=datasets_reanalysis,
+                    jet_data_reanalysis=jet_data_reanalysis,
+                    discharge_data=discharge_data_loaded,
+                    season=season
+                )
+        except Exception as e:
+            logging.error(f"Fehler beim Erstellen der Korrelations-Zeitreihenplots: {e}")
+            logging.error(traceback.format_exc())
 
 
         # --- PART 2: CMIP6 AND STORYLINE ANALYSIS ---
@@ -261,8 +337,6 @@ class ClimateAnalysis:
             logging.error(traceback.format_exc())
 
         # --- FINALE ZUSAMMENFASSUNGEN ---
-
-        # Modell-Lauf-Zusammenfassung
         if cmip6_results:
             model_status = cmip6_results.get('model_run_status')
             if model_status:
@@ -281,15 +355,11 @@ class ClimateAnalysis:
                             logging.info(f"  - GWL {gwl}°C ({len(models)} models): {', '.join(models)}")
                 logging.info("-----------------------------")
 
-        # NEU: Storyline-Klassifizierungs-Zusammenfassung
-        if cmip6_results:
             storyline_classification = cmip6_results.get('storyline_classification')
-            # HINZUGEFÜGT: Zugriff auf die GWL-Jahre erhalten
             gwl_years_data = cmip6_results.get('gwl_threshold_years')
 
             if storyline_classification and gwl_years_data:
                 logging.info("\n\n--- CMIP6 Model Storyline Classification ---")
-                # HINZUGEFÜGT: Szenario-Namen für die Erstellung des Dictionary-Schlüssels holen
                 scenario = Config.CMIP6_SCENARIOS[0] if Config.CMIP6_SCENARIOS else ''
 
                 for gwl, jet_indices in sorted(storyline_classification.items()):
@@ -297,16 +367,12 @@ class ClimateAnalysis:
                         continue
                     logging.info(f"\nGWL {gwl}°C:")
                     for jet_index, storylines in jet_indices.items():
-                        # KORRIGIERT: Toleranz-Logik aus storyline.py übernommen
                         tolerance = 0.25 if 'Speed' in jet_index else 0.35
                         logging.info(f"  Classification for '{jet_index}' (Tolerance: ±{tolerance}):")
                         for storyline_type, models in sorted(storylines.items()):
-                            # MODIFIZIERTER BLOCK START
                             if models:
                                 models_with_timings = []
-                                # Die Variable `models` enthält jetzt die vollen Schlüssel
                                 for model_key in models:
-                                    # Der Schlüssel ist bereits korrekt (z.B. 'ACCESS-CM2_ssp585')
                                     threshold_year = gwl_years_data.get(model_key, {}).get(gwl)
                                     
                                     if threshold_year:
@@ -315,13 +381,19 @@ class ClimateAnalysis:
                                         end_year = threshold_year + (window - 1) // 2
                                         models_with_timings.append(f"{model_key} ({start_year}-{end_year})")
                                     else:
-                                        # Fallback, falls für ein Modell kein Jahr gefunden wird
                                         models_with_timings.append(model_key)
                                 
                                 logging.info(f"    - {storyline_type}: {', '.join(models_with_timings)} ({len(models)})")
                             else:
                                 logging.info(f"    - {storyline_type}: No models in range.")
-                            # MODIFIZIERTER BLOCK ENDE
+                
+                # *** HINZUGEFÜGTE ERLÄUTERUNG ***
+                logging.info("\n------------------------------------------")
+                logging.info("\nErläuterung zum Format:")
+                logging.info("  - Jede Zeile listet die Modelle auf, deren projizierte Änderung einem bestimmten Storyline-Typ entspricht.")
+                logging.info("  - Beispiel: 'Modell-XYZ_ssp585 (2040-2059)'")
+                logging.info("    - 'Modell-XYZ_ssp585': Name des Klimamodells und das verwendete Szenario.")
+                logging.info(f"    - '(2040-2059)': Der {Config.GWL_YEARS_WINDOW}-jährige Analysezeitraum. Dieser Zeitraum ist um das Jahr zentriert, in dem das jeweilige Modell zum ersten Mal das entsprechende Global Warming Level (GWL) erreicht.")
                 logging.info("------------------------------------------")
         
         logging.info("\n\n=====================================================")

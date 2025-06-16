@@ -586,6 +586,8 @@ class AdvancedAnalyzer:
     def analyze_timeseries_for_projection_plot(cmip6_results, datasets_reanalysis, config):
         """
         Prepares CMIP6 and reanalysis data for the climate projection timeseries plot.
+        This version aligns the ERA5 timeseries to the 20CRv3 anomaly baseline for
+        a visually consistent comparison, based on the mean over their overlap period.
 
         This method calculates anomalies relative to a pre-industrial baseline (or an
         alternative for ERA5) and applies a rolling mean to the timeseries of
@@ -672,30 +674,48 @@ class AdvancedAnalyzer:
                         logging.error(f"Failed to calculate MMM for CMIP6 {key}: {e}")
 
         # --- 2. Process Reanalysis Data ---
-        for dset in ["20CRv3", "ERA5"]:
-            ua_seasonal = datasets_reanalysis.get(f'{dset}_ua850_seasonal')
-            if ua_seasonal is None:
-                continue
+        logging.info("Preparing reanalysis data, aligning ERA5 to the 20CRv3 anomaly baseline...")
 
-            # Determine reference period for this dataset
-            if dset == "20CRv3":
-                ref_start, ref_end = pi_ref_start, pi_ref_end
-            else: # ERA5
-                min_year_era5 = ua_seasonal.season_year.min().item()
-                ref_start, ref_end = min_year_era5, min_year_era5 + 29
-            
-            # DJF Jet Speed
+        # Helper to get absolute jet indices first
+        def get_abs_indices(dset_key):
+            ua_seasonal = datasets_reanalysis.get(f'{dset_key}_ua850_seasonal')
+            if ua_seasonal is None: return None, None
             djf_ua = DataProcessor.filter_by_season(ua_seasonal, 'Winter')
-            djf_jet_speed = JetStreamAnalyzer.calculate_jet_speed_index(djf_ua)
-            djf_jet_speed.name = "DJF_JetSpeed"
-            reanalysis_plot_data['DJF_JetSpeed'][dset] = _get_anomaly_and_smooth(djf_jet_speed, 'season_year', ref_start, ref_end, rolling_window)
-
-            # JJA Jet Latitude
             jja_ua = DataProcessor.filter_by_season(ua_seasonal, 'Summer')
-            jja_jet_lat = JetStreamAnalyzer.calculate_jet_lat_index(jja_ua)
-            jja_jet_lat.name = "JJA_JetLat"
-            reanalysis_plot_data['JJA_JetLat'][dset] = _get_anomaly_and_smooth(jja_jet_lat, 'season_year', ref_start, ref_end, rolling_window)
-            
+            return JetStreamAnalyzer.calculate_jet_speed_index(djf_ua), JetStreamAnalyzer.calculate_jet_lat_index(jja_ua)
+
+        djf_speed_20crv3, jja_lat_20crv3 = get_abs_indices("20CRv3")
+        djf_speed_era5, jja_lat_era5 = get_abs_indices("ERA5")
+
+        # Process each jet index type
+        for jet_key, ts_20crv3, ts_era5 in [('DJF_JetSpeed', djf_speed_20crv3, djf_speed_era5), 
+                                           ('JJA_JetLat', jja_lat_20crv3, jja_lat_era5)]:
+            if ts_20crv3 is None: continue
+
+            # --- 2a. Process 20CRv3: Calculate anomaly relative to 1850-1900 ---
+            pi_mean_20crv3 = ts_20crv3.sel(season_year=slice(pi_ref_start, pi_ref_end)).mean(skipna=True).item()
+            anomaly_20crv3 = ts_20crv3 - pi_mean_20crv3
+            reanalysis_plot_data[jet_key]['20CRv3'] = anomaly_20crv3.rolling({'season_year': rolling_window}, center=True).mean().dropna(dim='season_year')
+
+            if ts_era5 is None: continue
+
+            # --- 2b. Align ERA5 to 20CRv3 ---
+            common_years = np.intersect1d(ts_20crv3.season_year.values, ts_era5.season_year.values)
+            if len(common_years) > 5:
+                # Calculate the mean of each *absolute* timeseries over the overlap
+                mean_20crv3_overlap = ts_20crv3.sel(season_year=common_years).mean(skipna=True).item()
+                mean_era5_overlap = ts_era5.sel(season_year=common_years).mean(skipna=True).item()
+                
+                # The offset is the difference in their means during the overlap
+                offset = mean_era5_overlap - mean_20crv3_overlap
+                
+                # Adjust ERA5 by this offset to align it with the 20CRv3 climatology
+                adjusted_era5 = ts_era5 - offset
+                
+                # Now, calculate the anomaly of the *adjusted* ERA5 data relative to the same pre-industrial mean
+                anomaly_era5 = adjusted_era5 - pi_mean_20crv3
+                reanalysis_plot_data[jet_key]['ERA5'] = anomaly_era5.rolling({'season_year': rolling_window}, center=True).mean().dropna(dim='season_year')
+
         return cmip6_plot_data, reanalysis_plot_data
     
     @staticmethod

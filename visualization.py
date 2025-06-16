@@ -70,7 +70,7 @@ class Visualizer:
                                cmap=cmap, vmin=vmin, vmax=vmax, transform=ccrs.PlateCarree())
         
         if ua_seasonal_mean is not None and not np.all(np.isnan(ua_seasonal_mean)):
-            contour_levels = np.arange(-20, 21, 4)
+            contour_levels = np.arange(4, 21, 4)
             cs = ax.contour(lons_plot, lats_plot, ua_seasonal_mean, levels=contour_levels, colors='black',
                             linewidths=0.8, transform=ccrs.PlateCarree())
             ax.clabel(cs, inline=True, fontsize=7, fmt='%d')

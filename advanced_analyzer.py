@@ -582,6 +582,8 @@ class AdvancedAnalyzer:
             'Summer': summer_correlations
         }
         
+# In lasseweis/paper1-project/paper1-project-plot/advanced_analyzer.py
+
     @staticmethod
     def analyze_timeseries_for_projection_plot(cmip6_results, datasets_reanalysis, config):
         """
@@ -693,7 +695,7 @@ class AdvancedAnalyzer:
             if ts_20crv3 is None: continue
 
             # --- 2a. Process 20CRv3: Calculate anomaly relative to 1850-1900 ---
-            pi_mean_20crv3 = ts_20crv3.sel(season_year=slice(pi_ref_start, pi_ref_end)).mean(skipna=True).item()
+            pi_mean_20crv3 = ts_20crv3.sel(season_year=slice(pi_ref_start, pi_ref_end)).mean(skipna=True).compute()
             anomaly_20crv3 = ts_20crv3 - pi_mean_20crv3
             reanalysis_plot_data[jet_key]['20CRv3'] = anomaly_20crv3.rolling({'season_year': rolling_window}, center=True).mean().dropna(dim='season_year')
 
@@ -703,8 +705,8 @@ class AdvancedAnalyzer:
             common_years = np.intersect1d(ts_20crv3.season_year.values, ts_era5.season_year.values)
             if len(common_years) > 5:
                 # Calculate the mean of each *absolute* timeseries over the overlap
-                mean_20crv3_overlap = ts_20crv3.sel(season_year=common_years).mean(skipna=True).item()
-                mean_era5_overlap = ts_era5.sel(season_year=common_years).mean(skipna=True).item()
+                mean_20crv3_overlap = ts_20crv3.sel(season_year=common_years).mean(skipna=True).compute()
+                mean_era5_overlap = ts_era5.sel(season_year=common_years).mean(skipna=True).compute()
                 
                 # The offset is the difference in their means during the overlap
                 offset = mean_era5_overlap - mean_20crv3_overlap

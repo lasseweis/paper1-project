@@ -697,3 +697,57 @@ class AdvancedAnalyzer:
             reanalysis_plot_data['JJA_JetLat'][dset] = _get_anomaly_and_smooth(jja_jet_lat, 'season_year', ref_start, ref_end, rolling_window)
             
         return cmip6_plot_data, reanalysis_plot_data
+    
+    @staticmethod
+    def calculate_reanalysis_betas(datasets_reanalysis, jet_data_reanalysis, dataset_key='ERA5'):
+        """
+        Calculates the regression slopes (beta_obs) between jet indices and climate impacts
+        for a specific reanalysis dataset (typically ERA5).
+        """
+        logging.info(f"Calculating beta_obs slopes from {dataset_key} reanalysis...")
+        beta_obs_slopes = {}
+        
+        # Define all the relationships needed
+        beta_configs = [
+            {'jet': 'DJF_JetSpeed', 'impact': 'DJF_tas', 'impact_var_key': 'tas', 'season': 'Winter', 'jet_type': 'speed'},
+            {'jet': 'DJF_JetSpeed', 'impact': 'DJF_pr',  'impact_var_key': 'pr',  'season': 'Winter', 'jet_type': 'speed'},
+            {'jet': 'JJA_JetLat',   'impact': 'JJA_tas', 'impact_var_key': 'tas', 'season': 'Summer', 'jet_type': 'lat'},
+            {'jet': 'JJA_JetLat',   'impact': 'JJA_pr',  'impact_var_key': 'pr',  'season': 'Summer', 'jet_type': 'lat'}
+        ]
+
+        for config in beta_configs:
+            beta_key_name = f"{config['jet']}_vs_{config['impact_var_key']}"
+            
+            # Get the jet timeseries (detrended)
+            jet_data_key = f"{dataset_key}_{config['season'].lower()}_{config['jet_type']}_data"
+            jet_ts = jet_data_reanalysis.get(jet_data_key, {}).get('jet')
+
+            # Get the impact timeseries (detrended)
+            impact_box_mean = datasets_reanalysis.get(f"{dataset_key}_{config['impact_var_key']}_box_mean")
+            impact_ts = None
+            if impact_box_mean is not None:
+                impact_ts = DataProcessor.detrend_data(
+                    DataProcessor.filter_by_season(impact_box_mean, config['season'])
+                )
+            
+            if jet_ts is None or impact_ts is None:
+                logging.warning(f"  Could not calculate beta for '{beta_key_name}': Missing jet or impact data.")
+                beta_obs_slopes[beta_key_name] = np.nan
+                continue
+
+            # Find common years and calculate regression
+            common_years, idx1, idx2 = np.intersect1d(jet_ts.season_year.values, impact_ts.season_year.values, return_indices=True)
+            
+            if len(common_years) < 5:
+                logging.warning(f"  Could not calculate beta for '{beta_key_name}': Not enough common years.")
+                beta_obs_slopes[beta_key_name] = np.nan
+                continue
+
+            jet_vals = jet_ts.values[idx1]
+            impact_vals = impact_ts.values[idx2]
+
+            slope, _, _, _, _ = StatsAnalyzer.calculate_regression(jet_vals, impact_vals)
+            beta_obs_slopes[beta_key_name] = slope
+            logging.info(f"  - Calculated Beta_obs for {beta_key_name}: {slope:.3f}")
+            
+        return beta_obs_slopes

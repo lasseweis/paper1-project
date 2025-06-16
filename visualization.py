@@ -979,3 +979,107 @@ class Visualizer:
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved climate projection timeseries plot to {filepath}")
+        
+    @staticmethod
+    def _plot_single_scatter_panel(ax, cmip6_results, beta_obs_slopes, gwl_to_plot,
+                                   jet_key, impact_key, beta_key, title):
+        """Helper function to draw one panel of the CMIP6 scatter comparison plot."""
+        
+        all_deltas = cmip6_results['all_individual_model_deltas_for_plot']
+        mmm_changes = cmip6_results['mmm_changes']
+        
+        # Extract delta values for the specific jet and impact variable
+        jet_deltas = all_deltas.get(jet_key, {}).get(gwl_to_plot, {})
+        impact_deltas = all_deltas.get(impact_key, {}).get(gwl_to_plot, {})
+        
+        if not jet_deltas or not impact_deltas:
+            ax.text(0.5, 0.5, "Data Missing", ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(title, fontsize=10)
+            return
+
+        # Align data using model keys
+        models = sorted(list(set(jet_deltas.keys()) & set(impact_deltas.keys())))
+        jet_vals = np.array([jet_deltas[m] for m in models])
+        impact_vals = np.array([impact_deltas[m] for m in models])
+
+        # Plot scatter of individual models
+        ax.scatter(jet_vals, impact_vals, color='grey', alpha=0.6, s=25, label=f'CMIP6 Models (N={len(models)})')
+
+        # Plot CMIP6 inter-model regression fit
+        slope_cmip6, intercept_cmip6, _, _, _ = StatsAnalyzer.calculate_regression(jet_vals, impact_vals)
+        if not np.isnan(slope_cmip6):
+            x_fit = np.array(ax.get_xlim())
+            y_fit = intercept_cmip6 + slope_cmip6 * x_fit
+            ax.plot(x_fit, y_fit, color='black', linestyle='-', linewidth=2, label=f'CMIP6 Fit (Slope={slope_cmip6:.2f})')
+
+        # Plot observed IAV slope (beta_obs) anchored at the MMM
+        beta_obs = beta_obs_slopes.get(beta_key)
+        delta_jet_mmm = mmm_changes.get(gwl_to_plot, {}).get(jet_key)
+        delta_impact_mmm = mmm_changes.get(gwl_to_plot, {}).get(impact_key)
+
+        if beta_obs is not None and delta_jet_mmm is not None and delta_impact_mmm is not None:
+            intercept_iav = delta_impact_mmm - beta_obs * delta_jet_mmm
+            y_fit_iav = intercept_iav + beta_obs * x_fit
+            ax.plot(x_fit, y_fit_iav, color='red', linestyle='--', linewidth=2, label=f'Obs. IAV Slope ($\\beta_{{obs}}$={beta_obs:.2f})')
+
+        # Formatting
+        ref_period = f"{Config.CMIP6_ANOMALY_REF_START}-{Config.CMIP6_ANOMALY_REF_END}"
+        x_label = f'Change in {jet_key.replace("_", " ")}'
+        y_label = f'Change in {impact_key.replace("_", " ")}'
+        
+        if "Lat" in jet_key: x_label += ' (°Lat)'
+        elif "Speed" in jet_key: x_label += ' (m/s)'
+        
+        if "_pr" in impact_key: y_label += ' (%)'
+        elif "_tas" in impact_key: y_label += ' (°C)'
+        
+        ax.set_xlabel(x_label, fontsize=9)
+        ax.set_ylabel(y_label, fontsize=9)
+        ax.set_title(title, fontsize=11)
+        ax.grid(True, linestyle=':', alpha=0.6)
+        ax.axhline(0, color='grey', lw=0.7); ax.axvline(0, color='grey', lw=0.7)
+        ax.legend(fontsize=8)
+
+    @staticmethod
+    def plot_cmip6_scatter_comparison(cmip6_results, beta_obs_slopes, gwl_to_plot):
+        """
+        Creates a 2x2 subplot figure comparing CMIP6 projected changes for different
+        jet indices and impact variables at a specific Global Warming Level.
+        """
+        if not cmip6_results or not beta_obs_slopes:
+            logging.warning("Cannot plot CMIP6 scatter comparison: Missing results or beta slopes.")
+            return
+            
+        logging.info(f"Plotting CMIP6 scatter comparison for {gwl_to_plot}°C GWL...")
+        Visualizer.ensure_plot_dir_exists()
+
+        fig, axs = plt.subplots(2, 2, figsize=(14, 12))
+        
+        plot_configs = [
+            {'ax': axs[0, 0], 'jet_key': 'DJF_JetSpeed', 'impact_key': 'DJF_tas', 'beta_key': 'DJF_JetSpeed_vs_tas', 'title': 'Winter Temp vs. Jet Speed'},
+            {'ax': axs[0, 1], 'jet_key': 'JJA_JetLat',   'impact_key': 'JJA_tas', 'beta_key': 'JJA_JetLat_vs_tas',   'title': 'Summer Temp vs. Jet Latitude'},
+            {'ax': axs[1, 0], 'jet_key': 'DJF_JetSpeed', 'impact_key': 'DJF_pr',  'beta_key': 'DJF_JetSpeed_vs_pr',  'title': 'Winter Precip vs. Jet Speed'},
+            {'ax': axs[1, 1], 'jet_key': 'JJA_JetLat',   'impact_key': 'JJA_pr',  'beta_key': 'JJA_JetLat_vs_pr',    'title': 'Summer Precip vs. Jet Latitude'},
+        ]
+
+        for config in plot_configs:
+            Visualizer._plot_single_scatter_panel(
+                ax=config['ax'],
+                cmip6_results=cmip6_results,
+                beta_obs_slopes=beta_obs_slopes,
+                gwl_to_plot=gwl_to_plot,
+                jet_key=config['jet_key'],
+                impact_key=config['impact_key'],
+                beta_key=config['beta_key'],
+                title=config['title']
+            )
+        
+        ref_period = f"{Config.CMIP6_ANOMALY_REF_START}-{Config.CMIP6_ANOMALY_REF_END}"
+        fig.suptitle(f"CMIP6 Projected Changes at {gwl_to_plot}°C Global Warming Level\n(Changes relative to {ref_period} PI)",
+                     fontsize=16, weight='bold')
+        
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        filename = os.path.join(Config.PLOT_DIR, f"cmip6_scatter_comparison_gwl_{gwl_to_plot:.1f}.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved CMIP6 scatter comparison plot to {filename}")

@@ -391,6 +391,37 @@ class ClimateAnalysis:
                 logging.warning("Skipping climate evolution plot: Missing CMIP6 results or reanalysis data.")
         else:
             logging.info(f"Plot '{evolution_plot_filename}' existiert bereits. Überspringe Berechnung und Erstellung.")
+            
+        # --- PART 4: BETA-OBS CALCULATION & CMIP6 SCATTER PLOTS ---
+        logging.info("\n\n--- Calculating Beta_obs and Plotting CMIP6 Scatter Comparisons ---")
+        
+        # Check if we have the necessary data
+        if cmip6_results and datasets_reanalysis and jet_data_reanalysis:
+            
+            # 1. Calculate the beta_obs slopes from ERA5 reanalysis
+            beta_obs_slopes = AdvancedAnalyzer.calculate_reanalysis_betas(
+                datasets_reanalysis, 
+                jet_data_reanalysis, 
+                dataset_key=Config.DATASET_ERA5
+            )
+            
+            if beta_obs_slopes:
+                # 2. Loop through GWLs and create a scatter plot figure for each
+                for gwl in Config.GLOBAL_WARMING_LEVELS:
+                    # Check if the GWL has data in the CMIP6 results before plotting
+                    if gwl in cmip6_results.get('mmm_changes', {}):
+                        Visualizer.plot_cmip6_scatter_comparison(
+                            cmip6_results=cmip6_results,
+                            beta_obs_slopes=beta_obs_slopes,
+                            gwl_to_plot=gwl
+                        )
+                    else:
+                        logging.warning(f"Skipping scatter plot for GWL {gwl}°C: No MMM data found in cmip6_results.")
+            else:
+                logging.warning("Skipping CMIP6 scatter plots because beta_obs_slopes could not be calculated.")
+        else:
+            logging.warning("Skipping CMIP6 scatter plots due to missing cmip6_results, reanalysis data, or jet data.")
+
 
         # --- FINALE ZUSAMMENFASSUNGEN ---
         if cmip6_results:

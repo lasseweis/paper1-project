@@ -421,7 +421,24 @@ class ClimateAnalysis:
                 logging.warning("Skipping CMIP6 scatter plots because beta_obs_slopes could not be calculated.")
         else:
             logging.warning("Skipping CMIP6 scatter plots due to missing cmip6_results, reanalysis data, or jet data.")
-
+            
+        # --- PART 5: JET INTER-RELATIONSHIP SCATTER PLOTS ---
+        logging.info("\n\n--- Plotting CMIP6 Jet Inter-relationship Scatter Plots ---")
+        if cmip6_results:
+            # Define filename for the combined plot
+            inter_rel_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_combined_gwl.png")
+            if not os.path.exists(inter_rel_plot_filename):
+                # Check if there is any data to plot
+                if cmip6_results.get('mmm_changes'):
+                     Visualizer.plot_jet_inter_relationship_scatter_combined_gwl(
+                         cmip6_results=cmip6_results
+                     )
+                else:
+                    logging.warning(f"Skipping combined jet inter-relationship scatter plot: No data found in cmip6_results.")
+            else:
+                logging.info(f"Plot '{inter_rel_plot_filename}' existiert bereits. Überspringe Erstellung.")
+        else:
+            logging.warning("Skipping CMIP6 jet inter-relationship scatter plots due to missing cmip6_results.")
 
         # --- FINALE ZUSAMMENFASSUNGEN ---
         if cmip6_results:

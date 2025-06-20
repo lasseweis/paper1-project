@@ -85,6 +85,18 @@ class Config:
         'JJA_JetLat': {
             2.0: {'Core Mean': 0.5, 'Core High': 1.8, 'Extreme Low': -1.5, 'Extreme High': 2.5},
             3.0: {'Core Mean': 1.2, 'Core High': 2.2, 'Extreme Low': -1.0, 'Extreme High': 3.0},
+        },
+        # NEU: Platzhalter für Winter Jet Latitude.
+        # Diese Werte müssen basierend auf der CMIP6-Analyse angepasst werden.
+        'DJF_JetLat': {
+            2.0: {'Core Mean': 0.0, 'Core High': 0.5, 'Extreme Low': -0.5, 'Extreme High': 1.0}, # Beispielwerte
+            3.0: {'Core Mean': 0.0, 'Core High': 0.7, 'Extreme Low': -0.7, 'Extreme High': 1.2}, # Beispielwerte
+        },
+        # NEU: Platzhalter für Summer Jet Speed.
+        # Diese Werte müssen basierend auf der CMIP6-Analyse angepasst werden.
+        'JJA_JetSpeed': {
+            2.0: {'Core Mean': 0.1, 'Core High': 0.5, 'Extreme Low': -0.5, 'Extreme High': 0.8}, # Beispielwerte
+            3.0: {'Core Mean': 0.2, 'Core High': 0.7, 'Extreme Low': -0.7, 'Extreme High': 1.0}, # Beispielwerte
         }
     }
 

@@ -581,67 +581,53 @@ class AdvancedAnalyzer:
             'Winter': winter_correlations,
             'Summer': summer_correlations
         }
-        
-# In lasseweis/paper1-project/paper1-project-plot/advanced_analyzer.py
 
     @staticmethod
     def analyze_timeseries_for_projection_plot(cmip6_results, datasets_reanalysis, config):
         """
         Prepares CMIP6 and reanalysis data for the climate projection timeseries plot.
-        This version aligns the ERA5 timeseries to the 20CRv3 anomaly baseline for
-        a visually consistent comparison, based on the mean over their overlap period.
-
-        This method calculates anomalies relative to a pre-industrial baseline (or an
-        alternative for ERA5) and applies a rolling mean to the timeseries of
-        global temperature, JJA jet latitude, and DJF jet speed.
-
-        Args:
-            cmip6_results (dict): The output from StorylineAnalyzer.analyze_cmip6_changes_at_gwl.
-            datasets_reanalysis (dict): The dictionary containing processed reanalysis data.
-            config (Config): The configuration object.
-
-        Returns:
-            tuple: A tuple containing two dictionaries:
-                   - cmip6_plot_data (dict): Prepared CMIP6 members and MMM.
-                   - reanalysis_plot_data (dict): Prepared reanalysis data.
+        MODIFIZIERT, um alle vier Jet-Indizes (JJA/DJF Speed/Lat) zu verarbeiten.
         """
-        logging.info("Preparing data for climate projection timeseries plot...")
+        logging.info("Preparing data for climate projection timeseries plot (all four jet indices)...")
+        
+        # --- MODIFIKATION START ---
+        # Initialisierung für alle vier Indizes
         cmip6_plot_data = {'Global_Tas': {'members': [], 'mmm': None},
                            'JJA_JetLat': {'members': [], 'mmm': None},
-                           'DJF_JetSpeed': {'members': [], 'mmm': None}}
-        reanalysis_plot_data = {'JJA_JetLat': {}, 'DJF_JetSpeed': {}}
+                           'DJF_JetSpeed': {'members': [], 'mmm': None},
+                           'JJA_JetSpeed': {'members': [], 'mmm': None},
+                           'DJF_JetLat': {'members': [], 'mmm': None}}
+        reanalysis_plot_data = {'JJA_JetLat': {}, 'DJF_JetSpeed': {}, 
+                                'JJA_JetSpeed': {}, 'DJF_JetLat': {}}
+        # --- MODIFIKATION ENDE ---
 
         rolling_window = 20
         pi_ref_start = config.CMIP6_PRE_INDUSTRIAL_REF_START
         pi_ref_end = config.CMIP6_PRE_INDUSTRIAL_REF_END
 
-        # Helper to calculate anomaly and smooth
         def _get_anomaly_and_smooth(data_array, year_coord, ref_start, ref_end, window):
-            if data_array is None or data_array.size == 0:
-                return None
+            # Diese Hilfsfunktion bleibt unverändert.
+            if data_array is None or data_array.size == 0: return None
             try:
                 ref_period_data = data_array.sel({year_coord: slice(ref_start, ref_end)})
                 if ref_period_data.sizes.get(year_coord, 0) == 0:
-                    logging.warning(f"No data in reference period {ref_start}-{ref_end} for {data_array.name}. Cannot calculate anomaly.")
+                    logging.warning(f"No data in reference period {ref_start}-{ref_end} for {data_array.name}.")
                     return None
-                
                 ref_mean = ref_period_data.mean(dim=year_coord, skipna=True)
                 anomaly = data_array - ref_mean
-                
                 if anomaly.sizes.get(year_coord, 0) >= window:
-                    smoothed = anomaly.rolling({year_coord: window}, center=True).mean().dropna(dim=year_coord)
-                    return smoothed
-                return anomaly # Return unsmoothed if too short
+                    return anomaly.rolling({year_coord: window}, center=True).mean().dropna(dim=year_coord)
+                return anomaly
             except Exception as e:
                 logging.error(f"Error in _get_anomaly_and_smooth for {data_array.name}: {e}")
                 return None
 
-        # --- 1. Process CMIP6 Data ---
+        # --- 1. CMIP6-Daten verarbeiten ---
         if cmip6_results and 'cmip6_model_data_loaded' in cmip6_results and 'model_metric_timeseries' in cmip6_results:
             cmip6_data = cmip6_results['cmip6_model_data_loaded']
             cmip6_metrics = cmip6_results['model_metric_timeseries']
 
-            # Process Global Temperature for each model
+            # Globale Temperatur bleibt unverändert
             for key, model_data in cmip6_data.items():
                 tas_regional = model_data.get('tas')
                 if tas_regional is not None:
@@ -649,25 +635,27 @@ class AdvancedAnalyzer:
                     tas_global_mean = tas_regional.weighted(weights).mean(dim=('lon', 'lat'), skipna=True)
                     tas_annual = tas_global_mean.groupby('time.year').mean('time', skipna=True)
                     tas_annual.name = "Global_Tas"
-                    
                     processed_tas = _get_anomaly_and_smooth(tas_annual, 'year', pi_ref_start, pi_ref_end, rolling_window)
                     if processed_tas is not None:
                         cmip6_plot_data['Global_Tas']['members'].append(processed_tas)
             
-            # Process Jet Indices for each model
-            for jet_key in ['JJA_JetLat', 'DJF_JetSpeed']:
+            # --- MODIFIKATION START ---
+            # Verarbeite alle vier Jet-Indizes
+            for jet_key in ['JJA_JetLat', 'DJF_JetSpeed', 'JJA_JetSpeed', 'DJF_JetLat']:
                 for model_key, metrics in cmip6_metrics.items():
+                    # Der zugrunde liegende Analyse-Schritt in storyline.py berechnet bereits alle vier.
+                    # Wir müssen sie hier nur abrufen.
                     jet_timeseries = metrics.get(jet_key)
                     if jet_timeseries is not None:
                         processed_jet = _get_anomaly_and_smooth(jet_timeseries, 'season_year', pi_ref_start, pi_ref_end, rolling_window)
                         if processed_jet is not None:
                             cmip6_plot_data[jet_key]['members'].append(processed_jet)
+            # --- MODIFIKATION ENDE ---
 
-            # Calculate MMM for each variable
+            # MMM-Berechnung bleibt konzeptionell gleich
             for key, data in cmip6_plot_data.items():
                 if data['members']:
                     try:
-                        # Use the appropriate time coordinate for concatenation
                         time_coord = 'year' if key == 'Global_Tas' else 'season_year'
                         valid_members = [m for m in data['members'] if m is not None and time_coord in m.dims]
                         if valid_members:
@@ -675,48 +663,48 @@ class AdvancedAnalyzer:
                     except Exception as e:
                         logging.error(f"Failed to calculate MMM for CMIP6 {key}: {e}")
 
-        # --- 2. Process Reanalysis Data ---
-        logging.info("Preparing reanalysis data, aligning ERA5 to the 20CRv3 anomaly baseline...")
+        # --- 2. Reanalyse-Daten verarbeiten ---
+        logging.info("Preparing reanalysis data (all four indices), aligning ERA5 to 20CRv3 baseline...")
 
-        # Helper to get absolute jet indices first
+        # --- MODIFIKATION START ---
+        # Hilfsfunktion, die nun ein Dictionary mit allen 4 Indizes zurückgibt
         def get_abs_indices(dset_key):
             ua_seasonal = datasets_reanalysis.get(f'{dset_key}_ua850_seasonal')
-            if ua_seasonal is None: return None, None
+            if ua_seasonal is None: return {}
             djf_ua = DataProcessor.filter_by_season(ua_seasonal, 'Winter')
             jja_ua = DataProcessor.filter_by_season(ua_seasonal, 'Summer')
-            return JetStreamAnalyzer.calculate_jet_speed_index(djf_ua), JetStreamAnalyzer.calculate_jet_lat_index(jja_ua)
+            return {
+                'DJF_JetSpeed': JetStreamAnalyzer.calculate_jet_speed_index(djf_ua),
+                'DJF_JetLat': JetStreamAnalyzer.calculate_jet_lat_index(djf_ua),
+                'JJA_JetSpeed': JetStreamAnalyzer.calculate_jet_speed_index(jja_ua),
+                'JJA_JetLat': JetStreamAnalyzer.calculate_jet_lat_index(jja_ua)
+            }
 
-        djf_speed_20crv3, jja_lat_20crv3 = get_abs_indices("20CRv3")
-        djf_speed_era5, jja_lat_era5 = get_abs_indices("ERA5")
+        indices_20crv3 = get_abs_indices("20CRv3")
+        indices_era5 = get_abs_indices("ERA5")
 
-        # Process each jet index type
-        for jet_key, ts_20crv3, ts_era5 in [('DJF_JetSpeed', djf_speed_20crv3, djf_speed_era5), 
-                                           ('JJA_JetLat', jja_lat_20crv3, jja_lat_era5)]:
+        # Verarbeite jeden Jet-Index-Typ in einer Schleife
+        for jet_key in ['DJF_JetSpeed', 'JJA_JetLat', 'DJF_JetLat', 'JJA_JetSpeed']:
+            ts_20crv3 = indices_20crv3.get(jet_key)
+            ts_era5 = indices_era5.get(jet_key)
+            
             if ts_20crv3 is None: continue
 
-            # --- 2a. Process 20CRv3: Calculate anomaly relative to 1850-1900 ---
             pi_mean_20crv3 = ts_20crv3.sel(season_year=slice(pi_ref_start, pi_ref_end)).mean(skipna=True).compute()
             anomaly_20crv3 = ts_20crv3 - pi_mean_20crv3
             reanalysis_plot_data[jet_key]['20CRv3'] = anomaly_20crv3.rolling({'season_year': rolling_window}, center=True).mean().dropna(dim='season_year')
 
             if ts_era5 is None: continue
 
-            # --- 2b. Align ERA5 to 20CRv3 ---
             common_years = np.intersect1d(ts_20crv3.season_year.values, ts_era5.season_year.values)
             if len(common_years) > 5:
-                # Calculate the mean of each *absolute* timeseries over the overlap
                 mean_20crv3_overlap = ts_20crv3.sel(season_year=common_years).mean(skipna=True).compute()
                 mean_era5_overlap = ts_era5.sel(season_year=common_years).mean(skipna=True).compute()
-                
-                # The offset is the difference in their means during the overlap
                 offset = mean_era5_overlap - mean_20crv3_overlap
-                
-                # Adjust ERA5 by this offset to align it with the 20CRv3 climatology
                 adjusted_era5 = ts_era5 - offset
-                
-                # Now, calculate the anomaly of the *adjusted* ERA5 data relative to the same pre-industrial mean
                 anomaly_era5 = adjusted_era5 - pi_mean_20crv3
                 reanalysis_plot_data[jet_key]['ERA5'] = anomaly_era5.rolling({'season_year': rolling_window}, center=True).mean().dropna(dim='season_year')
+        # --- MODIFIKATION ENDE ---
 
         return cmip6_plot_data, reanalysis_plot_data
     

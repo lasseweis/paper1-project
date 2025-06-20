@@ -266,10 +266,9 @@ class Visualizer:
     def plot_jet_changes_vs_gwl(cmip6_results, filename="cmip6_jet_changes_vs_gwl.png"):
         """
         Plots CMIP6 jet index changes vs GWL, with percentile spread.
-        MODIFIZIERT, um eine gemeinsame Legende und spezifische Storyline-Marker zu verwenden,
-        ähnlich dem Stil des ursprünglichen Codes.
+        MODIFIZIERT, um ein 2x2-Raster für Winter/Sommer und Geschwindigkeit/Breite zu erstellen.
         """
-        logging.info("Plotting Jet Changes vs GWL (with shared legend and custom markers)...")
+        logging.info("Plotting Jet Changes vs GWL (2x2 layout)...")
         Visualizer.ensure_plot_dir_exists()
 
         if not cmip6_results or 'all_individual_model_deltas_for_plot' not in cmip6_results:
@@ -278,13 +277,15 @@ class Visualizer:
 
         all_deltas = cmip6_results['all_individual_model_deltas_for_plot']
         mmm_changes = cmip6_results.get('mmm_changes', {})
-        jet_indices_to_plot = list(Config.STORYLINE_JET_CHANGES.keys())
         
-        n_indices = len(jet_indices_to_plot)
-        if n_indices == 0: return
-
-        fig, axs = plt.subplots(1, n_indices, figsize=(7 * n_indices, 6.5), sharey=False, squeeze=False)
-        axs = axs.flatten()
+        # --- MODIFIKATION START ---
+        # Definieren Sie die vier Indizes, die explizit geplottet werden sollen.
+        jet_indices_to_plot = ['JJA_JetLat', 'JJA_JetSpeed', 'DJF_JetLat', 'DJF_JetSpeed']
+        
+        # Ändern Sie das Layout auf 2x2 Subplots.
+        fig, axs = plt.subplots(2, 2, figsize=(15, 12), sharex=True, squeeze=False)
+        axs = axs.flatten() # Vereinfacht die Iteration über die Achsen.
+        # --- MODIFIKATION ENDE ---
 
         master_legend_handles = [
             plt.Line2D([0], [0], color='darkgray', lw=0.8, marker='.', markersize=4, linestyle='-'),
@@ -305,7 +306,9 @@ class Visualizer:
         }
 
         used_storyline_types = set()
-        for jet_idx in jet_indices_to_plot:
+        # Hinweis: Diese Logik funktioniert weiterhin korrekt. Für Indizes ohne Storyline-Definition
+        # werden einfach keine speziellen Marker geplottet.
+        for jet_idx in Config.STORYLINE_JET_CHANGES:
             for gwl in Config.STORYLINE_JET_CHANGES.get(jet_idx, {}):
                 for storyline_type in Config.STORYLINE_JET_CHANGES[jet_idx][gwl]:
                     used_storyline_types.add(storyline_type)
@@ -319,10 +322,17 @@ class Visualizer:
                 )
                 master_legend_labels.append(f'Storyline: {storyline_type}')
 
+        # Die Schleife iteriert nun über die vier definierten Indizes und füllt das 2x2-Raster.
         for i, jet_idx in enumerate(jet_indices_to_plot):
             ax = axs[i]
             
-            deltas_by_gwl = all_deltas[jet_idx]
+            # Der Rest der Plot-Logik für jeden Subplot bleibt identisch.
+            deltas_by_gwl = all_deltas.get(jet_idx)
+            if not deltas_by_gwl:
+                ax.text(0.5, 0.5, f"No data for\n{jet_idx}", ha='center', va='center', transform=ax.transAxes)
+                ax.set_title(f'Projected Change in {jet_idx.replace("_", " ")}')
+                continue
+
             gwls_fine = sorted(deltas_by_gwl.keys())
 
             model_runs = {}
@@ -343,11 +353,11 @@ class Visualizer:
             p10 = [np.percentile(d, 10) if d else np.nan for d in delta_values_per_gwl]
             p90 = [np.percentile(d, 90) if d else np.nan for d in delta_values_per_gwl]
             
-            valid_indices = [i for i, (p10_val, p90_val) in enumerate(zip(p10, p90)) if not np.isnan(p10_val) and not np.isnan(p90_val)]
+            valid_indices = [j for j, (p10_val, p90_val) in enumerate(zip(p10, p90)) if not np.isnan(p10_val) and not np.isnan(p90_val)]
             if valid_indices:
-                gwls_plot = [gwls_fine[i] for i in valid_indices]
-                p10_plot = [p10[i] for i in valid_indices]
-                p90_plot = [p90[i] for i in valid_indices]
+                gwls_plot = [gwls_fine[j] for j in valid_indices]
+                p10_plot = [p10[j] for j in valid_indices]
+                p90_plot = [p90[j] for j in valid_indices]
                 ax.fill_between(gwls_plot, p10_plot, p90_plot, color='lightcoral', alpha=0.4)
                     
             gwls_main = sorted(mmm_changes.keys())
@@ -366,24 +376,36 @@ class Visualizer:
                                    linewidth=0.8,
                                    zorder=5)
 
-            ylabel = f'Change in {jet_idx.replace("_", " ")}'
+            # Titel und Labels werden dynamisch erstellt
+            season_title = "Summer (JJA)" if "JJA" in jet_idx else "Winter (DJF)"
+            index_type_title = "Jet Latitude" if "Lat" in jet_idx else "Jet Speed"
+            
+            ylabel = f'Change in {index_type_title}'
             if '_pr' in jet_idx: ylabel += ' (%)'
             elif 'Lat' in jet_idx: ylabel += ' (°Lat)'
             elif 'Speed' in jet_idx: ylabel += ' (m/s)'
             ax.set_ylabel(ylabel)
-            ax.set_xlabel('Global Warming Level (°C)')
-            ax.set_title(f'Projected Change in {jet_idx.replace("_", " ")}')
+            
+            # X-Achsen-Label nur für die untere Reihe
+            if i >= 2:
+                ax.set_xlabel('Global Warming Level (°C)')
+                
+            ax.set_title(f'Projected Change in {season_title} {index_type_title}')
             ax.grid(True, linestyle=':', alpha=0.6)
             ax.axhline(0, color='grey', lw=0.8)
         
+        # --- MODIFIKATION START ---
+        # Passen Sie die Position der Legende für das neue Layout an.
         fig.legend(handles=master_legend_handles, labels=master_legend_labels,
                    loc='lower center',
-                   bbox_to_anchor=(0.5, -0.01),
-                   ncol=4,
-                   fontsize=10,
+                   bbox_to_anchor=(0.5, -0.02), # Y-Position angepasst
+                   ncol=3, # Angepasst für bessere Darstellung
+                   fontsize=11,
                    frameon=True)
 
-        plt.tight_layout(rect=[0, 0.08, 1, 0.95])
+        plt.tight_layout(rect=[0, 0.06, 1, 0.95]) # Rect-Parameter angepasst
+        # --- MODIFIKATION ENDE ---
+        
         fig.suptitle("CMIP6 Projected Jet Changes vs. Global Warming Level", fontsize=16, weight='bold')
         filepath = os.path.join(Config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
@@ -903,21 +925,25 @@ class Visualizer:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved AMO vs Jet correlation comparison plot to {filename}")
-        
+
     @staticmethod
     def plot_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, config, filename="climate_indices_evolution.png"):
         """
         Plots CMIP6 and Reanalysis changes over time, showing the evolution of key climate indices.
-        This plot is inspired by Harvey et al. (2023), Fig. 6.
+        MODIFIZIERT, um ein 2x3-Raster mit globaler Temperatur und allen vier Jet-Indizes zu erstellen.
         """
         filename = "climate_indices_evolution.png"
-        logging.info(f"Plotting climate projection timeseries comparison to {filename}...")
+        logging.info(f"Plotting climate projection timeseries comparison to {filename} (2x3 layout)...")
         Visualizer.ensure_plot_dir_exists()
 
-        fig, axs = plt.subplots(1, 3, figsize=(21, 6), sharex=True)
-        
-        # --- (a) Global Temperature Anomaly ---
-        ax_a = axs[0]
+        # --- MODIFIKATION START ---
+        # Ändern des Layouts auf 2x3 Subplots
+        fig, axs = plt.subplots(2, 3, figsize=(21, 12), sharex=True)
+        axs_flat = axs.flatten()
+        # --- MODIFIKATION ENDE ---
+
+        # --- (a) Globale Temperatur-Anomalie ---
+        ax_a = axs_flat[0]
         if cmip6_plot_data['Global_Tas']['members']:
             for member_tas in cmip6_plot_data['Global_Tas']['members']:
                 ax_a.plot(member_tas.year, member_tas, color='grey', alpha=0.3, linewidth=0.7)
@@ -925,53 +951,52 @@ class Visualizer:
             ax_a.plot(cmip6_plot_data['Global_Tas']['mmm'].year, cmip6_plot_data['Global_Tas']['mmm'], color='black', linewidth=2.5, label='CMIP6 MMM')
         
         ax_a.set_title('(a) Global Temperature Change', fontsize=12)
-        ax_a.set_ylabel(f'Temperature Anomaly (°C relative to {config.CMIP6_PRE_INDUSTRIAL_REF_START}-{config.CMIP6_PRE_INDUSTRIAL_REF_END})', fontsize=10)
+        ax_a.set_ylabel(f'Temp. Anomaly (°C rel. to {config.CMIP6_PRE_INDUSTRIAL_REF_START}-{config.CMIP6_PRE_INDUSTRIAL_REF_END})', fontsize=10)
         ax_a.legend(fontsize=9)
 
-        # --- (b) Summer Jet Latitude Anomaly ---
-        ax_b = axs[1]
-        if cmip6_plot_data['JJA_JetLat']['members']:
-            for member_lat in cmip6_plot_data['JJA_JetLat']['members']:
-                ax_b.plot(member_lat.season_year, member_lat, color='grey', alpha=0.3, linewidth=0.7)
-        if cmip6_plot_data['JJA_JetLat']['mmm'] is not None:
-            ax_b.plot(cmip6_plot_data['JJA_JetLat']['mmm'].season_year, cmip6_plot_data['JJA_JetLat']['mmm'], color='black', linewidth=2.5, label='CMIP6 MMM')
-        
-        if reanalysis_plot_data['JJA_JetLat'].get('20CRv3') is not None:
-            reanalysis_20crv3_lat = reanalysis_plot_data['JJA_JetLat']['20CRv3']
-            ax_b.plot(reanalysis_20crv3_lat.season_year, reanalysis_20crv3_lat, color='darkorange', linewidth=2, label='20CRv3')
-        if reanalysis_plot_data['JJA_JetLat'].get('ERA5') is not None:
-            reanalysis_era5_lat = reanalysis_plot_data['JJA_JetLat']['ERA5']
-            ax_b.plot(reanalysis_era5_lat.season_year, reanalysis_era5_lat, color='purple', linewidth=2, label='ERA5')
+        # --- Konfiguration für die vier Jet-Index-Plots ---
+        plot_configs = [
+            {'key': 'JJA_JetLat', 'ax': axs_flat[1], 'title': '(b) Summer (JJA) Jet Latitude Change', 'ylabel': 'Latitude Anomaly (°)'},
+            {'key': 'JJA_JetSpeed', 'ax': axs_flat[2], 'title': '(c) Summer (JJA) Jet Speed Change', 'ylabel': 'Speed Anomaly (m/s)'},
+            {'key': 'DJF_JetLat', 'ax': axs_flat[4], 'title': '(e) Winter (DJF) Jet Latitude Change', 'ylabel': 'Latitude Anomaly (°)'},
+            {'key': 'DJF_JetSpeed', 'ax': axs_flat[5], 'title': '(f) Winter (DJF) Jet Speed Change', 'ylabel': 'Speed Anomaly (m/s)'},
+        ]
 
-        ax_b.set_title('(b) Summer (JJA) Jet Latitude Change', fontsize=12)
-        ax_b.set_ylabel('Latitude Anomaly (°)', fontsize=10)
-        ax_b.legend(fontsize=9)
-        
-        # --- (c) Winter Jet Speed Anomaly ---
-        ax_c = axs[2]
-        if cmip6_plot_data['DJF_JetSpeed']['members']:
-            for member_spd in cmip6_plot_data['DJF_JetSpeed']['members']:
-                ax_c.plot(member_spd.season_year, member_spd, color='grey', alpha=0.3, linewidth=0.7)
-        if cmip6_plot_data['DJF_JetSpeed']['mmm'] is not None:
-            ax_c.plot(cmip6_plot_data['DJF_JetSpeed']['mmm'].season_year, cmip6_plot_data['DJF_JetSpeed']['mmm'], color='black', linewidth=2.5, label='CMIP6 MMM')
-        
-        if reanalysis_plot_data['DJF_JetSpeed'].get('20CRv3') is not None:
-            reanalysis_20crv3_spd = reanalysis_plot_data['DJF_JetSpeed']['20CRv3']
-            ax_c.plot(reanalysis_20crv3_spd.season_year, reanalysis_20crv3_spd, color='darkorange', linewidth=2, label='20CRv3')
-        if reanalysis_plot_data['DJF_JetSpeed'].get('ERA5') is not None:
-            reanalysis_era5_spd = reanalysis_plot_data['DJF_JetSpeed']['ERA5']
-            ax_c.plot(reanalysis_era5_spd.season_year, reanalysis_era5_spd, color='purple', linewidth=2, label='ERA5')
+        for p_config in plot_configs:
+            ax = p_config['ax']
+            key = p_config['key']
 
-        ax_c.set_title('(c) Winter (DJF) Jet Speed Change', fontsize=12)
-        ax_c.set_ylabel('Speed Anomaly (m/s)', fontsize=10)
-        ax_c.legend(fontsize=9)
+            if cmip6_plot_data.get(key) and cmip6_plot_data[key]['members']:
+                for member_jet in cmip6_plot_data[key]['members']:
+                    ax.plot(member_jet.season_year, member_jet, color='grey', alpha=0.3, linewidth=0.7)
+            if cmip6_plot_data.get(key) and cmip6_plot_data[key]['mmm'] is not None:
+                ax.plot(cmip6_plot_data[key]['mmm'].season_year, cmip6_plot_data[key]['mmm'], color='black', linewidth=2.5, label='CMIP6 MMM')
+            
+            if reanalysis_plot_data.get(key) and reanalysis_plot_data[key].get('20CRv3') is not None:
+                reanalysis_20crv3 = reanalysis_plot_data[key]['20CRv3']
+                ax.plot(reanalysis_20crv3.season_year, reanalysis_20crv3, color='darkorange', linewidth=2, label='20CRv3')
+            if reanalysis_plot_data.get(key) and reanalysis_plot_data[key].get('ERA5') is not None:
+                reanalysis_era5 = reanalysis_plot_data[key]['ERA5']
+                ax.plot(reanalysis_era5.season_year, reanalysis_era5, color='purple', linewidth=2, label='ERA5')
 
-        # --- Final formatting for all axes ---
-        for ax in axs:
+            ax.set_title(p_config['title'], fontsize=12)
+            ax.set_ylabel(p_config['ylabel'], fontsize=10)
+            ax.legend(fontsize=9)
+
+        # --- Finale Formatierung für alle Achsen ---
+        for ax in axs_flat:
             ax.grid(True, linestyle=':', alpha=0.7)
-            ax.set_xlabel('Year', fontsize=10)
             ax.set_xlim(1850, 2100)
             ax.axhline(0, color='black', linewidth=0.5)
+        
+        # X-Achsen-Label nur für die untere Reihe
+        for ax in axs[1, :]:
+             ax.set_xlabel('Year', fontsize=10)
+
+        # --- MODIFIKATION START ---
+        # Leeren Subplot in der Mitte ausblenden
+        axs_flat[3].axis('off')
+        # --- MODIFIKATION ENDE ---
 
         fig.suptitle('Evolution of Key Climate Indices (20-Year Rolling Mean Anomaly)', fontsize=16, weight='bold')
         plt.tight_layout(rect=[0, 0, 1, 0.96])

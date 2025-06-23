@@ -78,25 +78,25 @@ class Config:
     # TODO: These values MUST be adapted after analyzing the CMIP6 jet changes!
     # Format: {'IndexName': {GWL: {'StorylineType': Value}}}
     STORYLINE_JET_CHANGES = {
+        # Winter (DJF) Jet Speed [Unten Rechts]
         'DJF_JetSpeed': {
             2.0: {'Core Mean': 0.25, 'Core High': 0.8, 'Extreme Low': -0.8, 'Extreme High': 1.2},
             3.0: {'Core Mean': 0.4, 'Core High': 1.0, 'Extreme Low': -0.6, 'Extreme High': 1.5},
         },
+        # Sommer (JJA) Jet Latitude [Oben Links]
         'JJA_JetLat': {
-            2.0: {'Core Mean': 0.5, 'Core High': 1.8, 'Extreme Low': -1.5, 'Extreme High': 2.5},
+            2.0: {'Core Mean': 0.5, 'Core High': 1.8, 'Extreme Low': -1.6, 'Extreme High': 2.4},
             3.0: {'Core Mean': 1.2, 'Core High': 2.2, 'Extreme Low': -1.0, 'Extreme High': 3.0},
         },
-        # NEU: Platzhalter für Winter Jet Latitude.
-        # Diese Werte müssen basierend auf der CMIP6-Analyse angepasst werden.
+        # Winter (DJF) Jet Latitude [Unten Links]
         'DJF_JetLat': {
-            2.0: {'Core Mean': 0.0, 'Core High': 0.5, 'Extreme Low': -0.5, 'Extreme High': 1.0}, # Beispielwerte
-            3.0: {'Core Mean': 0.0, 'Core High': 0.7, 'Extreme Low': -0.7, 'Extreme High': 1.2}, # Beispielwerte
+            2.0: {'Core Mean': 0.4, 'Core High': 1.1, 'Extreme Low': -0.6, 'Extreme High': 1.3},
+            3.0: {'Core Mean': 0.5, 'Core High': 1.2, 'Extreme Low': -1.1, 'Extreme High': 1.8},
         },
-        # NEU: Platzhalter für Summer Jet Speed.
-        # Diese Werte müssen basierend auf der CMIP6-Analyse angepasst werden.
+        # Sommer (JJA) Jet Speed [Oben Rechts]
         'JJA_JetSpeed': {
-            2.0: {'Core Mean': 0.1, 'Core High': 0.5, 'Extreme Low': -0.5, 'Extreme High': 0.8}, # Beispielwerte
-            3.0: {'Core Mean': 0.2, 'Core High': 0.7, 'Extreme Low': -0.7, 'Extreme High': 1.0}, # Beispielwerte
+            2.0: {'Core Mean': 0.0, 'Core High': 0.5, 'Extreme Low': -0.45, 'Extreme High': 0.8},
+            3.0: {'Core Mean': -0.15, 'Core High': 0.7, 'Extreme Low': -0.75, 'Extreme High': 1.0},
         }
     }
 

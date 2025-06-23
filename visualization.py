@@ -1068,26 +1068,35 @@ class Visualizer:
     @staticmethod
     def plot_cmip6_scatter_comparison(cmip6_results, beta_obs_slopes, gwl_to_plot):
         """
-        Creates a 2x2 subplot figure comparing CMIP6 projected changes for different
-        jet indices and impact variables at a specific Global Warming Level.
+        Creates a 2x4 subplot figure comparing CMIP6 projected changes for all 8 combinations
+        of jet indices and impact variables at a specific Global Warming Level.
         """
         if not cmip6_results or not beta_obs_slopes:
             logging.warning("Cannot plot CMIP6 scatter comparison: Missing results or beta slopes.")
             return
             
-        logging.info(f"Plotting CMIP6 scatter comparison for {gwl_to_plot}°C GWL...")
+        logging.info(f"Plotting expanded 2x4 CMIP6 scatter comparison for {gwl_to_plot}°C GWL...")
         Visualizer.ensure_plot_dir_exists()
 
-        fig, axs = plt.subplots(2, 2, figsize=(14, 12))
+        # Change subplot layout to 2x4 and adjust figsize to be wider
+        fig, axs = plt.subplots(2, 4, figsize=(24, 12))
         
+        # Define all 8 plot configurations
         plot_configs = [
+            # Row 1: Temperature Impacts
             {'ax': axs[0, 0], 'jet_key': 'DJF_JetSpeed', 'impact_key': 'DJF_tas', 'beta_key': 'DJF_JetSpeed_vs_tas', 'title': 'Winter Temp vs. Jet Speed'},
-            {'ax': axs[0, 1], 'jet_key': 'JJA_JetLat',   'impact_key': 'JJA_tas', 'beta_key': 'JJA_JetLat_vs_tas',   'title': 'Summer Temp vs. Jet Latitude'},
+            {'ax': axs[0, 1], 'jet_key': 'DJF_JetLat',   'impact_key': 'DJF_tas', 'beta_key': 'DJF_JetLat_vs_tas',   'title': 'Winter Temp vs. Jet Latitude'},
+            {'ax': axs[0, 2], 'jet_key': 'JJA_JetSpeed', 'impact_key': 'JJA_tas', 'beta_key': 'JJA_JetSpeed_vs_tas', 'title': 'Summer Temp vs. Jet Speed'},
+            {'ax': axs[0, 3], 'jet_key': 'JJA_JetLat',   'impact_key': 'JJA_tas', 'beta_key': 'JJA_JetLat_vs_tas',   'title': 'Summer Temp vs. Jet Latitude'},
+            # Row 2: Precipitation Impacts
             {'ax': axs[1, 0], 'jet_key': 'DJF_JetSpeed', 'impact_key': 'DJF_pr',  'beta_key': 'DJF_JetSpeed_vs_pr',  'title': 'Winter Precip vs. Jet Speed'},
-            {'ax': axs[1, 1], 'jet_key': 'JJA_JetLat',   'impact_key': 'JJA_pr',  'beta_key': 'JJA_JetLat_vs_pr',    'title': 'Summer Precip vs. Jet Latitude'},
+            {'ax': axs[1, 1], 'jet_key': 'DJF_JetLat',   'impact_key': 'DJF_pr',  'beta_key': 'DJF_JetLat_vs_pr',    'title': 'Winter Precip vs. Jet Latitude'},
+            {'ax': axs[1, 2], 'jet_key': 'JJA_JetSpeed', 'impact_key': 'JJA_pr',  'beta_key': 'JJA_JetSpeed_vs_pr',  'title': 'Summer Precip vs. Jet Speed'},
+            {'ax': axs[1, 3], 'jet_key': 'JJA_JetLat',   'impact_key': 'JJA_pr',  'beta_key': 'JJA_JetLat_vs_pr',    'title': 'Summer Precip vs. Jet Latitude'},
         ]
 
         for config in plot_configs:
+            # The helper function _plot_single_scatter_panel is generic and can be reused
             Visualizer._plot_single_scatter_panel(
                 ax=config['ax'],
                 cmip6_results=cmip6_results,
@@ -1100,14 +1109,14 @@ class Visualizer:
             )
         
         ref_period = f"{Config.CMIP6_ANOMALY_REF_START}-{Config.CMIP6_ANOMALY_REF_END}"
-        fig.suptitle(f"CMIP6 Projected Changes at {gwl_to_plot}°C Global Warming Level\n(Changes relative to {ref_period} PI)",
-                     fontsize=16, weight='bold')
+        fig.suptitle(f"CMIP6 Projected Changes at {gwl_to_plot}°C Global Warming Level\n(Changes relative to {ref_period})",
+                     fontsize=18, weight='bold')
         
         plt.tight_layout(rect=[0, 0, 1, 0.95])
-        filename = os.path.join(Config.PLOT_DIR, f"cmip6_scatter_comparison_gwl_{gwl_to_plot:.1f}.png")
+        filename = os.path.join(Config.PLOT_DIR, f"cmip6_scatter_comparison_gwl_{gwl_to_plot:.1f}_extended.png") # Added _extended to filename
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved CMIP6 scatter comparison plot to {filename}")
+        logging.info(f"Saved expanded CMIP6 scatter comparison plot to {filename}")
         
     @staticmethod
     def _plot_single_jet_relationship_panel(ax, cmip6_results, gwl_to_plot, x_jet_key, y_jet_key, title):

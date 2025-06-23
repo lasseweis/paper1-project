@@ -707,28 +707,36 @@ class AdvancedAnalyzer:
         # --- MODIFIKATION ENDE ---
 
         return cmip6_plot_data, reanalysis_plot_data
-    
+
     @staticmethod
     def calculate_reanalysis_betas(datasets_reanalysis, jet_data_reanalysis, dataset_key='ERA5'):
         """
         Calculates the regression slopes (beta_obs) between jet indices and climate impacts
         for a specific reanalysis dataset (typically ERA5).
+        NOW CALCULATES ALL 8 COMBINATIONS.
         """
-        logging.info(f"Calculating beta_obs slopes from {dataset_key} reanalysis...")
+        logging.info(f"Calculating all 8 beta_obs slopes from {dataset_key} reanalysis...")
         beta_obs_slopes = {}
         
-        # Define all the relationships needed
+        # Define all 8 relationships needed for the full comparison
         beta_configs = [
-            {'jet': 'DJF_JetSpeed', 'impact': 'DJF_tas', 'impact_var_key': 'tas', 'season': 'Winter', 'jet_type': 'speed'},
-            {'jet': 'DJF_JetSpeed', 'impact': 'DJF_pr',  'impact_var_key': 'pr',  'season': 'Winter', 'jet_type': 'speed'},
-            {'jet': 'JJA_JetLat',   'impact': 'JJA_tas', 'impact_var_key': 'tas', 'season': 'Summer', 'jet_type': 'lat'},
-            {'jet': 'JJA_JetLat',   'impact': 'JJA_pr',  'impact_var_key': 'pr',  'season': 'Summer', 'jet_type': 'lat'}
+            # Winter Relationships
+            {'jet_key_part': 'DJF_JetSpeed', 'impact_var_key': 'tas', 'season': 'Winter', 'jet_type': 'speed'},
+            {'jet_key_part': 'DJF_JetSpeed', 'impact_var_key': 'pr',  'season': 'Winter', 'jet_type': 'speed'},
+            {'jet_key_part': 'DJF_JetLat',   'impact_var_key': 'tas', 'season': 'Winter', 'jet_type': 'lat'},
+            {'jet_key_part': 'DJF_JetLat',   'impact_var_key': 'pr',  'season': 'Winter', 'jet_type': 'lat'},
+            # Summer Relationships
+            {'jet_key_part': 'JJA_JetSpeed', 'impact_var_key': 'tas', 'season': 'Summer', 'jet_type': 'speed'},
+            {'jet_key_part': 'JJA_JetSpeed', 'impact_var_key': 'pr',  'season': 'Summer', 'jet_type': 'speed'},
+            {'jet_key_part': 'JJA_JetLat',   'impact_var_key': 'tas', 'season': 'Summer', 'jet_type': 'lat'},
+            {'jet_key_part': 'JJA_JetLat',   'impact_var_key': 'pr',  'season': 'Summer', 'jet_type': 'lat'}
         ]
 
         for config in beta_configs:
-            beta_key_name = f"{config['jet']}_vs_{config['impact_var_key']}"
+            # Construct the final key for the output dictionary (e.g., 'DJF_JetSpeed_vs_tas')
+            beta_key_name = f"{config['jet_key_part']}_vs_{config['impact_var_key']}"
             
-            # Get the jet timeseries (detrended)
+            # Get the jet timeseries (already detrended from main workflow)
             jet_data_key = f"{dataset_key}_{config['season'].lower()}_{config['jet_type']}_data"
             jet_ts = jet_data_reanalysis.get(jet_data_key, {}).get('jet')
 

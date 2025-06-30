@@ -1218,3 +1218,112 @@ class Visualizer:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved combined CMIP6 jet inter-relationship scatter plot to {filename}")
+
+    @staticmethod
+    def plot_u850_change_map(ax, u850_change_data, historical_mean_contours,
+                            lons, lats, title, season_label,
+                            cmap='RdBu_r', vmin=-2, vmax=2, cbar_label='U850 Change (m/s)',
+                            contour_levels=np.arange(-20, 21, 4)):
+        """
+        Plots a map of U850 change with historical mean contours.
+        """
+        if u850_change_data is None:
+            ax.text(0.5, 0.5, "Data Missing", ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(title + f"\n{season_label}\n(Data Missing)", fontsize=10)
+            return None
+
+        ax.set_extent(Config.PLOT_MAP_EXTENT, crs=ccrs.PlateCarree())
+        ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=0)
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
+        ax.add_feature(cfeature.BORDERS, linestyle=':', linewidth=0.5)
+        gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+        gl.top_labels = gl.right_labels = False
+        gl.xlabel_style = {'size': 8}; gl.ylabel_style = {'size': 8}
+
+        if lons.ndim == 1:
+            lons_plot, lats_plot = np.meshgrid(lons, lats)
+        else:
+            lons_plot, lats_plot = lons, lats
+
+        cf = ax.pcolormesh(lons_plot, lats_plot, u850_change_data, shading='auto',
+                        cmap=cmap, vmin=vmin, vmax=vmax, transform=ccrs.PlateCarree())
+
+        if historical_mean_contours is not None:
+            try:
+                cs = ax.contour(lons_plot, lats_plot, historical_mean_contours,
+                                levels=contour_levels, colors='black',
+                                linewidths=0.8, transform=ccrs.PlateCarree())
+                ax.clabel(cs, inline=True, fontsize=7, fmt='%d')
+            except Exception as e_contour:
+                logging.warning(f"Could not plot contours for {title} {season_label}: {e_contour}")
+
+        ax.set_title(f"{title}\n{season_label}", fontsize=10)
+        return cf, cbar_label
+
+    @staticmethod
+    def plot_cmip6_u850_change_panel(u850_change_results, config,
+                                    future_period=(2070,2099), historical_period=(1995,2014),
+                                    filename="cmip6_u850_change_djf_jja.png"):
+        """
+        Creates a panel plot for CMIP6 MMM U850 changes (DJF & JJA).
+        """
+        logging.info(f"Plotting CMIP6 MMM U850 change panel to {filename}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        if u850_change_results is None or \
+        u850_change_results.get('DJF') is None or \
+        u850_change_results.get('JJA') is None:
+            logging.warning("Cannot plot U850 change panel: Missing DJF or JJA data.")
+            return
+
+        fig = plt.figure(figsize=(12, 6))
+        gs = gridspec.GridSpec(1, 3, width_ratios=[10, 10, 1], wspace=0.1)
+        cf_ref = None
+
+        # DJF Plot
+        ax_djf = fig.add_subplot(gs[0, 0], projection=ccrs.PlateCarree())
+        djf_data = u850_change_results['DJF']
+        if djf_data and djf_data.get('u850_change_mmm') is not None:
+            cf_djf, _ = Visualizer.plot_u850_change_map(
+                ax_djf,
+                djf_data['u850_change_mmm'].data,
+                djf_data['u850_historical_mean_mmm'].data,
+                djf_data['u850_change_mmm'].lon.values,
+                djf_data['u850_change_mmm'].lat.values,
+                "CMIP6 MMM U850 Change", "DJF"
+            )
+            if cf_djf: cf_ref = cf_djf
+        else:
+            ax_djf.text(0.5,0.5, "DJF Data Missing", transform=ax_djf.transAxes, ha='center', va='center')
+            ax_djf.set_title("CMIP6 MMM U850 Change\nDJF\n(Data Missing)")
+
+        # JJA Plot
+        ax_jja = fig.add_subplot(gs[0, 1], projection=ccrs.PlateCarree())
+        jja_data = u850_change_results['JJA']
+        if jja_data and jja_data.get('u850_change_mmm') is not None:
+            cf_jja, label_jja = Visualizer.plot_u850_change_map(
+                ax_jja,
+                jja_data['u850_change_mmm'].data,
+                jja_data['u850_historical_mean_mmm'].data,
+                jja_data['u850_change_mmm'].lon.values,
+                jja_data['u850_change_mmm'].lat.values,
+                "CMIP6 MMM U850 Change", "JJA"
+            )
+            if cf_jja and cf_ref is None: cf_ref = cf_jja
+        else:
+            ax_jja.text(0.5,0.5, "JJA Data Missing", transform=ax_jja.transAxes, ha='center', va='center')
+            ax_jja.set_title("CMIP6 MMM U850 Change\nJJA\n(Data Missing)")
+
+        # Colorbar
+        if cf_ref is not None:
+            cax = fig.add_subplot(gs[0, 2])
+            cbar = fig.colorbar(cf_ref, cax=cax, extend='both')
+            cbar.set_label('U850 Change (m/s)', fontsize=9)
+            cbar.ax.tick_params(labelsize=8)
+        
+        plt.suptitle(f"CMIP6 MMM U850 Change ({future_period[0]}-{future_period[1]} minus {historical_period[0]}-{historical_period[1]})", fontsize=14, weight='bold')
+        plt.tight_layout(rect=[0, 0, 0.95, 0.95])
+        filepath = os.path.join(config.PLOT_DIR, filename)
+        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        logging.info(f"Saved CMIP6 U850 change panel to {filepath}")
+        plt.close(fig)

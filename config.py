@@ -52,7 +52,7 @@ class Config:
     BASE_PERIOD_END_YEAR = 2010
 
     # --- CMIP6 Parameters ---
-    CMIP6_DATA_BASE_PATH = '/data/users/vlw/paper1-cmip-data'
+    CMIP6_DATA_BASE_PATH = '/data/reloclim/normal/CMIP6_STREAM/paper1-cmip-data'
     CMIP6_VAR_PATH = os.path.join(CMIP6_DATA_BASE_PATH, '{variable}_regrid')
     CMIP6_FILE_PATTERN = '{variable}_Amon_{model}_{experiment}_{member}_{grid}_*_regridded.nc'
     CMIP6_SCENARIOS = ['ssp585', 'ssp245']

@@ -471,3 +471,108 @@ class StorylineAnalyzer:
                     
                     classification_results[gwl][jet_index][storyline_type] = sorted(models_in_storyline)
         return classification_results
+    
+    def calculate_cmip6_u850_change_fields(self,
+                                            models_to_run=None,
+                                            future_scenario='ssp585',
+                                            future_period=(2070, 2099),
+                                            historical_period=(1995, 2014),
+                                            preloaded_cmip6_data=None):
+        """
+        Calculates the MMM U850 change (future - historical) and the historical MMM U850 field.
+        Utilizes preloaded CMIP6 data if provided. Includes detailed logging for debugging.
+        """
+        logging.info(f"\nCalculating CMIP6 MMM U850 change: {future_scenario} ({future_period[0]}-{future_period[1]}) vs Historical ({historical_period[0]}-{historical_period[1]})...")
+
+        if models_to_run is None:
+            logging.warning("models_to_run is None, scanning for all potential models.")
+            potential_models_set = set()
+            base_path_scan = self.config.CMIP6_VAR_PATH.format(variable='ua')
+            file_pattern_scan = self.config.CMIP6_FILE_PATTERN.format(
+                variable='ua', model='*', experiment='*',
+                member=self.config.CMIP6_MEMBER_ID, grid='*', start_date='*', end_date='*'
+            )
+            all_found_files_scan = glob.glob(os.path.join(base_path_scan, file_pattern_scan))
+            for f_scan in all_found_files_scan:
+                try: potential_models_set.add(os.path.basename(f_scan).split('_')[2])
+                except IndexError: logging.warning(f"Could not parse model name from: {f_scan}")
+            models_to_process_list = sorted(list(potential_models_set))
+        else:
+            models_to_process_list = models_to_run
+
+        logging.info(f"Processing {len(models_to_process_list)} models for U850 change fields: {models_to_process_list}")
+
+        model_u850_changes = {'DJF': [], 'JJA': []}
+        model_u850_historical_means = {'DJF': [], 'JJA': []}
+        valid_models_processed = 0
+
+        for model in models_to_process_list:
+            logging.info(f"--- Attempting U850 change processing for model: {model} ---")
+            model_processed_successfully = False
+
+            try:
+                ua_combined_monthly = None
+                model_scenario_key = self.get_model_scenario_key(model, future_scenario)
+
+                if preloaded_cmip6_data and model_scenario_key in preloaded_cmip6_data and 'ua' in preloaded_cmip6_data[model_scenario_key]:
+                    ua_combined_monthly = preloaded_cmip6_data[model_scenario_key]['ua']
+                else:
+                    logging.info(f"    Directly loading 'ua' data for {model}.")
+                    ua_combined_monthly = self._load_and_preprocess_model_data(model, [future_scenario], 'ua')
+
+                if ua_combined_monthly is None:
+                    logging.warning(f"    SKIP {model}: Could not load 'ua' data.")
+                    continue
+
+                ua_hist_monthly = ua_combined_monthly.sel(time=slice(str(historical_period[0]), str(historical_period[1])))
+                ua_future_monthly = ua_combined_monthly.sel(time=slice(str(future_period[0]), str(future_period[1])))
+
+                if ua_hist_monthly.time.size == 0 or ua_future_monthly.time.size == 0:
+                    logging.warning(f"    SKIP {model}: Not enough data in historical or future period.")
+                    continue
+
+                ua_hist_seasonal = self.data_processor.calculate_seasonal_means(self.data_processor.assign_season_to_dataarray(ua_hist_monthly))
+                ua_future_seasonal = self.data_processor.calculate_seasonal_means(self.data_processor.assign_season_to_dataarray(ua_future_monthly))
+                
+                if ua_hist_seasonal is None or ua_future_seasonal is None:
+                    continue
+
+                for season in ['Winter', 'JJA']:
+                    s_key = 'DJF' if season == 'Winter' else 'JJA'
+                    ua_hist_season = self.data_processor.filter_by_season(ua_hist_seasonal, season)
+                    ua_future_season = self.data_processor.filter_by_season(ua_future_seasonal, season)
+
+                    if ua_hist_season is not None and ua_future_season is not None:
+                        hist_mean = ua_hist_season.mean(dim='season_year', skipna=True)
+                        future_mean = ua_future_season.mean(dim='season_year', skipna=True)
+                        
+                        change = future_mean - hist_mean
+                        model_u850_changes[s_key].append(change)
+                        model_u850_historical_means[s_key].append(hist_mean)
+                        model_processed_successfully = True
+
+            except Exception as e:
+                logging.error(f"    Error processing U850 change for {model}: {e}")
+                traceback.print_exc()
+
+            if model_processed_successfully:
+                valid_models_processed += 1
+
+        results = {}
+        if valid_models_processed < 3:
+            logging.warning(f"Not enough models ({valid_models_processed}) to compute reliable MMM for U850 change.")
+            return None
+
+        for season in ['DJF', 'JJA']:
+            if model_u850_changes[season]:
+                aligned_changes = [da.reindex_like(model_u850_changes[season][0], method='nearest') for da in model_u850_changes[season]]
+                aligned_hist_means = [da.reindex_like(model_u850_historical_means[season][0], method='nearest') for da in model_u850_historical_means[season]]
+                
+                results[season] = {
+                    'u850_change_mmm': xr.concat(aligned_changes, dim='model').mean(dim='model', skipna=True).load(),
+                    'u850_historical_mean_mmm': xr.concat(aligned_hist_means, dim='model').mean(dim='model', skipna=True).load()
+                }
+            else:
+                results[season] = None
+                
+        return results

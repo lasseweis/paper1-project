@@ -439,6 +439,44 @@ class ClimateAnalysis:
                 logging.info(f"Plot '{inter_rel_plot_filename}' existiert bereits. Überspringe Erstellung.")
         else:
             logging.warning("Skipping CMIP6 jet inter-relationship scatter plots due to missing cmip6_results.")
+            
+        #CMIP6 MMM Analysis
+        logging.info("\n\n--- Checking for CMIP6 U850 Change Maps ---")
+        u850_change_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_mmm_u850_change_djf_jja.png")
+        if not os.path.exists(u850_change_plot_filename):
+            logging.info(f"Plot '{u850_change_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
+            if cmip6_results and 'cmip6_model_data_loaded' in cmip6_results:
+                future_period = (2070, 2099)
+                hist_period = (Config.CMIP6_ANOMALY_REF_START, Config.CMIP6_ANOMALY_REF_END)
+                
+                # Modelle aus den erfolgreich geladenen Daten ableiten
+                preloaded_data = cmip6_results['cmip6_model_data_loaded']
+                models_for_calc = sorted(list(set(key.split('_')[0] for key in preloaded_data.keys())))
+
+                if models_for_calc:
+                    u850_change_data = storyline_analyzer.calculate_cmip6_u850_change_fields(
+                        models_to_run=models_for_calc,
+                        future_scenario=Config.CMIP6_SCENARIOS[0],
+                        future_period=future_period,
+                        historical_period=hist_period,
+                        preloaded_cmip6_data=preloaded_data
+                    )
+                    if u850_change_data:
+                        Visualizer.plot_cmip6_u850_change_panel(
+                            u850_change_data,
+                            Config(),
+                            future_period=future_period,
+                            historical_period=hist_period,
+                            filename=os.path.basename(u850_change_plot_filename)
+                        )
+                    else:
+                        logging.warning("Berechnung der U850-Änderungsdaten fehlgeschlagen.")
+                else:
+                    logging.warning("Keine Modelle für die U850-Änderungsberechnung verfügbar.")
+            else:
+                logging.warning("Überspringe U850-Änderungsplot: CMIP6-Ergebnisse fehlen.")
+        else:
+            logging.info(f"Plot '{u850_change_plot_filename}' existiert bereits. Überspringe Erstellung.")
 
         # --- FINALE ZUSAMMENFASSUNGEN ---
         if cmip6_results:

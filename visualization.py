@@ -1223,7 +1223,7 @@ class Visualizer:
     def plot_u850_change_map(ax, u850_change_data, historical_mean_contours,
                             lons, lats, title, season_label,
                             cmap='RdBu_r', vmin=-2, vmax=2, cbar_label='U850 Change (m/s)',
-                            contour_levels=np.arange(-20, 21, 4)):
+                            contour_levels=np.arange(4, 21, 4)):
         """
         Plots a map of U850 change with historical mean contours.
         """

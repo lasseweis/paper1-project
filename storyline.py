@@ -537,7 +537,7 @@ class StorylineAnalyzer:
                 if ua_hist_seasonal is None or ua_future_seasonal is None:
                     continue
 
-                for season in ['Winter', 'JJA']:
+                for season in ['Winter', 'Summer']:
                     s_key = 'DJF' if season == 'Winter' else 'JJA'
                     ua_hist_season = self.data_processor.filter_by_season(ua_hist_seasonal, season)
                     ua_future_season = self.data_processor.filter_by_season(ua_future_seasonal, season)

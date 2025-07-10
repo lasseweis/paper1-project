@@ -79,52 +79,31 @@ class StorylineAnalyzer:
 
         try:
             preprocess_func = None
-            # Define common arguments for open_mfdataset
             common_args = {
-                "paths": all_files,
-                "parallel": False,
-                "engine": 'netcdf4',
-                "use_cftime": True,
-                "coords": 'minimal',
-                "data_vars": 'minimal',
-                "compat": 'override',
-                "chunks": {'time': 120}
+                "paths": all_files, "parallel": False, "engine": 'netcdf4',
+                "use_cftime": True, "coords": 'minimal', "data_vars": 'minimal',
+                "compat": 'override', "chunks": {'time': 120}
             }
 
-            # **FIX:** Choose the combine strategy based on the variable, like in the original script.
             if variable == 'ua':
                 preprocess_func = lambda ds: select_level_preprocess(ds, level_hpa=self.config.CMIP6_LEVEL)
-                ds = xr.open_mfdataset(**common_args, combine='by_coords', preprocess=preprocess_func)
+                ds = xr.open_mfdataset(**common_args, combine='nested', concat_dim='time', preprocess=preprocess_func)
             else:
                 ds = xr.open_mfdataset(**common_args, combine='nested', concat_dim='time')
 
             data_var = ds[actual_var_name]
 
-            # Standardize coordinates (robust version)
             rename_map = {'latitude': 'lat', 'longitude': 'lon', 'plev': 'lev'}
-            final_rename_map = {}
-            for old_name, new_name in rename_map.items():
-                if old_name in data_var.dims:
-                    final_rename_map[old_name] = new_name
-                # WICHTIG: Prüft auch, ob es eine Koordinate ist, die nicht gleichzeitig eine Dimension ist.
-                if old_name in data_var.coords and old_name not in data_var.dims:
-                    final_rename_map[old_name] = new_name
-            
+            final_rename_map = {old: new for old, new in rename_map.items() if old in data_var.dims or old in data_var.coords}
             if final_rename_map:
-                logging.info(f"Renaming coordinates/dims for {model}: {final_rename_map}")
                 data_var = data_var.rename(final_rename_map)
 
-            # Debugging-Tipp: Fügen Sie diese Zeile hinzu, um die erfolgreiche Umbenennung zu prüfen
-            logging.debug(f"Coordinates after renaming for {model}: {list(data_var.coords.keys())}")
-
-            # Ensure time coordinate is clean
             if not data_var.indexes['time'].is_unique:
                 _, index = np.unique(data_var['time'], return_index=True)
                 data_var = data_var.isel(time=index)
             if not data_var.indexes['time'].is_monotonic_increasing:
                 data_var = data_var.sortby('time')
 
-            # Unit conversions
             if variable == 'pr' and data_var.attrs.get('units', '').lower() == 'kg m-2 s-1':
                 data_var = data_var * 86400.0
                 data_var.attrs['units'] = 'mm/day'
@@ -132,28 +111,34 @@ class StorylineAnalyzer:
                 data_var = data_var - 273.15
                 data_var.attrs['units'] = 'degC'
 
-            # Specific processing for global vs. regional
             is_global_tas = (variable == self.config.CMIP6_GLOBAL_TAS_VAR) and not force_regional
             if is_global_tas:
                 if 'lat' in data_var.dims and 'lon' in data_var.dims:
                     weights = np.cos(np.deg2rad(data_var.lat))
                     data_var = data_var.weighted(weights).mean(dim=("lon", "lat"), skipna=True)
-                if data_var.ndim > 1: # Ensure it's a 1D time series
+                if data_var.ndim > 1:
                     data_var = data_var.squeeze(drop=True)
                 if data_var.ndim != 1 or 'time' not in data_var.dims:
                     raise ValueError(f"Global TAS for {model} could not be reduced to 1D time series. Dims: {data_var.dims}")
-            else: # Regional processing
+            else:
                 if 'lon' in data_var.coords and np.any(data_var.lon > 180):
                     data_var = data_var.assign_coords(lon=(((data_var.lon + 180) % 360) - 180)).sortby('lon')
             
-            # Filter time up to 2300 for long-running scenarios
             if 'time' in data_var.coords and data_var.time.size > 0:
                 data_var = data_var.sel(time=slice(None, '2101-01-01'))
 
             return data_var.load()
 
+        # --- KORRIGIERTER/ERWEITERTER FEHLER-BLOCK ---
+        except (OSError, ValueError) as e:
+            if isinstance(e, OSError) and "HDF" in str(e):
+                logging.error(f"FATAL HDF ERROR (corrupted file) for {variable}, {model}: {e}")
+            else:
+                logging.error(f"FATAL ERROR loading/processing {variable} for {model}: {e}")
+            logging.error(traceback.format_exc())
+            return None
         except Exception as e:
-            logging.error(f"FATAL ERROR loading/processing {variable} for {model}: {e}")
+            logging.error(f"UNEXPECTED FATAL ERROR loading/processing {variable} for {model}: {e}")
             logging.error(traceback.format_exc())
             return None
 

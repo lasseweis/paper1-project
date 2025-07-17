@@ -33,15 +33,16 @@ class JetStreamAnalyzer:
                 logging.warning(f"JetSpeed: da_season lacks lat/lon coordinates or they are empty.")
                 return None
 
-            # === KORREKTUR START ===
-            # This logic checks if latitude is descending and reverses the slice if needed.
             lat_slice = slice(lat_min, lat_max)
             if da_season.lat.size > 1 and da_season.lat.values[0] > da_season.lat.values[-1]:
                 lat_slice = slice(lat_max, lat_min)
-            # === KORREKTUR ENDE ===
 
             domain = da_season.sel(lat=lat_slice, lon=slice(lon_min, lon_max))
-            if domain.lat.size > 0 and domain.lon.size > 0:
+            
+            # --- START DER KORREKTUR ---
+            # Prüfen, ob nach der Auswahl überhaupt gültige (nicht-NaN) Datenpunkte übrig sind.
+            if domain.lat.size > 0 and domain.lon.size > 0 and not domain.isnull().all():
+            # --- ENDE DER KORREKTUR ---
                 weights = np.cos(np.deg2rad(domain.lat))
                 weights.name = "weights"
                 weighted_mean = domain.weighted(weights).mean(dim=["lat", "lon"], skipna=True)
@@ -61,7 +62,7 @@ class JetStreamAnalyzer:
                     weighted_mean.attrs['dataset'] = da_season.attrs['dataset']
                 return weighted_mean
             else:
-                logging.warning(f"JetSpeed: Domain for index calculation is empty.")
+                logging.warning(f"JetSpeed: Domain for index calculation is empty or contains only NaNs.")
                 return None
 
         except Exception as e:

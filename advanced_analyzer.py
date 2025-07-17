@@ -655,16 +655,40 @@ class AdvancedAnalyzer:
                         if processed_jet is not None:
                             cmip6_plot_data[jet_key]['members'].append(processed_jet)
 
-            # MMM-Berechnung
+            # MMM-Berechnung (MODIFIZIERT FÜR ROBUSTHEIT)
             for key, data in cmip6_plot_data.items():
                 if data['members']:
                     try:
                         time_coord = 'year' if key == 'Global_Tas' else 'season_year'
+                        
                         valid_members = [m for m in data['members'] if m is not None and time_coord in m.dims and m.sizes[time_coord] > 0]
-                        if valid_members:
-                            cmip6_plot_data[key]['mmm'] = xr.concat(valid_members, dim='member').mean('member', skipna=True)
+                        if not valid_members:
+                            logging.warning(f"No valid members found for MMM calculation of {key}.")
+                            continue
+
+                        sanitized_members = []
+                        for m in valid_members:
+                            coords_to_drop = [c for c in m.coords if c not in m.dims and c != time_coord]
+                            if coords_to_drop:
+                                sanitized_members.append(m.drop_vars(coords_to_drop, errors='ignore'))
+                            else:
+                                sanitized_members.append(m)
+
+                        if sanitized_members:
+                            # --- START DER KORREKTUR ---
+                            # Ändere join='override' zu join='outer', um Modelle mit leicht
+                            # unterschiedlichen Zeitachsen korrekt zu kombinieren.
+                            combined = xr.concat(sanitized_members, dim='member', join='outer', combine_attrs="override")
+                            # --- ENDE DER KORREKTUR ---
+                            
+                            cmip6_plot_data[key]['mmm'] = combined.mean('member', skipna=True)
+                            logging.info(f"Successfully calculated MMM for CMIP6 {key} from {len(sanitized_members)} members.")
+                        else:
+                            logging.warning(f"MMM calculation for {key} skipped, no sanitized members available.")
+                            
                     except Exception as e:
                         logging.error(f"Failed to calculate MMM for CMIP6 {key}: {e}")
+                        traceback.print_exc()
 
         # --- 2. Reanalyse-Daten verarbeiten (unverändert, aber profitiert von korrekter Hilfsfunktion) ---
         logging.info("Preparing reanalysis data (all four indices), aligning ERA5 to 20CRv3 baseline...")

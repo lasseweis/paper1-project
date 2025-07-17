@@ -124,8 +124,9 @@ class StorylineAnalyzer:
                 if 'lon' in data_var.coords and np.any(data_var.lon > 180):
                     data_var = data_var.assign_coords(lon=(((data_var.lon + 180) % 360) - 180)).sortby('lon')
             
+            # Hier begrenzen wir die Zeitachse aller geladenen Modelldaten auf den 31.12.2099
             if 'time' in data_var.coords and data_var.time.size > 0:
-                data_var = data_var.sel(time=slice(None, '2101-01-01'))
+                data_var = data_var.sel(time=slice(None, '2100-01-01'))
 
             return data_var.load()
 

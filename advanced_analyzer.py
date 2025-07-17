@@ -586,11 +586,10 @@ class AdvancedAnalyzer:
     def analyze_timeseries_for_projection_plot(cmip6_results, datasets_reanalysis, config):
         """
         Prepares CMIP6 and reanalysis data for the climate projection timeseries plot.
-        MODIFIZIERT, um alle vier Jet-Indizes (JJA/DJF Speed/Lat) zu verarbeiten.
+        MODIFIZIERT, um alle vier Jet-Indizes (JJA/DJF Speed/Lat) zu verarbeiten und Fehler zu beheben.
         """
         logging.info("Preparing data for climate projection timeseries plot (all four jet indices)...")
         
-        # --- MODIFIKATION START ---
         # Initialisierung für alle vier Indizes
         cmip6_plot_data = {'Global_Tas': {'members': [], 'mmm': None},
                            'JJA_JetLat': {'members': [], 'mmm': None},
@@ -599,75 +598,77 @@ class AdvancedAnalyzer:
                            'DJF_JetLat': {'members': [], 'mmm': None}}
         reanalysis_plot_data = {'JJA_JetLat': {}, 'DJF_JetSpeed': {}, 
                                 'JJA_JetSpeed': {}, 'DJF_JetLat': {}}
-        # --- MODIFIKATION ENDE ---
 
         rolling_window = 20
         pi_ref_start = config.CMIP6_PRE_INDUSTRIAL_REF_START
         pi_ref_end = config.CMIP6_PRE_INDUSTRIAL_REF_END
 
+        # --- START KORREKTUR: Hilfsfunktion hier definieren ---
         def _get_anomaly_and_smooth(data_array, year_coord, ref_start, ref_end, window):
-            # Diese Hilfsfunktion bleibt unverändert.
+            """Interne Hilfsfunktion zur Berechnung von Anomalien und gleitenden Mitteln."""
             if data_array is None or data_array.size == 0: return None
             try:
+                # Referenzperiode auswählen
                 ref_period_data = data_array.sel({year_coord: slice(ref_start, ref_end)})
                 if ref_period_data.sizes.get(year_coord, 0) == 0:
-                    logging.warning(f"No data in reference period {ref_start}-{ref_end} for {data_array.name}.")
-                    return None
+                    logging.warning(f"No data in reference period {ref_start}-{ref_end} for an index.")
+                    # Fallback: Den gesamten verfügbaren Zeitraum als Referenz verwenden, wenn die PI-Periode leer ist
+                    if data_array.sizes.get(year_coord, 0) > 0:
+                         ref_period_data = data_array
+                    else:
+                         return None
+                
                 ref_mean = ref_period_data.mean(dim=year_coord, skipna=True)
                 anomaly = data_array - ref_mean
+                
+                # Gleitendes Mittel anwenden
                 if anomaly.sizes.get(year_coord, 0) >= window:
                     return anomaly.rolling({year_coord: window}, center=True).mean().dropna(dim=year_coord)
-                return anomaly
+                return anomaly # Rückgabe der nicht geglätteten Anomalie, wenn die Zeitreihe zu kurz ist
             except Exception as e:
-                logging.error(f"Error in _get_anomaly_and_smooth for {data_array.name}: {e}")
+                logging.error(f"Error in _get_anomaly_and_smooth: {e}")
                 return None
+        # --- ENDE KORREKTUR ---
 
         # --- 1. CMIP6-Daten verarbeiten ---
         if cmip6_results and 'cmip6_model_data_loaded' in cmip6_results and 'model_metric_timeseries' in cmip6_results:
             cmip6_data = cmip6_results['cmip6_model_data_loaded']
             cmip6_metrics = cmip6_results['model_metric_timeseries']
 
-            # Globale Temperatur bleibt unverändert
+            # --- START KORREKTUR für globale Temperatur ---
             for key, model_data in cmip6_data.items():
-                tas_regional = model_data.get('tas')
-                if tas_regional is not None:
-                    weights = np.cos(np.deg2rad(tas_regional.lat))
-                    tas_global_mean = tas_regional.weighted(weights).mean(dim=('lon', 'lat'), skipna=True)
-                    tas_annual = tas_global_mean.groupby('time.year').mean('time', skipna=True)
+                tas_global_monthly = model_data.get(f"{config.CMIP6_GLOBAL_TAS_VAR}_global")
+                if tas_global_monthly is not None:
+                    tas_annual = tas_global_monthly.groupby('time.year').mean('time', skipna=True)
                     tas_annual.name = "Global_Tas"
                     processed_tas = _get_anomaly_and_smooth(tas_annual, 'year', pi_ref_start, pi_ref_end, rolling_window)
                     if processed_tas is not None:
                         cmip6_plot_data['Global_Tas']['members'].append(processed_tas)
+            # --- ENDE KORREKTUR für globale Temperatur ---
             
-            # --- MODIFIKATION START ---
             # Verarbeite alle vier Jet-Indizes
             for jet_key in ['JJA_JetLat', 'DJF_JetSpeed', 'JJA_JetSpeed', 'DJF_JetLat']:
                 for model_key, metrics in cmip6_metrics.items():
-                    # Der zugrunde liegende Analyse-Schritt in storyline.py berechnet bereits alle vier.
-                    # Wir müssen sie hier nur abrufen.
                     jet_timeseries = metrics.get(jet_key)
                     if jet_timeseries is not None:
                         processed_jet = _get_anomaly_and_smooth(jet_timeseries, 'season_year', pi_ref_start, pi_ref_end, rolling_window)
                         if processed_jet is not None:
                             cmip6_plot_data[jet_key]['members'].append(processed_jet)
-            # --- MODIFIKATION ENDE ---
 
-            # MMM-Berechnung bleibt konzeptionell gleich
+            # MMM-Berechnung
             for key, data in cmip6_plot_data.items():
                 if data['members']:
                     try:
                         time_coord = 'year' if key == 'Global_Tas' else 'season_year'
-                        valid_members = [m for m in data['members'] if m is not None and time_coord in m.dims]
+                        valid_members = [m for m in data['members'] if m is not None and time_coord in m.dims and m.sizes[time_coord] > 0]
                         if valid_members:
                             cmip6_plot_data[key]['mmm'] = xr.concat(valid_members, dim='member').mean('member', skipna=True)
                     except Exception as e:
                         logging.error(f"Failed to calculate MMM for CMIP6 {key}: {e}")
 
-        # --- 2. Reanalyse-Daten verarbeiten ---
+        # --- 2. Reanalyse-Daten verarbeiten (unverändert, aber profitiert von korrekter Hilfsfunktion) ---
         logging.info("Preparing reanalysis data (all four indices), aligning ERA5 to 20CRv3 baseline...")
-
-        # --- MODIFIKATION START ---
-        # Hilfsfunktion, die nun ein Dictionary mit allen 4 Indizes zurückgibt
+        
         def get_abs_indices(dset_key):
             ua_seasonal = datasets_reanalysis.get(f'{dset_key}_ua850_seasonal')
             if ua_seasonal is None: return {}
@@ -683,7 +684,6 @@ class AdvancedAnalyzer:
         indices_20crv3 = get_abs_indices("20CRv3")
         indices_era5 = get_abs_indices("ERA5")
 
-        # Verarbeite jeden Jet-Index-Typ in einer Schleife
         for jet_key in ['DJF_JetSpeed', 'JJA_JetLat', 'DJF_JetLat', 'JJA_JetSpeed']:
             ts_20crv3 = indices_20crv3.get(jet_key)
             ts_era5 = indices_era5.get(jet_key)
@@ -704,7 +704,6 @@ class AdvancedAnalyzer:
                 adjusted_era5 = ts_era5 - offset
                 anomaly_era5 = adjusted_era5 - pi_mean_20crv3
                 reanalysis_plot_data[jet_key]['ERA5'] = anomaly_era5.rolling({'season_year': rolling_window}, center=True).mean().dropna(dim='season_year')
-        # --- MODIFIKATION ENDE ---
 
         return cmip6_plot_data, reanalysis_plot_data
 

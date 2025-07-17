@@ -39,13 +39,16 @@ class JetStreamAnalyzer:
 
             domain = da_season.sel(lat=lat_slice, lon=slice(lon_min, lon_max))
             
-            # --- START DER KORREKTUR ---
-            # Prüfen, ob nach der Auswahl überhaupt gültige (nicht-NaN) Datenpunkte übrig sind.
             if domain.lat.size > 0 and domain.lon.size > 0 and not domain.isnull().all():
-            # --- ENDE DER KORREKTUR ---
+                
+                # --- KORREKTUR: Berücksichtige nur Westwinde (ua > 0) für den Index ---
+                domain_westerly = domain.where(domain > 0)
+
                 weights = np.cos(np.deg2rad(domain.lat))
                 weights.name = "weights"
-                weighted_mean = domain.weighted(weights).mean(dim=["lat", "lon"], skipna=True)
+                
+                # Berechne den Mittelwert auf den gefilterten "westerly" Daten
+                weighted_mean = domain_westerly.weighted(weights).mean(dim=["lat", "lon"], skipna=True)
                 
                 if weighted_mean.ndim > 1:
                     time_dim = next((d for d in ['season_year', 'year', 'time'] if d in weighted_mean.dims), None)

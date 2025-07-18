@@ -603,16 +603,13 @@ class AdvancedAnalyzer:
         pi_ref_start = config.CMIP6_PRE_INDUSTRIAL_REF_START
         pi_ref_end = config.CMIP6_PRE_INDUSTRIAL_REF_END
 
-        # --- START KORREKTUR: Hilfsfunktion hier definieren ---
         def _get_anomaly_and_smooth(data_array, year_coord, ref_start, ref_end, window):
             """Interne Hilfsfunktion zur Berechnung von Anomalien und gleitenden Mitteln."""
             if data_array is None or data_array.size == 0: return None
             try:
-                # Referenzperiode auswählen
                 ref_period_data = data_array.sel({year_coord: slice(ref_start, ref_end)})
                 if ref_period_data.sizes.get(year_coord, 0) == 0:
                     logging.warning(f"No data in reference period {ref_start}-{ref_end} for an index.")
-                    # Fallback: Den gesamten verfügbaren Zeitraum als Referenz verwenden, wenn die PI-Periode leer ist
                     if data_array.sizes.get(year_coord, 0) > 0:
                             ref_period_data = data_array
                     else:
@@ -621,21 +618,18 @@ class AdvancedAnalyzer:
                 ref_mean = ref_period_data.mean(dim=year_coord, skipna=True)
                 anomaly = data_array - ref_mean
                 
-                # Gleitendes Mittel anwenden
                 if anomaly.sizes.get(year_coord, 0) >= window:
                     return anomaly.rolling({year_coord: window}, center=True).mean().dropna(dim=year_coord)
-                return anomaly # Rückgabe der nicht geglätteten Anomalie, wenn die Zeitreihe zu kurz ist
+                return anomaly
             except Exception as e:
                 logging.error(f"Error in _get_anomaly_and_smooth: {e}")
                 return None
-        # --- ENDE KORREKTUR ---
 
         # --- 1. CMIP6-Daten verarbeiten ---
         if cmip6_results and 'cmip6_model_data_loaded' in cmip6_results and 'model_metric_timeseries' in cmip6_results:
             cmip6_data = cmip6_results['cmip6_model_data_loaded']
             cmip6_metrics = cmip6_results['model_metric_timeseries']
 
-            # --- START KORREKTUR für globale Temperatur ---
             for key, model_data in cmip6_data.items():
                 tas_global_monthly = model_data.get(f"{config.CMIP6_GLOBAL_TAS_VAR}_global")
                 if tas_global_monthly is not None:
@@ -643,19 +637,21 @@ class AdvancedAnalyzer:
                     tas_annual.name = "Global_Tas"
                     processed_tas = _get_anomaly_and_smooth(tas_annual, 'year', pi_ref_start, pi_ref_end, rolling_window)
                     if processed_tas is not None:
-                        cmip6_plot_data['Global_Tas']['members'].append(processed_tas)
-            # --- ENDE KORREKTUR für globale Temperatur ---
+                        # KORREKTUR: Bereinige auch die einzelnen Members
+                        cleaned_tas = processed_tas.where(abs(processed_tas) < 1e10)
+                        cmip6_plot_data['Global_Tas']['members'].append(cleaned_tas)
             
-            # Verarbeite alle vier Jet-Indizes
             for jet_key in ['JJA_JetLat', 'DJF_JetSpeed', 'JJA_JetSpeed', 'DJF_JetLat']:
                 for model_key, metrics in cmip6_metrics.items():
                     jet_timeseries = metrics.get(jet_key)
                     if jet_timeseries is not None:
                         processed_jet = _get_anomaly_and_smooth(jet_timeseries, 'season_year', pi_ref_start, pi_ref_end, rolling_window)
                         if processed_jet is not None:
-                            cmip6_plot_data[jet_key]['members'].append(processed_jet)
+                            # KORREKTUR: Bereinige auch die einzelnen Jet-Index-Members
+                            cleaned_jet = processed_jet.where(abs(processed_jet) < 1e10)
+                            cmip6_plot_data[jet_key]['members'].append(cleaned_jet)
 
-            # MMM-Berechnung (MODIFIZIERT FÜR ROBUSTHEIT)
+            # MMM-Berechnung
             for key, data in cmip6_plot_data.items():
                 if data['members']:
                     try:
@@ -675,13 +671,12 @@ class AdvancedAnalyzer:
                                 sanitized_members.append(m)
 
                         if sanitized_members:
-                            # --- START DER KORREKTUR ---
-                            # Ändere join='override' zu join='outer', um Modelle mit leicht
-                            # unterschiedlichen Zeitachsen korrekt zu kombinieren.
-                            combined = xr.concat(sanitized_members, dim='member', join='outer', combine_attrs="override")
-                            # --- ENDE DER KORREKTUR ---
+                            combined = xr.concat(sanitized_members, dim='member', join='outer', combine_attrs="drop_conflicts")
                             
-                            cmip6_plot_data[key]['mmm'] = combined.mean('member', skipna=True)
+                            # Die Maskierung hier wirkt sich nur auf die MMM-Berechnung aus
+                            combined_masked = combined.where(abs(combined) < 1e10)
+                            cmip6_plot_data[key]['mmm'] = combined_masked.mean('member', skipna=True)
+                            
                             logging.info(f"Successfully calculated MMM for CMIP6 {key} from {len(sanitized_members)} members.")
                         else:
                             logging.warning(f"MMM calculation for {key} skipped, no sanitized members available.")
@@ -693,8 +688,6 @@ class AdvancedAnalyzer:
         # --- 2. Reanalyse-Daten verarbeiten ---
         logging.info("Preparing reanalysis data (Global Tas and all four indices), aligning ERA5 to 20CRv3 baseline...")
 
-        # --- START: NEUER BLOCK für globale Temperatur-Anomalie der Reanalysen ---
-        # Hilfsfunktion zur Berechnung des globalen Mittels
         def _calculate_global_mean_tas(da):
             if da is None or 'lat' not in da.dims or 'lon' not in da.dims:
                 return None
@@ -703,23 +696,19 @@ class AdvancedAnalyzer:
             global_mean = da.weighted(weights).mean(dim=("lat", "lon"), skipna=True)
             return global_mean.groupby('time.year').mean('time', skipna=True)
 
-        # Lade monatliche Temperaturdaten
         tas_20crv3_monthly = datasets_reanalysis.get('20CRv3_tas_monthly')
         tas_era5_monthly = datasets_reanalysis.get('ERA5_tas_monthly')
 
-        # Verarbeite 20CRv3
         tas_20crv3_annual = _calculate_global_mean_tas(tas_20crv3_monthly)
         if tas_20crv3_annual is not None:
             processed_tas_20crv3 = _get_anomaly_and_smooth(tas_20crv3_annual, 'year', pi_ref_start, pi_ref_end, rolling_window)
             if processed_tas_20crv3 is not None:
                 reanalysis_plot_data['Global_Tas']['20CRv3'] = processed_tas_20crv3
 
-        # Verarbeite und aligniere ERA5
         tas_era5_annual = _calculate_global_mean_tas(tas_era5_monthly)
         if tas_era5_annual is not None and tas_20crv3_annual is not None:
             common_years_tas = np.intersect1d(tas_20crv3_annual.year.values, tas_era5_annual.year.values)
             if len(common_years_tas) > 5:
-                # *** KORREKTUR HIER ***
                 pi_mean_20crv3 = tas_20crv3_annual.sel(year=slice(pi_ref_start, pi_ref_end)).mean(skipna=True).compute().item()
                 mean_20crv3_overlap = tas_20crv3_annual.sel(year=common_years_tas).mean(skipna=True).compute().item()
                 mean_era5_overlap = tas_era5_annual.sel(year=common_years_tas).mean(skipna=True).compute().item()
@@ -733,7 +722,6 @@ class AdvancedAnalyzer:
                     reanalysis_plot_data['Global_Tas']['ERA5'] = smoothed_anomaly_era5
                 else:
                     reanalysis_plot_data['Global_Tas']['ERA5'] = anomaly_era5
-        # --- ENDE: NEUER BLOCK ---
 
         def get_abs_indices(dset_key):
             ua_seasonal = datasets_reanalysis.get(f'{dset_key}_ua850_seasonal')
@@ -756,7 +744,6 @@ class AdvancedAnalyzer:
             
             if ts_20crv3 is None: continue
 
-            # *** KORREKTUR HIER ***
             pi_mean_20crv3 = ts_20crv3.sel(season_year=slice(pi_ref_start, pi_ref_end)).mean(skipna=True).compute()
             anomaly_20crv3 = ts_20crv3 - pi_mean_20crv3
             reanalysis_plot_data[jet_key]['20CRv3'] = anomaly_20crv3.rolling({'season_year': rolling_window}, center=True).mean().dropna(dim='season_year')
@@ -765,7 +752,6 @@ class AdvancedAnalyzer:
 
             common_years = np.intersect1d(ts_20crv3.season_year.values, ts_era5.season_year.values)
             if len(common_years) > 5:
-                # *** KORREKTUR HIER ***
                 mean_20crv3_overlap = ts_20crv3.sel(season_year=common_years).mean(skipna=True).compute()
                 mean_era5_overlap = ts_era5.sel(season_year=common_years).mean(skipna=True).compute()
                 offset = mean_era5_overlap - mean_20crv3_overlap

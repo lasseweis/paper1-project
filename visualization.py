@@ -935,6 +935,19 @@ class Visualizer:
         filename = "climate_indices_evolution.png"
         logging.info(f"Plotting climate projection timeseries comparison to {filename} (2x3 layout)...")
         Visualizer.ensure_plot_dir_exists()
+        
+        # DEBUG: Print the data received by the plotting function for DJF_JetSpeed
+        print("--- DEBUG: Data received by plot_climate_projection_timeseries for DJF_JetSpeed ---")
+        if cmip6_plot_data and 'DJF_JetSpeed' in cmip6_plot_data:
+            print("CMIP6 MMM data for DJF_JetSpeed:")
+            print(cmip6_plot_data['DJF_JetSpeed']['mmm'])
+        if reanalysis_plot_data and 'DJF_JetSpeed' in reanalysis_plot_data:
+            print("Reanalysis 20CRv3 data for DJF_JetSpeed:")
+            print(reanalysis_plot_data['DJF_JetSpeed'].get('20CRv3'))
+            print("Reanalysis ERA5 data for DJF_JetSpeed:")
+            print(reanalysis_plot_data['DJF_JetSpeed'].get('ERA5'))
+        print("------------------------------------------------------------------------------------")
+
 
         # --- MODIFIKATION START ---
         # Ändern des Layouts auf 2x3 Subplots

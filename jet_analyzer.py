@@ -41,14 +41,15 @@ class JetStreamAnalyzer:
             
             if domain.lat.size > 0 and domain.lon.size > 0 and not domain.isnull().all():
                 
-                # --- KORREKTUR: Berücksichtige nur Westwinde (ua > 0) für den Index ---
-                domain_westerly = domain.where(domain > 0)
-
+                # --- KORREKTUR ---
+                # Der räumliche Mittelwert wird direkt auf dem gesamten Gebietsausschnitt
+                # berechnet, ohne vorher nicht-westliche Winde zu entfernen. Das ist die
+                # Standardmethode und verhindert die Erzeugung von NaNs, wenn in Teilen
+                # der Box östliche Winde auftreten.
                 weights = np.cos(np.deg2rad(domain.lat))
                 weights.name = "weights"
                 
-                # Berechne den Mittelwert auf den gefilterten "westerly" Daten
-                weighted_mean = domain_westerly.weighted(weights).mean(dim=["lat", "lon"], skipna=True)
+                weighted_mean = domain.weighted(weights).mean(dim=["lat", "lon"], skipna=True)
                 
                 if weighted_mean.ndim > 1:
                     time_dim = next((d for d in ['season_year', 'year', 'time'] if d in weighted_mean.dims), None)
@@ -57,8 +58,8 @@ class JetStreamAnalyzer:
                         weighted_mean = weighted_mean.squeeze(dim=dims_to_squeeze, drop=True)
 
                 if weighted_mean.ndim > 1:
-                     logging.error(f"JetSpeed Index is still >1D after squeeze: Dims {weighted_mean.dims}.")
-                     return None
+                        logging.error(f"JetSpeed Index is still >1D after squeeze: Dims {weighted_mean.dims}.")
+                        return None
                 
                 weighted_mean.name = "jet_speed_index"
                 if 'dataset' in da_season.attrs:

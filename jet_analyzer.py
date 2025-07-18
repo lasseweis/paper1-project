@@ -1,10 +1,3 @@
-"""
-Jet stream analysis module.
-
-This file contains the JetStreamAnalyzer class, which provides
-specialized methods for calculating jet stream indices (speed and latitude)
-from U850 wind data arrays.
-"""
 import numpy as np
 import xarray as xr
 import logging
@@ -42,14 +35,15 @@ class JetStreamAnalyzer:
             if domain.lat.size > 0 and domain.lon.size > 0 and not domain.isnull().all():
                 
                 # --- KORREKTUR ---
-                # Der räumliche Mittelwert wird direkt auf dem gesamten Gebietsausschnitt
-                # berechnet, ohne vorher nicht-westliche Winde zu entfernen. Das ist die
-                # Standardmethode und verhindert die Erzeugung von NaNs, wenn in Teilen
-                # der Box östliche Winde auftreten.
-                weights = np.cos(np.deg2rad(domain.lat))
+                # Nur Westwinde (> 0) werden für die Berechnung des Index verwendet,
+                # um die Methode an die Berechnung des Jet-Latitude-Index anzugleichen.
+                westerly_winds = domain.where(domain > 0)
+                
+                weights = np.cos(np.deg2rad(westerly_winds.lat))
                 weights.name = "weights"
                 
-                weighted_mean = domain.weighted(weights).mean(dim=["lat", "lon"], skipna=True)
+                # Berechne den gewichteten Mittelwert nur für die Westwind-Komponenten
+                weighted_mean = westerly_winds.weighted(weights).mean(dim=["lat", "lon"], skipna=True)
                 
                 if weighted_mean.ndim > 1:
                     time_dim = next((d for d in ['season_year', 'year', 'time'] if d in weighted_mean.dims), None)

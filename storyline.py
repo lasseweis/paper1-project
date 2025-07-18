@@ -38,8 +38,6 @@ class StorylineAnalyzer:
         self.data_processor = DataProcessor()
         self.jet_analyzer = JetStreamAnalyzer()
 
-    # ... (alle bisherigen Methoden der StorylineAnalyzer bleiben hier)
-
     @staticmethod
     def get_model_scenario_key(model, scenario):
         return f"{model}_{scenario}"
@@ -1069,6 +1067,7 @@ class StorylineAnalyzer:
                 # 1. Get the first timeseries (impact variable)
                 var1_ts = None
                 if config['var1_key'] in ['discharge', 'extreme_flow']:
+                    # Abflussdaten sind für beide Reanalyse-Datensätze gleich
                     if discharge_data:
                         var1_ts = discharge_data.get(f"{season_lower}_{config['var1_key']}")
                 else:  # 'pr' or 'tas'
@@ -1136,7 +1135,7 @@ class StorylineAnalyzer:
     def analyze_timeseries_for_projection_plot(cmip6_results, datasets_reanalysis, config):
         """
         Prepares CMIP6 and reanalysis data for the climate projection timeseries plot.
-        MODIFIZIERT, um alle vier Jet-Indizes (JJA/DJF Speed/Lat) zu verarbeiten und Fehler zu beheben.
+        This version includes more robust data cleaning to prevent warnings from invalid model values.
         """
         logging.info("Preparing data for climate projection timeseries plot (all four jet indices)...")
         
@@ -1156,21 +1155,26 @@ class StorylineAnalyzer:
         def _get_anomaly_and_smooth(data_array, year_coord, ref_start, ref_end, window):
             """Interne Hilfsfunktion zur Berechnung von Anomalien und gleitenden Mitteln."""
             if data_array is None or data_array.size == 0: return None
+            
+            # [KORREKTUR] Filtere unrealistische Werte, bevor sie in die Berechnung eingehen
+            sane_data = data_array.where(np.abs(data_array) < 1e10)
+
             try:
-                ref_period_data = data_array.sel({year_coord: slice(ref_start, ref_end)})
+                ref_period_data = sane_data.sel({year_coord: slice(ref_start, ref_end)})
                 if ref_period_data.sizes.get(year_coord, 0) == 0:
-                    logging.warning(f"No data in reference period {ref_start}-{ref_end} for an index.")
-                    if data_array.sizes.get(year_coord, 0) > 0:
-                            ref_period_data = data_array
+                    logging.warning(f"No valid data in reference period {ref_start}-{ref_end} for an index.")
+                    # Fallback: Benutze alle verfügbaren Daten für den Referenzwert, wenn der Zeitraum leer ist
+                    if sane_data.sizes.get(year_coord, 0) > 0:
+                        ref_period_data = sane_data
                     else:
-                            return None
+                        return None
                 
                 ref_mean = ref_period_data.mean(dim=year_coord, skipna=True)
-                anomaly = data_array - ref_mean
+                anomaly = sane_data - ref_mean
                 
                 if anomaly.sizes.get(year_coord, 0) >= window:
                     return anomaly.rolling({year_coord: window}, center=True).mean().dropna(dim=year_coord)
-                return anomaly
+                return anomaly # Gib die nicht geglättete Anomalie zurück, wenn die Zeitreihe zu kurz ist
             except Exception as e:
                 logging.error(f"Error in _get_anomaly_and_smooth: {e}")
                 return None
@@ -1187,9 +1191,7 @@ class StorylineAnalyzer:
                     tas_annual.name = "Global_Tas"
                     processed_tas = _get_anomaly_and_smooth(tas_annual, 'year', pi_ref_start, pi_ref_end, rolling_window)
                     if processed_tas is not None:
-                        # KORREKTUR: Bereinige auch die einzelnen Members
-                        cleaned_tas = processed_tas.where(abs(processed_tas) < 1e10)
-                        cmip6_plot_data['Global_Tas']['members'].append(cleaned_tas)
+                        cmip6_plot_data['Global_Tas']['members'].append(processed_tas)
             
             for jet_key in ['JJA_JetLat', 'DJF_JetSpeed', 'JJA_JetSpeed', 'DJF_JetLat']:
                 for model_key, metrics in cmip6_metrics.items():
@@ -1197,9 +1199,7 @@ class StorylineAnalyzer:
                     if jet_timeseries is not None:
                         processed_jet = _get_anomaly_and_smooth(jet_timeseries, 'season_year', pi_ref_start, pi_ref_end, rolling_window)
                         if processed_jet is not None:
-                            # KORREKTUR: Bereinige auch die einzelnen Jet-Index-Members
-                            cleaned_jet = processed_jet.where(abs(processed_jet) < 1e10)
-                            cmip6_plot_data[jet_key]['members'].append(cleaned_jet)
+                            cmip6_plot_data[jet_key]['members'].append(processed_jet)
 
             # MMM-Berechnung
             for key, data in cmip6_plot_data.items():
@@ -1207,11 +1207,13 @@ class StorylineAnalyzer:
                     try:
                         time_coord = 'year' if key == 'Global_Tas' else 'season_year'
                         
-                        valid_members = [m for m in data['members'] if m is not None and time_coord in m.dims and m.sizes[time_coord] > 0]
+                        # [KORREKTUR] Filtere None-Werte und leere Arrays robuster
+                        valid_members = [m for m in data['members'] if m is not None and m.size > 0 and time_coord in m.dims]
                         if not valid_members:
                             logging.warning(f"No valid members found for MMM calculation of {key}.")
                             continue
 
+                        # Sanitize coordinates before concatenation
                         sanitized_members = []
                         for m in valid_members:
                             coords_to_drop = [c for c in m.coords if c not in m.dims and c != time_coord]
@@ -1222,11 +1224,8 @@ class StorylineAnalyzer:
 
                         if sanitized_members:
                             combined = xr.concat(sanitized_members, dim='member', join='outer', combine_attrs="drop_conflicts")
-                            
-                            # Die Maskierung hier wirkt sich nur auf die MMM-Berechnung aus
-                            combined_masked = combined.where(abs(combined) < 1e10)
-                            cmip6_plot_data[key]['mmm'] = combined_masked.mean('member', skipna=True)
-                            
+                            # Berechne MMM aus den bereits bereinigten Member-Daten
+                            cmip6_plot_data[key]['mmm'] = combined.mean('member', skipna=True)
                             logging.info(f"Successfully calculated MMM for CMIP6 {key} from {len(sanitized_members)} members.")
                         else:
                             logging.warning(f"MMM calculation for {key} skipped, no sanitized members available.")

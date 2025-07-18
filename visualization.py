@@ -128,7 +128,8 @@ class Visualizer:
             cax_tas = fig.add_subplot(gs[1, 2]); fig.colorbar(cf_tas, cax=cax_tas, extend='both', label=label_tas)
             
         plt.suptitle(f"{dataset_key}: U850 Regression onto Box Climate Indices (Detrended, Normalized Predictors)", fontsize=14, weight='bold')
-        plt.tight_layout(rect=[0, 0, 0.95, 0.95])
+        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
+        fig.tight_layout(rect=[0, 0, 0.95, 0.95])
         filename = os.path.join(Config.PLOT_DIR, f'regression_maps_norm_{dataset_key}.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -257,7 +258,8 @@ class Visualizer:
             row_idx += 1
         
         plt.suptitle(f"Correlation Maps of Jet Variations and Climate ({season}, Detrended)", fontsize=16, weight='bold')
-        plt.tight_layout(rect=[0, 0, 0.95, 0.96])
+        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
+        fig.tight_layout(rect=[0, 0, 0.95, 0.96])
         filename = os.path.join(Config.PLOT_DIR, f'jet_correlation_maps_{season.lower()}.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -403,7 +405,8 @@ class Visualizer:
                    fontsize=11,
                    frameon=True)
 
-        plt.tight_layout(rect=[0, 0.06, 1, 0.95]) # Rect-Parameter angepasst
+        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
+        fig.tight_layout(rect=[0, 0.06, 1, 0.95])
         # --- MODIFIKATION ENDE ---
         
         fig.suptitle("CMIP6 Projected Jet Changes vs. Global Warming Level", fontsize=16, weight='bold')
@@ -541,8 +544,8 @@ class Visualizer:
             row_idx += 1
         
         plt.suptitle(f"Regression of Climate Variables on Jet Variations ({season}, Detrended)", fontsize=16, weight='bold')
-        plt.tight_layout(rect=[0, 0, 0.95, 0.96])
-        # [MODIFIED] Changed the filename to match the user's request
+        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
+        fig.tight_layout(rect=[0, 0, 0.95, 0.96])
         filename = os.path.join(Config.PLOT_DIR, f'jet_impact_regression_maps_{season.lower()}.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -557,7 +560,7 @@ class Visualizer:
         logging.info("Plotting comparison of detrended jet indices (Speed vs. Latitude)...")
         Visualizer.ensure_plot_dir_exists()
 
-        fig, axs = plt.subplots(2, 2, figsize=(16, 10), sharex=True, tight_layout=True)
+        fig, axs = plt.subplots(2, 2, figsize=(16, 10), sharex=True)
         plot_configs = [
             {'ax': axs[0, 0], 'season': 'Winter', 'index_type': 'speed', 'ylabel': 'Jet Speed Anomaly (m/s)'},
             {'ax': axs[0, 1], 'season': 'Summer', 'index_type': 'speed', 'ylabel': 'Jet Speed Anomaly (m/s)'},
@@ -636,6 +639,8 @@ class Visualizer:
         axs[1, 0].set_xlabel("Year")
         axs[1, 1].set_xlabel("Year")
 
+        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
+        fig.tight_layout()
         filepath = os.path.join(Config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -733,6 +738,7 @@ class Visualizer:
                             fontsize=9, color=color, weight='bold', bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2'))
 
         fig.suptitle(f"{season} Correlations with Jet Stream Indices: 20CRv3 vs ERA5 (Detrended)", fontsize=16, weight='bold')
+        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
         fig.tight_layout(rect=[0, 0, 1, 0.96])
         filename = os.path.join(Config.PLOT_DIR, f'{season_lower}_correlations_comparison_detrended.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -831,7 +837,8 @@ class Visualizer:
         # Signifikanz-Erklärung
         plt.figtext(0.5, 0.01, "* p < 0.05, ** p < 0.01, *** p < 0.001", ha="center", fontsize=10)
 
-        plt.tight_layout(rect=[0, 0.05, 1, 0.95])
+        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
+        fig.tight_layout(rect=[0, 0.05, 1, 0.95])
         filename = os.path.join(Config.PLOT_DIR, f'correlation_matrix_comparison_{season.lower()}_detrended_grouped.png')
         plt.savefig(filename, dpi=300)
         plt.close(fig)
@@ -920,7 +927,8 @@ class Visualizer:
                 ax.legend(by_label.values(), by_label.keys(), loc='lower left', fontsize=8)
 
         fig.suptitle('Relationship Between AMO Index and Jet Stream Indices (Detrended)', fontsize=16, weight='bold')
-        plt.tight_layout(rect=[0, 0.03, 1, 0.96])
+        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
+        fig.tight_layout(rect=[0, 0.03, 1, 0.96])
         filename = os.path.join(Config.PLOT_DIR, f'amo_jet_correlations_comparison_rolling_{window_size}yr.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -1010,7 +1018,8 @@ class Visualizer:
         # --- MODIFIKATION ENDE ---
 
         fig.suptitle('Evolution of Key Climate Indices (20-Year Rolling Mean Anomaly)', fontsize=16, weight='bold')
-        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
+        fig.tight_layout(rect=[0, 0, 1, 0.96])
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -1123,7 +1132,8 @@ class Visualizer:
         fig.suptitle(f"CMIP6 Projected Changes at {gwl_to_plot}°C Global Warming Level\n(Changes relative to {ref_period})",
                      fontsize=18, weight='bold')
         
-        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
         filename = os.path.join(Config.PLOT_DIR, f"cmip6_scatter_comparison_gwl_{gwl_to_plot:.1f}_extended.png") # Added _extended to filename
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -1224,7 +1234,8 @@ class Visualizer:
                      f"(Changes relative to {ref_period})",
                      fontsize=16, weight='bold')
 
-        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
+        fig.tight_layout(rect=[0, 0, 1, 0.95])
         filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_combined_gwl.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -1333,7 +1344,8 @@ class Visualizer:
             cbar.ax.tick_params(labelsize=8)
         
         plt.suptitle(f"CMIP6 MMM U850 Change ({future_period[0]}-{future_period[1]} minus {historical_period[0]}-{historical_period[1]})", fontsize=14, weight='bold')
-        plt.tight_layout(rect=[0, 0, 0.95, 0.95])
+        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
+        fig.tight_layout(rect=[0, 0, 0.95, 0.95])
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         logging.info(f"Saved CMIP6 U850 change panel to {filepath}")

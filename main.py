@@ -28,7 +28,6 @@ from config import Config
 from data_processing import DataProcessor
 from stats_analyzer import StatsAnalyzer
 from jet_analyzer import JetStreamAnalyzer
-from advanced_analyzer import AdvancedAnalyzer
 from visualization import Visualizer
 from storyline import StorylineAnalyzer
 
@@ -210,6 +209,10 @@ class ClimateAnalysis:
         Visualizer.ensure_plot_dir_exists()
         cmip6_results = None
         regression_results = {} # Wird nur gefüllt, wenn die Plots tatsächlich erstellt werden.
+        
+        # Erstelle eine Instanz der zentralen Analyseklasse
+        storyline_analyzer = StorylineAnalyzer(config=Config)
+
 
         # --- PART 1: GRUNDLAGEN-BERECHNUNGEN ---
         # Diese Basis-Daten und Jet-Indizes werden immer geladen/berechnet,
@@ -249,7 +252,7 @@ class ClimateAnalysis:
             if not os.path.exists(regression_plot_filename):
                 logging.info(f"Plot '{regression_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
                 # BERECHNUNG JETZT INNERHALB DER IF-BEDINGUNG
-                results = AdvancedAnalyzer.calculate_regression_maps(
+                results = StorylineAnalyzer.calculate_regression_maps(
                     datasets=datasets_reanalysis,
                     dataset_key=dset_key,
                     regression_period=regression_period
@@ -279,8 +282,8 @@ class ClimateAnalysis:
             if not os.path.exists(jet_impact_plot_filename):
                 logging.info(f"Plot '{jet_impact_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
                 # BERECHNUNG JETZT INNERHALB DER IF-BEDINGUNG
-                impact_20crv3 = AdvancedAnalyzer.calculate_jet_impact_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_20CRV3, season)
-                impact_era5 = AdvancedAnalyzer.calculate_jet_impact_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_ERA5, season)
+                impact_20crv3 = StorylineAnalyzer.calculate_jet_impact_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_20CRV3, season)
+                impact_era5 = StorylineAnalyzer.calculate_jet_impact_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_ERA5, season)
 
                 data_20crv3 = impact_20crv3.get(season)
                 data_era5 = impact_era5.get(season)
@@ -298,8 +301,8 @@ class ClimateAnalysis:
             if not os.path.exists(jet_corr_plot_filename):
                 logging.info(f"Plot '{jet_corr_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
                 # BERECHNUNG JETZT INNERHALB DER IF-BEDINGUNG
-                corr_20crv3 = AdvancedAnalyzer.calculate_jet_correlation_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_20CRV3, season)
-                corr_era5 = AdvancedAnalyzer.calculate_jet_correlation_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_ERA5, season)
+                corr_20crv3 = StorylineAnalyzer.calculate_jet_correlation_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_20CRV3, season)
+                corr_era5 = StorylineAnalyzer.calculate_jet_correlation_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_ERA5, season)
 
                 if corr_20crv3 and corr_era5:
                     Visualizer.plot_jet_correlation_maps(corr_20crv3, corr_era5, season)
@@ -323,7 +326,7 @@ class ClimateAnalysis:
             if not os.path.exists(corr_barchart_filename):
                 logging.info(f"Plot '{corr_barchart_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
                 # BERECHNUNG JETZT INNERHALB DER IF-BEDINGUNG
-                correlation_data_for_bar_chart = AdvancedAnalyzer.analyze_all_correlations_for_bar_chart(
+                correlation_data_for_bar_chart = StorylineAnalyzer.analyze_all_correlations_for_bar_chart(
                     datasets_reanalysis, jet_data_reanalysis, discharge_data_loaded, season
                 )
                 if not correlation_data_for_bar_chart.empty:
@@ -340,7 +343,7 @@ class ClimateAnalysis:
             logging.info(f"Plot '{amo_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
             if amo_data_loaded:
                 # BERECHNUNG JETZT INNERHALB DER IF-BEDINGUNG
-                amo_correlation_data = AdvancedAnalyzer.analyze_amo_jet_correlations_for_plot(jet_data_reanalysis, amo_data_loaded, window_size_amo)
+                amo_correlation_data = StorylineAnalyzer.analyze_amo_jet_correlations_for_plot(jet_data_reanalysis, amo_data_loaded, window_size_amo)
                 if amo_correlation_data and any(amo_correlation_data.values()):
                     Visualizer.plot_amo_jet_correlation_comparison(amo_correlation_data, window_size_amo)
                 else:
@@ -355,7 +358,6 @@ class ClimateAnalysis:
         # für mehrere nachfolgende Plots und Auswertungen benötigt werden.
         logging.info("\n\n--- Analyzing CMIP6 Data and Storylines ---")
         try:
-            storyline_analyzer = StorylineAnalyzer(config=Config)
             cmip6_results = storyline_analyzer.analyze_cmip6_changes_at_gwl()
             
             if cmip6_results:
@@ -378,7 +380,7 @@ class ClimateAnalysis:
             logging.info(f"Plot '{evolution_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
             if cmip6_results and datasets_reanalysis:
                 # BERECHNUNG JETZT INNERHALB DER IF-BEDINGUNG
-                cmip6_plot_data, reanalysis_plot_data = AdvancedAnalyzer.analyze_timeseries_for_projection_plot(
+                cmip6_plot_data, reanalysis_plot_data = StorylineAnalyzer.analyze_timeseries_for_projection_plot(
                     cmip6_results, datasets_reanalysis, Config()
                 )
                 if cmip6_plot_data and reanalysis_plot_data:
@@ -399,7 +401,7 @@ class ClimateAnalysis:
         if cmip6_results and datasets_reanalysis and jet_data_reanalysis:
             
             # 1. Calculate the beta_obs slopes from ERA5 reanalysis
-            beta_obs_slopes = AdvancedAnalyzer.calculate_reanalysis_betas(
+            beta_obs_slopes = StorylineAnalyzer.calculate_reanalysis_betas(
                 datasets_reanalysis, 
                 jet_data_reanalysis, 
                 dataset_key=Config.DATASET_ERA5

@@ -950,6 +950,17 @@ class Visualizer:
         if cmip6_plot_data['Global_Tas']['mmm'] is not None:
             ax_a.plot(cmip6_plot_data['Global_Tas']['mmm'].year, cmip6_plot_data['Global_Tas']['mmm'], color='black', linewidth=2.5, label='CMIP6 MMM')
         
+        # --- START: NEUER PLOT-CODE ---
+        # Zeichne Reanalyse-Daten für globale Temperatur
+        if reanalysis_plot_data.get('Global_Tas'):
+            if reanalysis_plot_data['Global_Tas'].get('20CRv3') is not None:
+                reanalysis_20crv3_tas = reanalysis_plot_data['Global_Tas']['20CRv3']
+                ax_a.plot(reanalysis_20crv3_tas.year, reanalysis_20crv3_tas, color='darkorange', linewidth=2, label='20CRv3')
+            if reanalysis_plot_data['Global_Tas'].get('ERA5') is not None:
+                reanalysis_era5_tas = reanalysis_plot_data['Global_Tas']['ERA5']
+                ax_a.plot(reanalysis_era5_tas.year, reanalysis_era5_tas, color='purple', linewidth=2, label='ERA5')
+        # --- ENDE: NEUER PLOT-CODE ---
+        
         ax_a.set_title('(a) Global Temperature Change', fontsize=12)
         ax_a.set_ylabel(f'Temp. Anomaly (°C rel. to {config.CMIP6_PRE_INDUSTRIAL_REF_START}-{config.CMIP6_PRE_INDUSTRIAL_REF_END})', fontsize=10)
         ax_a.legend(fontsize=9)
@@ -991,7 +1002,7 @@ class Visualizer:
         
         # X-Achsen-Label nur für die untere Reihe
         for ax in axs[1, :]:
-             ax.set_xlabel('Year', fontsize=10)
+                ax.set_xlabel('Year', fontsize=10)
 
         # --- MODIFIKATION START ---
         # Leeren Subplot in der Mitte ausblenden

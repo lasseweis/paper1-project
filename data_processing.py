@@ -17,6 +17,7 @@ import traceback
 import warnings
 from functools import lru_cache
 from scipy import signal
+from scipy.stats import fisk, norm
 
 # Import the project's configuration
 from config import Config
@@ -551,3 +552,130 @@ class DataProcessor:
             except Exception as e_fallback:
                 logging.error(f"Detrending also failed with polyfit fallback. Returning original data. Error: {e_fallback}")
                 return data
+            
+    @staticmethod
+    def _calculate_pet_thornthwaite(tas_monthly, lat):
+        """
+        Calculates Potential Evapotranspiration (PET) using the Thornthwaite (1948) method.
+        Internal helper function.
+        
+        Parameters:
+        -----------
+        tas_monthly : xr.DataArray
+            Monthly mean temperature (°C) as a time series.
+        lat : float
+            Latitude in degrees.
+
+        Returns:
+        --------
+        xr.DataArray
+            Monthly PET in mm/month.
+        """
+        if tas_monthly is None: return None
+        
+        # Clip temperature at 0, as Thornthwaite is not defined for negative monthly means
+        t = tas_monthly.clip(min=0)
+        
+        # Calculate monthly heat index 'i'
+        i = (t / 5)**1.514
+        
+        # Calculate annual heat index 'I'
+        I_annual = i.groupby("time.year").sum("time")
+
+        # --- KORREKTUR START ---
+        # Map the annual values back to the monthly time series using .sel()
+        # This correctly broadcasts the annual value to each month of that year.
+        I = I_annual.sel(year=tas_monthly.time.dt.year)
+        # --- KORREKTUR ENDE ---
+        
+        # Calculate exponent 'a'
+        a = (6.75e-7 * I**3) - (7.71e-5 * I**2) + (1.792e-2 * I) + 0.49239
+        
+        # Calculate day length and sunlight hours correction factor
+        month_days = tas_monthly.time.dt.daysinmonth
+        day_of_year = tas_monthly.time.dt.dayofyear
+        
+        delta = 0.409 * np.sin(0.0172 * day_of_year - 1.39)
+        lat_rad = np.deg2rad(lat)
+        sunset_hour_angle = np.arccos(-np.tan(lat_rad) * np.tan(delta))
+        N = 24 / np.pi * sunset_hour_angle # Daylight hours
+        
+        # Correction factor L for days in month and daylight hours
+        L = (N / 12) * (month_days / 30)
+        
+        # Calculate unadjusted PET
+        pet_unadjusted = 16 * (10 * t / I)**a
+        
+        # Adjust PET for month and latitude
+        pet_monthly = pet_unadjusted * L
+        pet_monthly = pet_monthly.where(pet_monthly > 0, 0) # Ensure PET is not negative
+        pet_monthly.attrs = {'long_name': 'Potential Evapotranspiration', 'units': 'mm/month'}
+        
+        return pet_monthly
+
+    @staticmethod
+    def calculate_spei(pr_monthly, tas_monthly, lat, scale=4):
+        """
+        Calculates the Standardized Precipitation-Evapotranspiration Index (SPEI).
+        Follows the methodology described by Vincente-Serrano et al. (2010).
+
+        Parameters:
+        -----------
+        pr_monthly : xr.DataArray
+            Monthly total precipitation (mm/month) as a time series.
+        tas_monthly : xr.DataArray
+            Monthly mean temperature (°C) as a time series.
+        lat : float
+            Latitude of the location (for PET calculation).
+        scale : int, default=4
+            The time scale in months for aggregation.
+
+        Returns:
+        --------
+        xr.DataArray
+            The calculated SPEI time series.
+        """
+        if pr_monthly is None or tas_monthly is None:
+            logging.error("SPEI calculation failed: Input precipitation or temperature is None.")
+            return None
+        
+        logging.info(f"Calculating SPEI with a {scale}-month scale...")
+        
+        # 1. Calculate PET
+        pet_monthly = DataProcessor._calculate_pet_thornthwaite(tas_monthly, lat)
+        if pet_monthly is None:
+            logging.error("SPEI calculation failed: PET calculation returned None.")
+            return None
+            
+        # 2. Calculate climatic water balance D = P - PET
+        water_balance = pr_monthly - pet_monthly
+        
+        # 3. Aggregate D over the given time scale
+        aggregated_balance = water_balance.rolling(time=scale).sum()
+        
+        # Drop NaNs that result from the rolling window
+        valid_balance = aggregated_balance.dropna(dim='time')
+        
+        # 4. Fit log-logistic distribution (fisk in scipy) to the aggregated data
+        params = fisk.fit(valid_balance.values)
+        
+        # 5. Calculate CDF of the aggregated balance using the fitted distribution
+        cdf = fisk.cdf(valid_balance.values, *params)
+        
+        # 6. Transform to standard normal distribution to get SPEI
+        spei_values = norm.ppf(cdf)
+        
+        # Create a new DataArray to hold the SPEI results
+        spei_ts = xr.DataArray(
+            spei_values,
+            coords={'time': valid_balance.time},
+            dims=['time'],
+            name=f'spei_{scale}'
+        )
+        spei_ts.attrs = {
+            'long_name': f'{scale}-month Standardized Precipitation-Evapotranspiration Index',
+            'scale_months': scale
+        }
+
+        # Reindex to match the original monthly frequency, filling with NaNs where not calculated
+        return spei_ts.reindex_like(pr_monthly)

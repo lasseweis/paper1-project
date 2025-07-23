@@ -77,9 +77,14 @@ class ClimateAnalysis:
             tas_box_mean = DataProcessor.calculate_spatial_mean(tas_seasonal, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
 
             return {
-                '20CRv3_pr_seasonal': pr_seasonal, '20CRv3_tas_seasonal': tas_seasonal,
-                '20CRv3_ua850_seasonal': ua850_seasonal, '20CRv3_pr_box_mean': pr_box_mean,
-                '20CRv3_tas_box_mean': tas_box_mean, '20CRv3_tas_monthly': tas_monthly
+                '20CRv3_pr_monthly': pr_monthly,
+                '20CRv3_tas_monthly': tas_monthly,
+                '20CRv3_ua850_monthly': ua850_monthly,
+                '20CRv3_pr_seasonal': pr_seasonal, 
+                '20CRv3_tas_seasonal': tas_seasonal,
+                '20CRv3_ua850_seasonal': ua850_seasonal, 
+                '20CRv3_pr_box_mean': pr_box_mean,
+                '20CRv3_tas_box_mean': tas_box_mean
             }
         except Exception as e:
             logging.error(f"Error in process_20crv3_data: {e}")
@@ -106,9 +111,14 @@ class ClimateAnalysis:
             tas_box_mean = DataProcessor.calculate_spatial_mean(tas_seasonal, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
 
             return {
-                'ERA5_pr_seasonal': pr_seasonal, 'ERA5_tas_seasonal': tas_seasonal,
-                'ERA5_ua850_seasonal': ua850_seasonal, 'ERA5_pr_box_mean': pr_box_mean,
-                'ERA5_tas_box_mean': tas_box_mean, 'ERA5_tas_monthly': tas_monthly
+                'ERA5_pr_monthly': pr_monthly,
+                'ERA5_tas_monthly': tas_monthly,
+                'ERA5_ua850_monthly': ua850_monthly,
+                'ERA5_pr_seasonal': pr_seasonal, 
+                'ERA5_tas_seasonal': tas_seasonal,
+                'ERA5_ua850_seasonal': ua850_seasonal, 
+                'ERA5_pr_box_mean': pr_box_mean,
+                'ERA5_tas_box_mean': tas_box_mean
             }
         except Exception as e:
             logging.error(f"Error in process_era5_data: {e}")
@@ -225,6 +235,34 @@ class ClimateAnalysis:
         if not datasets_reanalysis:
             logging.critical("Failed to process reanalysis datasets. Aborting.")
             return None
+
+        # --- START: NEUER BLOCK für SPEI-Berechnung ---
+        logging.info("\n--- Calculating SPEI for Reanalysis Datasets ---")
+        for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
+            logging.info(f"  Calculating SPEI for {dset_key}...")
+            
+            # Lade die monatlichen Daten für das gesamte Gebiet
+            pr_monthly_full = datasets_reanalysis.get(f'{dset_key}_pr_monthly')
+            tas_monthly_full = datasets_reanalysis.get(f'{dset_key}_tas_monthly')
+
+            if pr_monthly_full is not None and tas_monthly_full is not None:
+                # Berechne den räumlichen Mittelwert über die Analyse-Box
+                pr_box_monthly = DataProcessor.calculate_spatial_mean(pr_monthly_full, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
+                tas_box_monthly = DataProcessor.calculate_spatial_mean(tas_monthly_full, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
+
+                if pr_box_monthly is not None and tas_box_monthly is not None:
+                    # Bestimme die zentrale geografische Breite der Box für die PET-Berechnung
+                    lat_center_of_box = (Config.BOX_LAT_MIN + Config.BOX_LAT_MAX) / 2
+                    
+                    # Berechne den SPEI mit einer Zeitskala von 4 Monaten
+                    spei4 = DataProcessor.calculate_spei(pr_box_monthly, tas_box_monthly, lat=lat_center_of_box, scale=4)
+                    
+                    if spei4 is not None:
+                        # Für die weitere Analyse benötigen wir die saisonalen Koordinaten
+                        spei4_seasonal = DataProcessor.assign_season_to_dataarray(spei4)
+                        datasets_reanalysis[f'{dset_key}_spei4'] = spei4_seasonal
+                        logging.info(f"    Successfully calculated SPEI-4 for {dset_key}.")
+        # --- END: NEUER BLOCK ---
         
         discharge_data_loaded = ClimateAnalysis.process_discharge_data(Config.DISCHARGE_FILE)
         amo_data_loaded = ClimateAnalysis.load_amo_index(Config.AMO_INDEX_FILE)

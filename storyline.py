@@ -1052,6 +1052,8 @@ class StorylineAnalyzer:
             {'title': f'{season} Discharge vs Jet Speed',  'var1_key': 'discharge',    'var2_key': 'speed', 'category': 'Discharge'},
             {'title': f'{season} Extreme Flow vs Jet Speed', 'var1_key': 'extreme_flow', 'var2_key': 'speed', 'category': 'Discharge'},
             {'title': f'{season} Precip vs Jet Speed',     'var1_key': 'pr',           'var2_key': 'speed', 'category': 'Precipitation'},
+            {'title': f'{season} Discharge vs SPEI-4',     'var1_key': 'discharge',    'var2_key': 'spei4', 'category': 'Drought Index'},
+            {'title': f'{season} Extreme Flow vs SPEI-4',  'var1_key': 'extreme_flow', 'var2_key': 'spei4', 'category': 'Drought Index'},
         ]
 
         for dataset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
@@ -1059,7 +1061,6 @@ class StorylineAnalyzer:
                 # 1. Get the first timeseries (impact variable)
                 var1_ts = None
                 if config['var1_key'] in ['discharge', 'extreme_flow']:
-                    # Abflussdaten sind für beide Reanalyse-Datensätze gleich
                     if discharge_data:
                         var1_ts = discharge_data.get(f"{season_lower}_{config['var1_key']}")
                 else:  # 'pr' or 'tas'
@@ -1067,9 +1068,16 @@ class StorylineAnalyzer:
                     if pr_tas_seasonal is not None:
                         var1_ts = DataProcessor.detrend_data(DataProcessor.filter_by_season(pr_tas_seasonal, season))
 
-                # 2. Get the second timeseries (jet index)
-                jet_data_key = f"{dataset_key}_{season_lower}_{config['var2_key']}_data"
-                var2_ts = jet_data_reanalysis.get(jet_data_key, {}).get('jet')
+                # 2. Get the second timeseries (predictor: jet index or SPEI)
+                var2_ts = None
+                if config['var2_key'] == 'spei4':
+                    spei_data = datasets_reanalysis.get(f"{dataset_key}_spei4")
+                    if spei_data is not None:
+                        # Das SPEI-Signal ist bereits eine Anomalie, wir können es direkt detrenden
+                        var2_ts = DataProcessor.detrend_data(DataProcessor.filter_by_season(spei_data, season))
+                else: # It's a jet index
+                    jet_data_key = f"{dataset_key}_{season_lower}_{config['var2_key']}_data"
+                    var2_ts = jet_data_reanalysis.get(jet_data_key, {}).get('jet')
 
                 if var1_ts is None or var2_ts is None or var1_ts.size == 0 or var2_ts.size == 0:
                     continue
@@ -1082,12 +1090,15 @@ class StorylineAnalyzer:
                 vals1 = var1_ts.values[idx1]
                 vals2 = var2_ts.values[idx2]
 
-                _, _, r_val, p_val, _ = StatsAnalyzer.calculate_regression(vals2, vals1) # Predictor (jet) is X, Impact is Y
+                # Predictor (var2) is X, Impact (var1) is Y
+                _, _, r_val, p_val, _ = StatsAnalyzer.calculate_regression(vals2, vals1)
 
                 if not np.isnan(r_val):
                     # Create a descriptive label for the plot
-                    base_label = config['title'].replace(f"{season} ", "").replace("vs", "vs.").replace("Jet", "Jet Index")
-                    
+                    base_label = config['title'].replace(f"{season} ", "").replace("vs", "vs.")
+                    if "Jet" in base_label:
+                        base_label = base_label.replace("Jet", "Jet Index")
+
                     all_results.append({
                         'correlation': r_val,
                         'p_value': p_val,

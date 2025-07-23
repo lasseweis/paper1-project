@@ -1065,18 +1065,24 @@ class Visualizer:
         if beta_obs is not None and delta_jet_mmm is not None and delta_impact_mmm is not None:
             intercept_iav = delta_impact_mmm - beta_obs * delta_jet_mmm
             y_fit_iav = intercept_iav + beta_obs * x_fit
-            ax.plot(x_fit, y_fit_iav, color='red', linestyle='--', linewidth=2, label=f'Obs. IAV Slope ($\\beta_{{obs}}$={beta_obs:.2f})')
+            # --- START DER ÄNDERUNG ---
+            # Hier wird die Legende von "Obs." auf "ERA5" geändert
+            ax.plot(x_fit, y_fit_iav, color='red', linestyle='--', linewidth=2, label=f'ERA5 IAV Slope ($\\beta_{{obs}}$={beta_obs:.2f})')
+            # --- ENDE DER ÄNDERUNG ---
 
         # Formatting
-        ref_period = f"{Config.CMIP6_ANOMALY_REF_START}-{Config.CMIP6_ANOMALY_REF_END}"
+        # --- START DER ÄNDERUNG ---
+        # Hier werden die Achsenbeschriftungen präzisiert
         x_label = f'Change in {jet_key.replace("_", " ")}'
-        y_label = f'Change in {impact_key.replace("_", " ")}'
+        # Hier wird die Referenz zur "Box" in der Y-Achsen-Beschriftung hinzugefügt
+        y_label = f'Change in {impact_key.replace("_", " ")} over Box'
         
         if "Lat" in jet_key: x_label += ' (°Lat)'
         elif "Speed" in jet_key: x_label += ' (m/s)'
         
         if "_pr" in impact_key: y_label += ' (%)'
         elif "_tas" in impact_key: y_label += ' (°C)'
+        # --- ENDE DER ÄNDERUNG ---
         
         ax.set_xlabel(x_label, fontsize=9)
         ax.set_ylabel(y_label, fontsize=9)
@@ -1128,12 +1134,17 @@ class Visualizer:
                 title=config['title']
             )
         
-        ref_period = f"{Config.CMIP6_ANOMALY_REF_START}-{Config.CMIP6_ANOMALY_REF_END}"
-        fig.suptitle(f"CMIP6 Projected Changes at {gwl_to_plot}°C Global Warming Level\n(Changes relative to {ref_period})",
-                     fontsize=18, weight='bold')
+        # --- START DER ÄNDERUNG ---
+        # Hier wird der Titel der gesamten Abbildung angepasst
+        ref_period_changes = f"{Config.CMIP6_ANOMALY_REF_START}-{Config.CMIP6_ANOMALY_REF_END}"
+        ref_period_gwl = f"{Config.CMIP6_PRE_INDUSTRIAL_REF_START}-{Config.CMIP6_PRE_INDUSTRIAL_REF_END}"
+        fig.suptitle(f"CMIP6 Projected Changes at {gwl_to_plot}°C Global Warming Level\n"
+                     f"(Changes relative to {ref_period_changes}; GWL defined relative to {ref_period_gwl})",
+                     fontsize=16, weight='bold') # Schriftgröße angepasst für bessere Lesbarkeit
+        # --- ENDE DER ÄNDERUNG ---
         
         # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
-        fig.tight_layout(rect=[0, 0, 1, 0.95])
+        fig.tight_layout(rect=[0, 0, 1, 0.94]) # Top-Wert angepasst, um Platz für den längeren Titel zu schaffen
         filename = os.path.join(Config.PLOT_DIR, f"cmip6_scatter_comparison_gwl_{gwl_to_plot:.1f}_extended.png") # Added _extended to filename
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -1350,3 +1361,65 @@ class Visualizer:
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         logging.info(f"Saved CMIP6 U850 change panel to {filepath}")
         plt.close(fig)
+        
+    @staticmethod
+    def plot_model_fidelity_comparison(cmip6_historical_slopes, beta_obs_slopes, historical_period):
+        """
+        Creates a plot to compare the distribution of historical regression slopes from CMIP6 models
+        with the observed slope from ERA5 reanalysis (Model Fidelity Check).
+        """
+        if not cmip6_historical_slopes or not beta_obs_slopes:
+            logging.warning("Cannot plot model fidelity comparison: Missing data.")
+            return
+
+        logging.info("Plotting Model Fidelity Comparison (CMIP6 vs. ERA5 slopes)...")
+        Visualizer.ensure_plot_dir_exists()
+
+        # Wir nehmen nur die Keys, für die wir sowohl CMIP6- als auch ERA5-Daten haben
+        valid_keys = sorted([k for k in beta_obs_slopes if k in cmip6_historical_slopes and cmip6_historical_slopes[k]])
+
+        if not valid_keys:
+            logging.warning("No common valid keys for model fidelity plot.")
+            return
+            
+        n_keys = len(valid_keys)
+        fig, axs = plt.subplots(1, n_keys, figsize=(5 * n_keys, 6), sharey=True)
+        if n_keys == 1:
+            axs = [axs]
+
+        for i, key in enumerate(valid_keys):
+            ax = axs[i]
+            model_slopes = cmip6_historical_slopes[key]
+            obs_slope = beta_obs_slopes[key]
+
+            # Erstelle einen Boxplot für die Verteilung der CMIP6-Modell-Steigungen
+            bp = ax.boxplot(model_slopes, vert=True, patch_artist=True, widths=0.6,
+                           boxprops=dict(facecolor='lightblue', color='black'),
+                           medianprops=dict(color='red', linewidth=2))
+
+            # Füge die einzelnen Modell-Punkte als "Jitter"-Plot hinzu für mehr Detail
+            jitter = np.random.normal(1, 0.08, size=len(model_slopes))
+            ax.plot(jitter, model_slopes, '.', color='black', alpha=0.6, markersize=8)
+
+            # Zeichne die ERA5-Beobachtung als durchgezogene horizontale Linie ein
+            ax.axhline(obs_slope, color='crimson', linestyle='--', linewidth=2.5,
+                       label=f'ERA5 Slope ({obs_slope:.2f})')
+
+            # Titel und Beschriftungen
+            title_parts = key.replace('_vs_', ' vs.\n').replace('_', ' ').split()
+            ax.set_title(f"{' '.join(title_parts)}", fontsize=10)
+            ax.set_xticks([])
+            ax.grid(axis='y', linestyle=':', alpha=0.7)
+
+        # Gemeinsame Y-Achsen-Beschriftung und Legende
+        axs[0].set_ylabel('Regression Slope β (Impact per Jet Unit)')
+        axs[0].legend(loc='best')
+        
+        hist_period_str = f"{historical_period[0]}-{historical_period[1]}"
+        fig.suptitle(f'Model Fidelity Check: CMIP6 Historical Slopes vs. ERA5 Observation ({hist_period_str})', fontsize=16, weight='bold')
+        
+        fig.tight_layout(rect=[0, 0, 1, 0.93])
+        filename = os.path.join(Config.PLOT_DIR, "cmip6_model_fidelity_comparison.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved model fidelity comparison plot to {filename}")

@@ -57,7 +57,7 @@ class Config:
     CMIP6_FILE_PATTERN = '{variable}_Amon_{model}_{experiment}_{member}_{grid}_*_regridded.nc'
     CMIP6_SCENARIOS = ['ssp585', 'ssp245']
     CMIP6_HISTORICAL_EXPERIMENT_NAME = 'historical'
-    CMIP6_MEMBER_ID = 'r1i1p1f1'
+    CMIP6_MEMBER_ID = '*'
     CMIP6_VARIABLES_TO_LOAD = ['ua', 'pr', 'tas']
     CMIP6_GLOBAL_TAS_VAR = 'tas'
     CMIP6_LEVEL = 850  # For U850
@@ -73,6 +73,40 @@ class Config:
     GWL_FINE_STEPS_FOR_PLOT = np.arange(1.5, 3.51, 0.5).tolist() # Yields [1.5, 2.0, ..., 4.5]
     GWL_YEARS_WINDOW = 30
     GWL_TEMP_SMOOTHING_WINDOW = 20
+    
+    REQUIRED_MODEL_SCENARIOS = {
+        "ACCESS-CM2": ["ssp245", "ssp585"],
+        "ACCESS-ESM1-5": ["ssp245", "ssp585"],
+        "BCC-CSM2-MR": ["ssp585"],
+        "CESM2": ["ssp245", "ssp585"],
+        "CESM2-WACCM": ["ssp245", "ssp585"],
+        "CMCC-CM2-SR5": ["ssp245", "ssp585"],
+        "CMCC-ESM2": ["ssp245", "ssp585"],
+        "CNRM-CM6-1-HR": ["ssp585"],
+        "CNRM-CM6-1": ["ssp585"],
+        "CNRM-ESM2-1": ["ssp585"],
+        "CanESM5": ["ssp245", "ssp585"],
+        "E3SM-1-0": ["ssp585"],
+        "EC-Earth3-CC": ["ssp245", "ssp585"],
+        "EC-Earth3-Veg-LR": ["ssp245", "ssp585"],
+        "EC-Earth3": ["ssp245", "ssp585"],
+        "GFDL-ESM4": ["ssp245", "ssp585"],
+        "HadGEM3-GC31-LL": ["ssp245", "ssp585"],
+        "HadGEM3-GC31-MM": ["ssp585"],
+        "IITM-ESM": ["ssp245", "ssp585"],
+        "INM-CM4-8": ["ssp245", "ssp585"],
+        "INM-CM5-0": ["ssp245", "ssp585"],
+        "IPSL-CM6A-LR": ["ssp245", "ssp585"],
+        "KACE-1-0-G": ["ssp245", "ssp585"],
+        "KIOST-ESM": ["ssp245", "ssp585"],
+        "MIROC-ES2L": ["ssp245", "ssp585"],
+        "MIROC6": ["ssp245", "ssp585"],
+        "MPI-ESM1-2-HR": ["ssp245", "ssp585"],
+        "MPI-ESM1-2-LR": ["ssp245", "ssp585"],
+        "MRI-ESM2-0": ["ssp245", "ssp585"],
+        "NorESM2-MM": ["ssp245", "ssp585"],
+        "UKESM1-0-LL": ["ssp245", "ssp585"],
+    }
 
     # --- Storyline Definitions (PLACEHOLDERS!) ---
     # TODO: These values MUST be adapted after analyzing the CMIP6 jet changes!

@@ -197,39 +197,31 @@ class StorylineAnalyzer:
         """The main workflow for analyzing CMIP6 data at specific GWLs."""
         logging.info("\n--- Starting CMIP6 Analysis at Global Warming Levels ---")
         
-        if models_to_run is None:
-            logging.info("No model list provided, scanning for available models...")
-            base_path_scan = self.config.CMIP6_VAR_PATH.format(variable='ua')
-            if not os.path.exists(base_path_scan): base_path_scan = self.config.CMIP6_DATA_BASE_PATH
-            
-            search_pattern = os.path.join(base_path_scan, self.config.CMIP6_FILE_PATTERN.format(
-                variable='ua', model='*', experiment='*', member=self.config.CMIP6_MEMBER_ID, grid='*'
-            ))
-            all_ua_files = glob.glob(search_pattern)
-            models_found = sorted(list(set(os.path.basename(f).split('_')[2] for f in all_ua_files)))
-            models_to_run = models_found
-            logging.info(f"Found {len(models_to_run)} models to process: {models_to_run}")
-
-        if not models_to_run:
-            logging.error("No models to run for CMIP6 analysis. Aborting.")
+        # Use the explicit model-scenario dictionary from the config
+        models_and_scenarios_to_load = self.config.REQUIRED_MODEL_SCENARIOS
+        if not models_and_scenarios_to_load:
+            logging.error("The REQUIRED_MODEL_SCENARIOS dictionary in config.py is empty. Aborting.")
             return {}
 
-        all_models_attempted = set(models_to_run)
+        logging.info(f"Explicitly processing {len(models_and_scenarios_to_load)} models based on the configuration file.")
+        all_models_attempted = set(models_and_scenarios_to_load.keys())
 
-        # Step 1: Load data
+        # Step 1: Load data based on the provided dictionary
         all_vars = self.config.CMIP6_VARIABLES_TO_LOAD + [self.config.CMIP6_GLOBAL_TAS_VAR]
         model_data = {}
-        for model in models_to_run:
-            for scenario in self.config.CMIP6_SCENARIOS:
+        # Iterate through the models and their specific scenarios from the dictionary
+        for model, scenarios_to_load in models_and_scenarios_to_load.items():
+            for scenario in scenarios_to_load:
                 key = self.get_model_scenario_key(model, scenario)
                 model_data[key] = {}
                 
                 is_valid_model = True
                 for var in self.config.CMIP6_VARIABLES_TO_LOAD:
                     force_regional = (var == 'tas')
+                    # Pass the specific scenarios for this model to the loading function
                     data = self._load_and_preprocess_model_data(model, [scenario], var, force_regional=force_regional)
                     if data is None:
-                        logging.warning(f"Skipping model {key} due to missing regional variable: {var}")
+                        logging.warning(f"Skipping model-scenario {key} due to missing regional variable: {var}")
                         is_valid_model = False
                         break
                     model_data[key][var] = data
@@ -239,19 +231,19 @@ class StorylineAnalyzer:
                     continue
 
                 global_tas_var = self.config.CMIP6_GLOBAL_TAS_VAR
+                # Pass the specific scenarios for this model to the loading function
                 data = self._load_and_preprocess_model_data(model, [scenario], global_tas_var, force_regional=False)
                 if data is None:
-                    logging.warning(f"Skipping model {key} due to missing global variable: {global_tas_var}")
+                    logging.warning(f"Skipping model-scenario {key} due to missing global variable: {global_tas_var}")
                     model_data.pop(key, None)
                     continue
                 
                 model_data[key][f"{global_tas_var}_global"] = data
 
         if not model_data:
-            logging.error("No CMIP6 models were successfully loaded. Aborting analysis.")
+            logging.error("No CMIP6 models were successfully loaded based on the provided list. Aborting analysis.")
             return {}
             
-        # Steps 2-5... (Diese Schritte bleiben unverändert und werden hier zur Kürze weggelassen)
         # Step 2: Calculate GWL threshold years
         gwl_thresholds = {}
         for key, data in model_data.items():

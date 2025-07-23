@@ -1363,63 +1363,109 @@ class Visualizer:
         plt.close(fig)
         
     @staticmethod
-    def plot_model_fidelity_comparison(cmip6_historical_slopes, beta_obs_slopes, historical_period):
+    def plot_model_fidelity_comparison(cmip6_historical_slopes, cmip6_future_temporal_slopes, beta_obs_slopes,
+                                     historical_period, gwls_to_plot):
         """
-        Creates a plot to compare the distribution of historical regression slopes from CMIP6 models
-        with the observed slope from ERA5 reanalysis (Model Fidelity Check).
+        Creates a comprehensive, publication-quality plot comparing the distribution
+        of temporal jet-impact slopes from historical simulations and future projections.
+        This provides a direct comparison of model fidelity vs. future relationship stability.
         """
-        if not cmip6_historical_slopes or not beta_obs_slopes:
-            logging.warning("Cannot plot model fidelity comparison: Missing data.")
+        if not cmip6_historical_slopes or not beta_obs_slopes or not cmip6_future_temporal_slopes:
+            logging.warning("Cannot plot comprehensive model fidelity comparison: Missing data.")
             return
 
-        logging.info("Plotting Model Fidelity Comparison (CMIP6 vs. ERA5 slopes)...")
+        logging.info("Plotting comprehensive Model Fidelity vs. Future Temporal Slopes...")
         Visualizer.ensure_plot_dir_exists()
 
-        # Wir nehmen nur die Keys, für die wir sowohl CMIP6- als auch ERA5-Daten haben
         valid_keys = sorted([k for k in beta_obs_slopes if k in cmip6_historical_slopes and cmip6_historical_slopes[k]])
-
         if not valid_keys:
-            logging.warning("No common valid keys for model fidelity plot.")
+            logging.warning("No common valid keys for fidelity plot.")
             return
-            
-        n_keys = len(valid_keys)
-        fig, axs = plt.subplots(1, n_keys, figsize=(5 * n_keys, 6), sharey=True)
-        if n_keys == 1:
-            axs = [axs]
 
+        # --- 1. Setup Aesthetics ---
+        color_cmip_hist = '#a6cee3'
+        color_cmip_future_2c = '#fdbf6f'
+        color_cmip_future_3c = '#ff7f00'
+        color_cmip_median = 'black'
+        color_era5_obs = '#e31a1c'
+
+        # --- 2. Create Figure Layout ---
+        n_keys = len(valid_keys)
+        n_cols = 1 + len(gwls_to_plot)
+        fig, axs = plt.subplots(n_keys, n_cols, figsize=(4 * n_cols, 3.5 * n_keys),
+                                sharey='row', squeeze=False)
+        fig.subplots_adjust(wspace=0.1, hspace=0.35)
+
+        # --- 3. Plotting Loop ---
         for i, key in enumerate(valid_keys):
-            ax = axs[i]
-            model_slopes = cmip6_historical_slopes[key]
+            # Column 1: Historical Fidelity
+            ax_hist = axs[i, 0]
+            model_slopes_hist = cmip6_historical_slopes[key]
             obs_slope = beta_obs_slopes[key]
 
-            # Erstelle einen Boxplot für die Verteilung der CMIP6-Modell-Steigungen
-            bp = ax.boxplot(model_slopes, vert=True, patch_artist=True, widths=0.6,
-                           boxprops=dict(facecolor='lightblue', color='black'),
-                           medianprops=dict(color='red', linewidth=2))
+            bp_hist = ax_hist.boxplot(model_slopes_hist, vert=True, patch_artist=True, widths=0.7,
+                                      boxprops=dict(facecolor=color_cmip_hist, color='black', linewidth=1),
+                                      medianprops=dict(color=color_cmip_median, linewidth=2.5),
+                                      showfliers=False)
+            
+            ax_hist.axhline(obs_slope, color=color_era5_obs, linestyle='-', linewidth=2.5, zorder=10)
 
-            # Füge die einzelnen Modell-Punkte als "Jitter"-Plot hinzu für mehr Detail
-            jitter = np.random.normal(1, 0.08, size=len(model_slopes))
-            ax.plot(jitter, model_slopes, '.', color='black', alpha=0.6, markersize=8)
-
-            # Zeichne die ERA5-Beobachtung als durchgezogene horizontale Linie ein
-            ax.axhline(obs_slope, color='crimson', linestyle='--', linewidth=2.5,
-                       label=f'ERA5 Slope ({obs_slope:.2f})')
-
-            # Titel und Beschriftungen
-            title_parts = key.replace('_vs_', ' vs.\n').replace('_', ' ').split()
-            ax.set_title(f"{' '.join(title_parts)}", fontsize=10)
-            ax.set_xticks([])
-            ax.grid(axis='y', linestyle=':', alpha=0.7)
-
-        # Gemeinsame Y-Achsen-Beschriftung und Legende
-        axs[0].set_ylabel('Regression Slope β (Impact per Jet Unit)')
-        axs[0].legend(loc='best')
+            # Columns 2, 3...: Future Projections
+            for j, gwl in enumerate(gwls_to_plot):
+                ax_future = axs[i, j + 1]
+                future_slopes = cmip6_future_temporal_slopes.get(key, {}).get(gwl, [])
+                
+                if not future_slopes:
+                    ax_future.text(0.5, 0.5, "Data\nMissing", ha='center', va='center', transform=ax_future.transAxes)
+                else:
+                    future_color = color_cmip_future_2c if gwl == 2.0 else color_cmip_future_3c
+                    bp_future = ax_future.boxplot(future_slopes, vert=True, patch_artist=True, widths=0.7,
+                                                  boxprops=dict(facecolor=future_color, color='black', linewidth=1),
+                                                  medianprops=dict(color=color_cmip_median, linewidth=2.5),
+                                                  showfliers=False)
+                
+                ax_future.axhline(obs_slope, color=color_era5_obs, linestyle='-', linewidth=2.5, zorder=10)
         
-        hist_period_str = f"{historical_period[0]}-{historical_period[1]}"
-        fig.suptitle(f'Model Fidelity Check: CMIP6 Historical Slopes vs. ERA5 Observation ({hist_period_str})', fontsize=16, weight='bold')
+        # --- 4. Final Formatting & Labeling ---
+        for i, key in enumerate(valid_keys):
+            title_parts = key.replace('_vs_', ' vs. ').replace('_', ' ')
+            # Geänderte Y-Achsen-Beschriftung für mehr Klarheit
+            axs[i, 0].set_ylabel(f'Regression Slope for\n{title_parts}', fontsize=9, weight='bold')
+
+            all_row_data = model_slopes_hist
+            for j, gwl in enumerate(gwls_to_plot):
+                 all_row_data.extend(cmip6_future_temporal_slopes.get(key, {}).get(gwl, []))
+            
+            if all_row_data:
+                y_min = min(all_row_data)
+                y_max = max(all_row_data)
+                y_range = y_max - y_min
+                axs[i, 0].set_ylim(y_min - y_range * 0.1, y_max + y_range * 0.1)
+
+            for j in range(n_cols):
+                axs[i, j].grid(axis='y', linestyle=':', alpha=0.7)
+                axs[i, j].set_xticks([])
+
+        # Column titles
+        axs[0, 0].set_title(f'Historical\n({historical_period[0]}-{historical_period[1]})', fontsize=11, weight='bold')
+        for j, gwl in enumerate(gwls_to_plot):
+            axs[0, j + 1].set_title(f'Future Projection\n(+{gwl}°C GWL)', fontsize=11, weight='bold')
         
-        fig.tight_layout(rect=[0, 0, 1, 0.93])
-        filename = os.path.join(Config.PLOT_DIR, "cmip6_model_fidelity_comparison.png")
+        # --- 5. Centralized Legend ---
+        hist_patch = mpatches.Patch(color=color_cmip_hist, ec='black', label=f'CMIP6 Historical')
+        future_2c_patch = mpatches.Patch(color=color_cmip_future_2c, ec='black', label=f'CMIP6 Future (+2°C)')
+        future_3c_patch = mpatches.Patch(color=color_cmip_future_3c, ec='black', label=f'CMIP6 Future (+3°C)')
+        median_line = plt.Line2D([0], [0], color=color_cmip_median, lw=2.5, label='CMIP6 Median')
+        era5_line = plt.Line2D([0], [0], color=color_era5_obs, lw=2.5, ls='-', label='ERA5 Historical')
+        
+        fig.legend(handles=[hist_patch, future_2c_patch, future_3c_patch, median_line, era5_line],
+                   loc='lower center', bbox_to_anchor=(0.5, -0.02), ncol=5, fontsize=9, frameon=False)
+        
+        # Geänderte Überschrift für mehr Klarheit
+        fig.suptitle('Comparison of Jet-Impact Regression Slopes: Historical vs. Future', fontsize=16, weight='bold')
+        fig.tight_layout(rect=[0, 0.08, 1, 0.93])
+        
+        filename = os.path.join(Config.PLOT_DIR, "cmip6_fidelity_vs_future_temporal_slopes.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved model fidelity comparison plot to {filename}")
+        logging.info(f"Saved comprehensive temporal slope comparison plot to {filename}")

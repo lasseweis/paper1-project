@@ -1371,3 +1371,75 @@ class StorylineAnalyzer:
             logging.info(f"  - Calculated Beta_obs for {beta_key_name}: {slope:.3f}")
             
         return beta_obs_slopes
+    
+    @staticmethod
+    def calculate_future_temporal_slopes(cmip6_results, beta_keys, gwls_to_analyze):
+        """
+        Calculates temporal regression slopes for each CMIP6 model over its specific
+        future GWL period. This results in a distribution of slopes for each GWL.
+
+        Parameters:
+        -----------
+        cmip6_results : dict
+            The main results dictionary containing model timeseries and GWL years.
+        beta_keys : list
+            A list of the beta relationship keys to analyze (e.g., 'DJF_JetSpeed_vs_tas').
+        gwls_to_analyze : list
+            A list of the global warming levels to analyze (e.g., [2.0, 3.0]).
+
+        Returns:
+        --------
+        dict
+            A nested dictionary with the slope distributions: {beta_key: {gwl: [list_of_slopes]}}
+        """
+        logging.info("Calculating future temporal slopes for each CMIP6 model and GWL...")
+        future_slopes = {key: {gwl: [] for gwl in gwls_to_analyze} for key in beta_keys}
+
+        model_timeseries = cmip6_results.get('model_metric_timeseries', {})
+        gwl_years = cmip6_results.get('gwl_threshold_years', {})
+        window = Config.GWL_YEARS_WINDOW
+
+        for beta_key in beta_keys:
+            jet_key, impact_key_part = beta_key.split('_vs_')
+            season_prefix = jet_key.split('_')[0]
+            impact_key = f"{season_prefix}_{impact_key_part}"
+
+            for model_run_key, metrics in model_timeseries.items():
+                for gwl in gwls_to_analyze:
+                    threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
+                    if threshold_year is None:
+                        continue
+
+                    jet_ts = metrics.get(jet_key)
+                    impact_ts = metrics.get(impact_key)
+
+                    if jet_ts is None or impact_ts is None:
+                        continue
+
+                    # Define the N-year window around the GWL threshold year
+                    start_year, end_year = threshold_year - window // 2, threshold_year + (window - 1) // 2
+                    
+                    jet_slice = jet_ts.sel(season_year=slice(start_year, end_year))
+                    impact_slice = impact_ts.sel(season_year=slice(start_year, end_year))
+                    
+                    # Ensure we have enough data for a meaningful regression
+                    common_years = np.intersect1d(jet_slice.season_year.values, impact_slice.season_year.values)
+                    if len(common_years) < 5:
+                        continue
+                        
+                    # Detrend the slices before calculating the slope
+                    jet_detrended = DataProcessor.detrend_data(jet_slice)
+                    impact_detrended = DataProcessor.detrend_data(impact_slice)
+
+                    if jet_detrended is not None and impact_detrended is not None:
+                        slope, _, _, _, _ = StatsAnalyzer.calculate_regression(
+                            jet_detrended.values, impact_detrended.values
+                        )
+                        if not np.isnan(slope):
+                            future_slopes[beta_key][gwl].append(slope)
+        
+        for key, gwl_data in future_slopes.items():
+            for gwl, slopes in gwl_data.items():
+                logging.info(f"  - Calculated {len(slopes)} future temporal slopes for {key} at +{gwl}°C GWL.")
+
+        return future_slopes

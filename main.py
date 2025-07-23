@@ -395,9 +395,8 @@ class ClimateAnalysis:
             logging.info(f"Plot '{evolution_plot_filename}' existiert bereits. Überspringe Berechnung und Erstellung.")
             
         # --- PART 4: BETA-OBS CALCULATION, MODEL FIDELITY & CMIP6 SCATTER PLOTS ---
-        logging.info("\n\n--- Calculating Beta_obs, Checking Model Fidelity & Plotting CMIP6 Scatter Comparisons ---")
+        logging.info("\n\n--- Calculating Betas, Checking Model Fidelity & Future Slopes, and Plotting Comparisons ---")
         
-        # Check if we have the necessary data
         if cmip6_results and datasets_reanalysis and jet_data_reanalysis:
             
             # 1. Calculate the beta_obs slopes from ERA5 reanalysis
@@ -407,51 +406,52 @@ class ClimateAnalysis:
                 dataset_key=Config.DATASET_ERA5
             )
             
-            # --- START: NEUER CODE-BLOCK FÜR MODELLGÜTE-PRÜFUNG ---
-            # 1a. Calculate historical slopes for each CMIP6 model for comparison
-            historical_period_for_fidelity = (1981, 2010)
-            cmip6_historical_slopes = StorylineAnalyzer.calculate_historical_slopes_comparison(
-                beta_obs_slopes=beta_obs_slopes,
-                cmip6_data_loaded=cmip6_results.get('cmip6_model_data_loaded', {}),
-                jet_data_reanalysis=jet_data_reanalysis,
-                historical_period=historical_period_for_fidelity
-            )
-
-            # 1b. Call the new plotting function
-            fidelity_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_model_fidelity_comparison.png")
-            if not os.path.exists(fidelity_plot_filename):
-                if cmip6_historical_slopes and beta_obs_slopes:
-                    Visualizer.plot_model_fidelity_comparison(
-                        cmip6_historical_slopes,
-                        beta_obs_slopes,
+            # 2. Check and create the comprehensive temporal slope comparison plot
+            fidelity_future_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_fidelity_vs_future_temporal_slopes.png")
+            if not os.path.exists(fidelity_future_plot_filename):
+                if beta_obs_slopes:
+                    logging.info(f"Plot '{fidelity_future_plot_filename}' not found, calculating data and plotting...")
+                    
+                    historical_period_for_fidelity = (1981, 2010)
+                    cmip6_historical_slopes = StorylineAnalyzer.calculate_historical_slopes_comparison(
+                        beta_obs_slopes=beta_obs_slopes,
+                        cmip6_data_loaded=cmip6_results.get('cmip6_model_data_loaded', {}),
+                        jet_data_reanalysis=jet_data_reanalysis,
                         historical_period=historical_period_for_fidelity
                     )
-                else:
-                    logging.warning("Skipping model fidelity plot: Missing CMIP6 historical slopes or ERA5 beta_obs.")
-            else:
-                 logging.info(f"Plot '{fidelity_plot_filename}' existiert bereits. Überspringe Erstellung.")
-            # --- ENDE: NEUER CODE-BLOCK ---
 
+                    # NEU: Berechne die Verteilung der zukünftigen zeitlichen Steigungen
+                    cmip6_future_temporal_slopes = StorylineAnalyzer.calculate_future_temporal_slopes(
+                        cmip6_results=cmip6_results,
+                        beta_keys=list(beta_obs_slopes.keys()),
+                        gwls_to_analyze=Config.GLOBAL_WARMING_LEVELS
+                    )
+
+                    # Rufe die überarbeitete Plot-Funktion auf
+                    Visualizer.plot_model_fidelity_comparison(
+                        cmip6_historical_slopes=cmip6_historical_slopes,
+                        cmip6_future_temporal_slopes=cmip6_future_temporal_slopes,
+                        beta_obs_slopes=beta_obs_slopes,
+                        historical_period=historical_period_for_fidelity,
+                        gwls_to_plot=Config.GLOBAL_WARMING_LEVELS
+                    )
+                else:
+                    logging.warning("Skipping temporal slope comparison plot: beta_obs slopes could not be calculated.")
+            else:
+                logging.info(f"Plot '{fidelity_future_plot_filename}' already exists. Skipping.")
+
+            # (Optional) Die alten Scatter-Plots können weiterhin generiert werden, falls gewünscht
             if beta_obs_slopes:
-                # 2. Loop through GWLs and create a scatter plot figure for each
                 for gwl in Config.GLOBAL_WARMING_LEVELS:
                     scatter_plot_filename = os.path.join(Config.PLOT_DIR, f"cmip6_scatter_comparison_gwl_{gwl:.1f}_extended.png")
                     if not os.path.exists(scatter_plot_filename):
-                        # Check if the GWL has data in the CMIP6 results before plotting
-                        if gwl in cmip6_results.get('mmm_changes', {}):
-                            Visualizer.plot_cmip6_scatter_comparison(
-                                cmip6_results=cmip6_results,
-                                beta_obs_slopes=beta_obs_slopes,
-                                gwl_to_plot=gwl
-                            )
-                        else:
-                            logging.warning(f"Skipping scatter plot for GWL {gwl}°C: No MMM data found in cmip6_results.")
-                    else:
-                        logging.info(f"Plot '{scatter_plot_filename}' existiert bereits. Überspringe Erstellung.")
-            else:
-                logging.warning("Skipping CMIP6 scatter plots because beta_obs_slopes could not be calculated.")
+                        Visualizer.plot_cmip6_scatter_comparison(
+                            cmip6_results=cmip6_results,
+                            beta_obs_slopes=beta_obs_slopes,
+                            gwl_to_plot=gwl
+                        )
         else:
-            logging.warning("Skipping CMIP6 scatter plots due to missing cmip6_results, reanalysis data, or jet data.")
+            logging.warning("Skipping all Fidelity/Scatter plots due to missing cmip6_results, reanalysis, or jet data.")
             
         # --- PART 5: JET INTER-RELATIONSHIP SCATTER PLOTS ---
         logging.info("\n\n--- Plotting CMIP6 Jet Inter-relationship Scatter Plots ---")

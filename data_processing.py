@@ -597,7 +597,14 @@ class DataProcessor:
         
         delta = 0.409 * np.sin(0.0172 * day_of_year - 1.39)
         lat_rad = np.deg2rad(lat)
-        sunset_hour_angle = np.arccos(-np.tan(lat_rad) * np.tan(delta))
+        
+        # --- START DER KORREKTUR GEGEN RUNTIMEWARNING ---
+        # Clip the argument of arccos to the valid range [-1, 1] to avoid NaN values
+        # in polar regions during perpetual day/night.
+        argument_for_arccos = -np.tan(lat_rad) * np.tan(delta)
+        sunset_hour_angle = np.arccos(np.clip(argument_for_arccos, -1.0, 1.0))
+        # --- ENDE DER KORREKTUR ---
+        
         N = 24 / np.pi * sunset_hour_angle # Daylight hours
         
         # Correction factor L for days in month and daylight hours
@@ -666,12 +673,12 @@ class DataProcessor:
                 valid_balance,
                 input_core_dims=[['time']],
                 output_core_dims=[['time']],
-                exclude_dims=set(('time',)),
+                vectorize=True,  # Ensures the function is applied over non-core dims
                 dask="parallelized",
                 output_dtypes=[valid_balance.dtype]
             )
             spei_ts = spei_values.rename(f'spei_{scale}')
-            spei_ts['time'] = valid_balance.time # Re-assign time coordinate
+            # The time coordinate is preserved by apply_ufunc with core_dims
         else:
             # Original logic for 1D timeseries
             params = fisk.fit(valid_balance.values)

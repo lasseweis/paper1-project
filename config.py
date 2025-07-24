@@ -23,9 +23,9 @@ class Config:
 
     # ERA5 data paths
     ERA5_BASE_PATH = '/data/reloclim/normal/ERA5_daily/'
-    ERA5_UA_FILE = os.path.join(ERA5_BASE_PATH, 'ERA5_2p5_day_UA_19580101-20221231_lon80W-40E_lat0-90N.nc')
-    ERA5_PR_FILE = os.path.join(ERA5_BASE_PATH, 'ERA5_2p5cdo_day_PR_19500101-20221231.nc')
-    ERA5_TAS_FILE = os.path.join(ERA5_BASE_PATH, 'ERA5_2p5cdo_day_TAS_19500101-20221231.nc')
+    ERA5_UA_FILE = os.path.join(ERA5_BASE_PATH, 'ERA5_025_day_ua850_19500101-20211231.nc')
+    ERA5_PR_FILE = os.path.join(ERA5_BASE_PATH, 'ERA5_0p25_day_PR_19500101-20221231.nc')
+    ERA5_TAS_FILE = os.path.join(ERA5_BASE_PATH, 'ERA5_0p25_day_TAS_19500101-20221231.nc')
 
     # Index and discharge data paths
     AMO_INDEX_FILE = '/nas/home/vlw/Desktop/STREAM/CMIP6-datasets/amo_index.csv'

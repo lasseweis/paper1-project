@@ -1482,3 +1482,79 @@ class StorylineAnalyzer:
             pr_monthly_full, tas_monthly_full, lat=lat_input, scale=scale
         )
         return spatial_spei
+
+    @staticmethod
+    def calculate_spei_on_discharge_map(spatial_spei_data, discharge_timeseries, season, analysis_type='correlation'):
+        """
+        Calculates a spatial map of either correlation or regression slope, showing
+        the relationship between the local SPEI at each grid cell and a single discharge timeseries.
+
+        Args:
+            spatial_spei_data (xr.DataArray): Gridded SPEI data with time, lat, lon dimensions.
+            discharge_timeseries (xr.DataArray): 1D discharge timeseries.
+            season (str): The season to analyze ('Winter' or 'Summer').
+            analysis_type (str): 'correlation' or 'regression'.
+
+        Returns:
+            tuple: A tuple of (map_data, p_values).
+        """
+        logging.info(f"Calculating {analysis_type} map for local SPEI's influence on discharge for {season}...")
+        
+        if spatial_spei_data is None or discharge_timeseries is None:
+            logging.error(f"Cannot calculate {analysis_type} map: Missing SPEI or discharge data.")
+            return None, None
+
+        # 1. Prepare data: Filter by season and detrend
+        spei_seasonal = DataProcessor.filter_by_season(spatial_spei_data, season)
+        spei_detrended = DataProcessor.detrend_data(spei_seasonal)
+        discharge_detrended = discharge_timeseries  # Already detrended
+
+        if spei_detrended is None or discharge_detrended is None:
+            return None, None
+            
+        # 2. Align data to common years. This is critical before the parallel step.
+        common_years, idx_spei, idx_discharge = np.intersect1d(
+            spei_detrended.season_year.values,
+            discharge_detrended.season_year.values,
+            return_indices=True
+        )
+        if len(common_years) < 10:
+            logging.warning(f"Not enough common years ({len(common_years)}) for map calculation.")
+            return None, None
+            
+        spei_common = spei_detrended.isel(season_year=idx_spei)
+        discharge_common = discharge_detrended.isel(season_year=idx_discharge)
+
+        # 3. Choose the predictor (X) and response (Y)
+        # We want to know the influence OF SPEI (X) ON discharge (Y).
+        if analysis_type == 'regression':
+            # For regression, we normalize the predictor (SPEI) to get the influence per std. dev.
+            # Normalization must happen for each grid cell's timeseries individually.
+            predictor_field = StatsAnalyzer.normalize(spei_common)
+        else: # for correlation, normalization is not required.
+            predictor_field = spei_common
+        
+        response_index = discharge_common
+
+        # 4. Use the parallel helper function, swapping index and field
+        # The helper expects (index, field), but here our index is the RESPONSE variable.
+        # So we calculate slope(Y, X) for each cell, which is what we want.
+        slopes, p_values = StorylineAnalyzer._calculate_regression_for_variable(
+            index_da=response_index,
+            field_da=predictor_field
+        )
+        
+        # 5. Finalize output
+        if analysis_type == 'correlation':
+            # If we calculated correlation, we need to convert the slope back to r-value
+            std_dev_predictor_map = predictor_field.std(dim='season_year', skipna=True)
+            std_dev_response = response_index.std(skipna=True).item()
+            std_dev_predictor_map = std_dev_predictor_map.where(std_dev_predictor_map > 1e-9)
+            
+            correlation_map = slopes * (std_dev_predictor_map / std_dev_response)
+            map_data = correlation_map.clip(min=-1, max=1)
+        else: # For regression, the slope is the final result
+            map_data = slopes
+
+        logging.info(f"Successfully calculated {analysis_type} map.")
+        return map_data, p_values

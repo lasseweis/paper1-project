@@ -236,7 +236,7 @@ class ClimateAnalysis:
             logging.critical("Failed to process reanalysis datasets. Aborting.")
             return None
 
-        # --- START: NEUER BLOCK für SPEI-Berechnung ---
+        # --- START: SPEI-Berechnung für Reanalyse-Datensätze ---
         logging.info("\n--- Calculating SPEI for Reanalysis Datasets ---")
         for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
             logging.info(f"  Calculating SPEI for {dset_key}...")
@@ -262,7 +262,7 @@ class ClimateAnalysis:
                         spei4_seasonal = DataProcessor.assign_season_to_dataarray(spei4)
                         datasets_reanalysis[f'{dset_key}_spei4'] = spei4_seasonal
                         logging.info(f"    Successfully calculated SPEI-4 for {dset_key}.")
-        # --- END: NEUER BLOCK ---
+        # --- ENDE: SPEI-Berechnung ---
         
         discharge_data_loaded = ClimateAnalysis.process_discharge_data(Config.DISCHARGE_FILE)
         amo_data_loaded = ClimateAnalysis.load_amo_index(Config.AMO_INDEX_FILE)
@@ -281,7 +281,7 @@ class ClimateAnalysis:
                 if jet_lat is not None:
                     jet_data_reanalysis[f'{dset_key}_{season_lower}_lat_data'] = {'jet': DataProcessor.detrend_data(jet_lat)}
 
-        # --- AB HIER: PLOT-SPEZIFISCHE BERECHNUNG UND ERSTELLUNG (PRÜFUNG ZUERST) ---
+        # --- AB HIER: PLOT-SPEZIFISCHE BERECHNUNG UND ERSTELLUNG ---
 
         logging.info("\n--- Checking for Reanalysis Regression Maps ---")
         regression_period = (1981, 2010)
@@ -385,8 +385,7 @@ class ClimateAnalysis:
                 logging.warning("AMO data could not be loaded, skipping AMO-Jet correlation analysis and plotting.")
         else:
             logging.info(f"Plot '{amo_plot_filename}' existiert bereits. Überspringe Berechnung und Erstellung.")
-
-        # === NEU: HINZUGEFÜGT FÜR ERWEITERUNG 1 ===
+            
         logging.info("\n\n--- Checking for Seasonal Drought Analysis Plot ---")
         drought_plot_filename = os.path.join(Config.PLOT_DIR, 'spei_drought_analysis_seasonal_comparison.png')
         if not os.path.exists(drought_plot_filename):
@@ -397,27 +396,51 @@ class ClimateAnalysis:
                 logging.warning("Skipping seasonal drought plot: No SPEI data was calculated.")
         else:
             logging.info(f"Plot '{drought_plot_filename}' existiert bereits. Überspringe Erstellung.")
-        # === ENDE NEUER TEIL 1 ===
 
-        # === NEU: HINZUGEFÜGT FÜR ERWEITERUNG 2 ===
-        logging.info("\n\n--- Checking for Spatial SPEI Map (Example Year) ---")
-        spatial_spei_filename = os.path.join(Config.PLOT_DIR, 'spatial_spei_era5_summer2003.png')
-        if not os.path.exists(spatial_spei_filename):
-            logging.info(f"Plot '{spatial_spei_filename}' nicht gefunden. Berechne und erstelle Beispielkarte...")
-            spatial_spei_era5 = StorylineAnalyzer.calculate_spatial_spei(datasets_reanalysis, Config.DATASET_ERA5, scale=4)
+        # === FINALE VERSION: Kombinierter SPEI-, Korrelations- und Einfluss-Plot ===
+        logging.info("\n\n--- Checking for Combined Spatial SPEI & Discharge Analysis Map ---")
+        combined_spei_plot_filename = os.path.join(Config.PLOT_DIR, 'spatial_spei_discharge_analysis_era5_summer.png')
+        if not os.path.exists(combined_spei_plot_filename):
+            logging.info(f"Plot '{combined_spei_plot_filename}' nicht gefunden. Berechne und erstelle Plot...")
             
-            if spatial_spei_era5 is not None:
-                Visualizer.plot_spatial_spei_map(
+            # Daten laden
+            spatial_spei_era5 = StorylineAnalyzer.calculate_spatial_spei(datasets_reanalysis, Config.DATASET_ERA5, scale=4)
+            summer_discharge_ts = discharge_data_loaded.get('summer_discharge')
+            
+            if spatial_spei_era5 is not None and summer_discharge_ts is not None:
+                # 1. Berechne die Korrelationskarte
+                corr_map, p_vals_corr = StorylineAnalyzer.calculate_spei_on_discharge_map(
                     spatial_spei_data=spatial_spei_era5,
+                    discharge_timeseries=summer_discharge_ts,
+                    season='Summer',
+                    analysis_type='correlation'
+                )
+
+                # 2. Berechne die Regressionskarte
+                regr_slopes, p_vals_regr = StorylineAnalyzer.calculate_spei_on_discharge_map(
+                    spatial_spei_data=spatial_spei_era5,
+                    discharge_timeseries=summer_discharge_ts,
+                    season='Summer',
+                    analysis_type='regression'
+                )
+                
+                # 3. Erstelle den kombinierten 1x3 Plot
+                Visualizer.plot_spatial_spei_analysis_maps(
+                    spatial_spei_data=spatial_spei_era5,
+                    discharge_corr_map=corr_map,
+                    p_values_corr=p_vals_corr,
+                    discharge_regr_slopes=regr_slopes,
+                    p_values_regr=p_vals_regr,
                     time_slice='2003-08-15',
-                    title='Spatial SPEI-4 for End of Summer 2003 (ERA5)',
-                    filename='spatial_spei_era5_summer2003.png'
+                    season='Summer',
+                    title_prefix='ERA5',
+                    filename=os.path.basename(combined_spei_plot_filename)
                 )
             else:
-                logging.warning("Konnte räumlichen SPEI für ERA5 nicht berechnen, überspringe Karten-Plot.")
+                logging.warning("Konnte kombinierten SPEI/Discharge-Analyseplot nicht erstellen, da Daten fehlen.")
         else:
-            logging.info(f"Plot '{spatial_spei_filename}' existiert bereits. Überspringe Erstellung.")
-        # === ENDE NEUER TEIL 2 ===
+            logging.info(f"Plot '{combined_spei_plot_filename}' existiert bereits. Überspringe Erstellung.")
+        # === ENDE FINALE VERSION ===
 
         # --- PART 2: CMIP6 AND STORYLINE ANALYSIS ---
         logging.info("\n\n--- Analyzing CMIP6 Data and Storylines ---")

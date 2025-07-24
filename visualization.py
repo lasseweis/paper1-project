@@ -1595,3 +1595,102 @@ class Visualizer:
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved spatial SPEI map to {filepath}")
+        
+    # In lasseweis/paper1-project/paper1-project-plot/visualization.py
+# ERSETZE die vorherige Plot-Funktion `plot_spatial_spei_analysis_maps` hiermit:
+
+    @staticmethod
+    def plot_spatial_spei_analysis_maps(
+        spatial_spei_data,
+        discharge_corr_map,
+        p_values_corr,
+        discharge_regr_slopes,
+        p_values_regr,
+        time_slice,
+        season,
+        title_prefix,
+        filename="spei_discharge_analysis.png"
+    ):
+        """
+        Plots a 1x3 panel:
+        1. Spatial SPEI for a specific time, cropped to the analysis box.
+        2. Correlation map showing where SPEI is linked to discharge.
+        3. Regression map showing where SPEI has the strongest influence on discharge.
+        """
+        logging.info(f"Plotting combined SPEI and Discharge analysis maps for {season}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        fig, axs = plt.subplots(1, 3, figsize=(24, 7), subplot_kw={'projection': ccrs.PlateCarree()})
+        plt.subplots_adjust(wspace=0.15, hspace=0.2)
+
+        # --- Allgemeine Einstellungen ---
+        extent_box = [Config.BOX_LON_MIN - 2, Config.BOX_LON_MAX + 2, Config.BOX_LAT_MIN - 2, Config.BOX_LAT_MAX + 2]
+        analysis_box_rect = mpatches.Rectangle(
+            (Config.BOX_LON_MIN, Config.BOX_LAT_MIN), Config.BOX_LON_MAX - Config.BOX_LON_MIN, Config.BOX_LAT_MAX - Config.BOX_LAT_MIN,
+            fill=False, edgecolor='lime', linewidth=2.5, zorder=10
+        )
+
+        def setup_map_ax(ax):
+            ax.set_extent(extent_box, crs=ccrs.PlateCarree())
+            ax.add_feature(cfeature.COASTLINE, linewidth=0.8)
+            ax.add_feature(cfeature.BORDERS, linestyle=':', linewidth=0.8)
+            gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+            gl.top_labels = gl.right_labels = False
+            ax.add_patch(mpatches.Rectangle((analysis_box_rect.get_x(), analysis_box_rect.get_y()), analysis_box_rect.get_width(), analysis_box_rect.get_height(), fill=False, edgecolor='lime', linewidth=2.5, zorder=10))
+            return gl
+
+        # --- Panel 1: SPEI Map ---
+        ax1 = axs[0]
+        gl1 = setup_map_ax(ax1)
+        try:
+            time_stamp = pd.to_datetime(time_slice)
+            spei_slice = spatial_spei_data.sel(time=time_stamp, method='nearest')
+            lons, lats = np.meshgrid(spei_slice.lon, spei_slice.lat)
+            cf1 = ax1.pcolormesh(lons, lats, spei_slice.values, cmap='BrBG', vmin=-2.5, vmax=2.5, transform=ccrs.PlateCarree(), shading='auto')
+            cbar1 = fig.colorbar(cf1, ax=ax1, orientation='vertical', pad=0.02, aspect=25, extend='both', shrink=0.8)
+            cbar1.set_label('SPEI Value')
+            ax1.set_title(f"a) SPEI-4 am {time_stamp.strftime('%Y-%m-%d')}", fontsize=12)
+        except Exception as e:
+            ax1.text(0.5, 0.5, "SPEI Data Error", transform=ax1.transAxes, ha='center', va='center')
+            logging.error(f"Could not create SPEI slice panel: {e}")
+
+        # --- Panel 2: Correlation Map ---
+        ax2 = axs[1]
+        gl2 = setup_map_ax(ax2)
+        gl2.left_labels = False
+        if discharge_corr_map is not None:
+            lons, lats = np.meshgrid(discharge_corr_map.lon, discharge_corr_map.lat)
+            cf2 = ax2.pcolormesh(lons, lats, discharge_corr_map.values, cmap='PiYG', vmin=-0.7, vmax=0.7, transform=ccrs.PlateCarree(), shading='auto')
+            if p_values_corr is not None:
+                sig_mask = (p_values_corr < 0.05) & np.isfinite(discharge_corr_map)
+                ax2.scatter(lons[sig_mask], lats[sig_mask], s=2, color='black', marker='.', alpha=0.7, transform=ccrs.PlateCarree())
+            cbar2 = fig.colorbar(cf2, ax=ax2, orientation='vertical', pad=0.02, aspect=25, extend='both', shrink=0.8)
+            cbar2.set_label('Korrelationskoeffizient (r)')
+            ax2.set_title(f"b) Korrelation: Lokaler SPEI vs. Abfluss ({season})", fontsize=12)
+        else:
+            ax2.text(0.5, 0.5, "Correlation Data Error", transform=ax2.transAxes, ha='center', va='center')
+
+        # --- Panel 3: Regression Map ---
+        ax3 = axs[2]
+        gl3 = setup_map_ax(ax3)
+        gl3.left_labels = False
+        if discharge_regr_slopes is not None:
+            lons, lats = np.meshgrid(discharge_regr_slopes.lon, discharge_regr_slopes.lat)
+            vmax = np.nanpercentile(np.abs(discharge_regr_slopes), 98) # Dynamisches Limit für bessere Farben
+            cf3 = ax3.pcolormesh(lons, lats, discharge_regr_slopes.values, cmap='RdYlBu', vmin=-vmax, vmax=vmax, transform=ccrs.PlateCarree(), shading='auto')
+            if p_values_regr is not None:
+                sig_mask = (p_values_regr < 0.05) & np.isfinite(discharge_regr_slopes)
+                ax3.scatter(lons[sig_mask], lats[sig_mask], s=2, color='black', marker='.', alpha=0.7, transform=ccrs.PlateCarree())
+            cbar3 = fig.colorbar(cf3, ax=ax3, orientation='vertical', pad=0.02, aspect=25, extend='both', shrink=0.8)
+            cbar3.set_label('Abflussänderung [m³/s] pro Std.Abw. SPEI')
+            ax3.set_title(f"c) Einfluss: Lokaler SPEI auf Abfluss ({season})", fontsize=12)
+        else:
+            ax3.text(0.5, 0.5, "Regression Data Error", transform=ax3.transAxes, ha='center', va='center')
+        
+        fig.suptitle(f"{title_prefix}: Räumliche Dürreanalyse und hydrologischer Zusammenhang ({season})", fontsize=16, weight='bold')
+        fig.tight_layout(rect=[0, 0, 1, 0.94])
+        
+        filepath = os.path.join(Config.PLOT_DIR, filename)
+        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved combined SPEI/Discharge analysis plot to {filepath}")

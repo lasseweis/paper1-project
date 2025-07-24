@@ -617,65 +617,75 @@ class DataProcessor:
     def calculate_spei(pr_monthly, tas_monthly, lat, scale=4):
         """
         Calculates the Standardized Precipitation-Evapotranspiration Index (SPEI).
-        Follows the methodology described by Vincente-Serrano et al. (2010).
-
-        Parameters:
-        -----------
-        pr_monthly : xr.DataArray
-            Monthly total precipitation (mm/month) as a time series.
-        tas_monthly : xr.DataArray
-            Monthly mean temperature (°C) as a time series.
-        lat : float
-            Latitude of the location (for PET calculation).
-        scale : int, default=4
-            The time scale in months for aggregation.
-
-        Returns:
-        --------
-        xr.DataArray
-            The calculated SPEI time series.
+        Handles both 1D timeseries and 3D (gridded) DataArrays.
         """
         if pr_monthly is None or tas_monthly is None:
             logging.error("SPEI calculation failed: Input precipitation or temperature is None.")
             return None
-        
-        logging.info(f"Calculating SPEI with a {scale}-month scale...")
-        
-        # 1. Calculate PET
-        pet_monthly = DataProcessor._calculate_pet_thornthwaite(tas_monthly, lat)
+
+        is_spatial = 'lat' in pr_monthly.dims and 'lon' in pr_monthly.dims
+        logging.info(f"Calculating SPEI with a {scale}-month scale (Spatial: {is_spatial})...")
+
+        if is_spatial:
+            # For spatial data, we need to pass a latitude array to PET calculation
+            lat_da = pr_monthly.lat
+        else:
+            lat_da = lat
+
+        pet_monthly = DataProcessor._calculate_pet_thornthwaite(tas_monthly, lat_da)
         if pet_monthly is None:
             logging.error("SPEI calculation failed: PET calculation returned None.")
             return None
-            
-        # 2. Calculate climatic water balance D = P - PET
+        
         water_balance = pr_monthly - pet_monthly
-        
-        # 3. Aggregate D over the given time scale
-        aggregated_balance = water_balance.rolling(time=scale).sum()
-        
-        # Drop NaNs that result from the rolling window
-        valid_balance = aggregated_balance.dropna(dim='time')
-        
-        # 4. Fit log-logistic distribution (fisk in scipy) to the aggregated data
-        params = fisk.fit(valid_balance.values)
-        
-        # 5. Calculate CDF of the aggregated balance using the fitted distribution
-        cdf = fisk.cdf(valid_balance.values, *params)
-        
-        # 6. Transform to standard normal distribution to get SPEI
-        spei_values = norm.ppf(cdf)
-        
-        # Create a new DataArray to hold the SPEI results
-        spei_ts = xr.DataArray(
-            spei_values,
-            coords={'time': valid_balance.time},
-            dims=['time'],
-            name=f'spei_{scale}'
-        )
+        aggregated_balance = water_balance.rolling(time=scale, min_periods=scale).sum()
+        valid_balance = aggregated_balance.dropna(dim='time', how='all')
+
+        def fit_and_transform(x):
+            # This function will be applied along the time dimension
+            # Drop NaNs for fitting, but keep track of their locations
+            series = pd.Series(x)
+            not_nan = series.notna()
+            if not_nan.sum() < 10: # Need enough data to fit
+                return np.full_like(x, np.nan)
+            
+            # Fit the distribution only to valid data
+            params = fisk.fit(series[not_nan])
+            
+            # Calculate CDF for all points (NaNs will result in NaNs)
+            cdf = fisk.cdf(series.values, *params)
+            
+            # Transform to standard normal
+            spei_values = norm.ppf(cdf)
+            return spei_values
+
+        if is_spatial:
+            # Use apply_ufunc for efficient grid-cell-wise computation
+            spei_values = xr.apply_ufunc(
+                fit_and_transform,
+                valid_balance,
+                input_core_dims=[['time']],
+                output_core_dims=[['time']],
+                exclude_dims=set(('time',)),
+                dask="parallelized",
+                output_dtypes=[valid_balance.dtype]
+            )
+            spei_ts = spei_values.rename(f'spei_{scale}')
+            spei_ts['time'] = valid_balance.time # Re-assign time coordinate
+        else:
+            # Original logic for 1D timeseries
+            params = fisk.fit(valid_balance.values)
+            cdf = fisk.cdf(valid_balance.values, *params)
+            spei_values = norm.ppf(cdf)
+            spei_ts = xr.DataArray(
+                spei_values,
+                coords={'time': valid_balance.time},
+                dims=['time'],
+                name=f'spei_{scale}'
+            )
+
         spei_ts.attrs = {
             'long_name': f'{scale}-month Standardized Precipitation-Evapotranspiration Index',
             'scale_months': scale
         }
-
-        # Reindex to match the original monthly frequency, filling with NaNs where not calculated
         return spei_ts.reindex_like(pr_monthly)

@@ -1469,3 +1469,125 @@ class Visualizer:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved comprehensive temporal slope comparison plot to {filename}")
+        
+    @staticmethod
+    def plot_seasonal_drought_analysis(datasets_reanalysis, scale=4):
+        """
+        Creates a 2x2 summary plot of seasonal drought characteristics from SPEI.
+        """
+        logging.info(f"Plotting seasonal SPEI-{scale} drought analysis...")
+        Visualizer.ensure_plot_dir_exists()
+        
+        fig, axs = plt.subplots(2, 2, figsize=(18, 12), sharex=True)
+        threshold = -1.0
+
+        for row, dataset_key in enumerate([Config.DATASET_20CRV3, Config.DATASET_ERA5]):
+            spei_data = datasets_reanalysis.get(f'{dataset_key}_spei{scale}')
+            if spei_data is None:
+                for col in range(2):
+                    axs[row, col].text(0.5, 0.5, f"SPEI Data for {dataset_key}\nnot available", 
+                                       ha='center', va='center', transform=axs[row, col].transAxes)
+                continue
+
+            for col, season in enumerate(['Winter', 'Summer']):
+                ax = axs[row, col]
+                # Filter the data for the correct season
+                seasonal_filtered = DataProcessor.filter_by_season(spei_data, season)
+                
+                # Check if data exists after filtering
+                if seasonal_filtered is None or seasonal_filtered.time.size < 2:
+                    ax.text(0.5, 0.5, "Not enough data", ha='center', va='center', transform=ax.transAxes)
+                    continue
+                
+                # FIX: Group by 'season_year' to make it the primary dimension for the plot.
+                # This resolves the "Dimension not found" error.
+                seasonal_spei = seasonal_filtered.groupby('season_year').mean(dim='time')
+                
+                # Now 'season_year' is the dimension, and we can safely use it.
+                years = seasonal_spei.season_year.values
+                values = seasonal_spei.values
+
+                # Plot SPEI time series
+                ax.plot(years, values, color='darkblue', lw=0.8, label=f'SPEI-{scale}')
+                
+                # Highlight drought periods
+                ax.fill_between(years, values, threshold, where=(values < threshold),
+                                color='red', alpha=0.3, interpolate=True)
+                
+                # Calculate and plot linear trend
+                slope, intercept, r_val, p_val, std_err = StatsAnalyzer.calculate_regression(years, values)
+                trend_line = intercept + slope * years
+                ax.plot(years, trend_line, 'k--', lw=1.5, label=f'Trend (p={p_val:.3f})')
+                
+                # Get drought statistics
+                # The stats function expects a 'time' dimension, so we rename 'season_year' just for this call.
+                stats = StatsAnalyzer.analyze_drought_characteristics(seasonal_spei.rename({'season_year': 'time'}), threshold)
+                
+                # Create text box with stats
+                stats_text = (
+                    f"Drought Stats (SPEI < {threshold}):\n"
+                    f"---------------------------------\n"
+                    f"Number of Events: {stats.get('number_of_events', 'N/A')}\n"
+                    f"Mean Duration: {stats.get('mean_duration', 0):.1f} years\n"
+                    f"Longest Duration: {stats.get('longest_duration', 0)} years\n"
+                    f"Mean Intensity: {stats.get('mean_intensity', 0):.2f}\n"
+                    f"Peak Intensity: {stats.get('peak_intensity', 0):.2f}"
+                )
+                
+                ax.text(0.02, 0.02, stats_text, transform=ax.transAxes, fontsize=9,
+                        verticalalignment='bottom', bbox=dict(boxstyle='round,pad=0.5', fc='white', alpha=0.8))
+
+                ax.set_title(f"{dataset_key} - {season} (DJF)" if season == 'Winter' else f"{dataset_key} - {season} (JJA)")
+                ax.set_ylabel(f"SPEI-{scale}")
+                ax.grid(True, linestyle=':', alpha=0.6)
+                ax.axhline(threshold, color='red', linestyle=':', lw=1.0)
+                ax.legend(loc='upper right')
+
+        for ax in axs[1, :]:
+            ax.set_xlabel("Year")
+            
+        fig.suptitle(f'Seasonal Drought Analysis Comparison (SPEI-{scale})', fontsize=16, weight='bold')
+        fig.tight_layout(rect=[0, 0, 1, 0.96])
+        filename = os.path.join(Config.PLOT_DIR, 'spei_drought_analysis_seasonal_comparison.png')
+        plt.savefig(filename, dpi=300)
+        plt.close(fig)
+        
+    @staticmethod
+    def plot_spatial_spei_map(spatial_spei_data, time_slice, title, filename="spatial_spei_map.png"):
+        """
+        Plots a single map of spatial SPEI for a specific time slice.
+        """
+        logging.info(f"Plotting spatial SPEI map for {time_slice}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        try:
+            spei_slice = spatial_spei_data.sel(time=time_slice, method='nearest')
+        except Exception as e:
+            logging.error(f"Could not select time slice '{time_slice}' for SPEI map: {e}")
+            return
+            
+        fig, ax = plt.subplots(figsize=(12, 8), subplot_kw={'projection': ccrs.PlateCarree()})
+        
+        ax.set_extent(Config.PLOT_MAP_EXTENT, crs=ccrs.PlateCarree())
+        ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=0)
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
+        ax.add_feature(cfeature.BORDERS, linestyle=':', linewidth=0.5)
+        gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+        gl.top_labels = gl.right_labels = False
+
+        lons, lats = np.meshgrid(spei_slice.lon, spei_slice.lat)
+        cmap = 'BrBG'
+        vmin, vmax = -2.5, 2.5
+        
+        cf = ax.pcolormesh(lons, lats, spei_slice.values, cmap=cmap, vmin=vmin, vmax=vmax,
+                           transform=ccrs.PlateCarree(), shading='auto')
+        
+        cbar = fig.colorbar(cf, ax=ax, orientation='vertical', pad=0.05, aspect=30, extend='both')
+        cbar.set_label('SPEI Value (Standard Deviations)')
+        
+        ax.set_title(title, fontsize=14, weight='bold')
+        
+        filepath = os.path.join(Config.PLOT_DIR, filename)
+        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved spatial SPEI map to {filepath}")

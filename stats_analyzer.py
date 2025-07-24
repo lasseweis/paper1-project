@@ -161,3 +161,70 @@ class StatsAnalyzer:
              )
         else:
             return normalized_values
+        
+    @staticmethod
+    def analyze_drought_characteristics(spei_timeseries, threshold=-1.0):
+        """
+        Analyzes a SPEI timeseries to extract drought event characteristics.
+
+        Parameters:
+        -----------
+        spei_timeseries : xr.DataArray
+            A 1D DataArray of SPEI values with a 'time' dimension.
+        threshold : float, default=-1.0
+            The SPEI value below which a month is considered in drought.
+
+        Returns:
+        --------
+        dict
+            A dictionary containing drought metrics.
+        """
+        if spei_timeseries is None or spei_timeseries.size == 0:
+            return {}
+
+        # Ensure boolean series for drought periods
+        in_drought = (spei_timeseries < threshold)
+
+        if not in_drought.any():
+            return {
+                'total_drought_months': 0, 'number_of_events': 0,
+                'mean_duration': 0, 'longest_duration': 0,
+                'mean_intensity': np.nan, 'peak_intensity': np.nan
+            }
+
+        # Identify changes to find start/end of events by looking at the difference
+        change = in_drought.astype(int).diff(dim='time', n=1)
+        
+        # An event starts where the change is 1, ends where it's -1
+        starts = np.where(change == 1)[0]
+        ends = np.where(change == -1)[0]
+        
+        # Handle cases where the series starts or ends within a drought event
+        if in_drought.values[0]:
+            starts = np.insert(starts, 0, 0)
+        if in_drought.values[-1]:
+            ends = np.append(ends, len(spei_timeseries) - 1)
+
+        # Ensure starts and ends arrays are correctly paired
+        if len(starts) > len(ends):
+            starts = starts[:len(ends)]
+        elif len(ends) > len(starts):
+            ends = ends[1:]
+
+        if len(starts) == 0:
+            return {'total_drought_months': int(in_drought.sum()), 'number_of_events': 0}
+
+        durations = (ends - starts) + 1
+        
+        event_slices = [slice(s, e + 1) for s, e in zip(starts, ends)]
+        intensities = [spei_timeseries.isel(time=sl).mean().item() for sl in event_slices]
+        peak_intensities = [spei_timeseries.isel(time=sl).min().item() for sl in event_slices]
+
+        return {
+            'total_drought_months': int(in_drought.sum()),
+            'number_of_events': len(durations),
+            'mean_duration': np.mean(durations) if len(durations) > 0 else 0,
+            'longest_duration': np.max(durations) if len(durations) > 0 else 0,
+            'mean_intensity': np.mean(intensities) if len(intensities) > 0 else np.nan,
+            'peak_intensity': np.min(peak_intensities) if len(peak_intensities) > 0 else np.nan
+        }

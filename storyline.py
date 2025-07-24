@@ -1035,10 +1035,11 @@ class StorylineAnalyzer:
         return correlations
 
     @staticmethod
-    def analyze_all_correlations_for_bar_chart(datasets_reanalysis, jet_data_reanalysis, discharge_data, season):
+    def analyze_all_correlations_for_bar_chart(datasets_reanalysis, jet_data_reanalysis, discharge_data, amo_data, season):
         """
         Analyzes all required correlations for the summary bar chart plot for a specific season.
         This method gathers data, calculates correlations, and returns a structured DataFrame.
+        NOW INCLUDES AMO-INDEX correlation with SPEI.
         """
         logging.info(f"Gathering all correlation data for summary bar chart ({season})...")
         all_results = []
@@ -1054,6 +1055,8 @@ class StorylineAnalyzer:
             {'title': f'{season} Precip vs Jet Speed',     'var1_key': 'pr',           'var2_key': 'speed', 'category': 'Precipitation'},
             {'title': f'{season} Discharge vs SPEI-4',     'var1_key': 'discharge',    'var2_key': 'spei4', 'category': 'Drought Index'},
             {'title': f'{season} Extreme Flow vs SPEI-4',  'var1_key': 'extreme_flow', 'var2_key': 'spei4', 'category': 'Drought Index'},
+            # --- KORRIGIERTE EINTRÄGE (AMO statt NAO) ---
+            {'title': f'{season} SPEI-4 vs. AMO Index',    'var1_key': 'spei4',        'var2_key': 'amo', 'category': 'Teleconnections'},
         ]
 
         for dataset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
@@ -1063,18 +1066,25 @@ class StorylineAnalyzer:
                 if config['var1_key'] in ['discharge', 'extreme_flow']:
                     if discharge_data:
                         var1_ts = discharge_data.get(f"{season_lower}_{config['var1_key']}")
+                elif config['var1_key'] == 'spei4':
+                    spei_data = datasets_reanalysis.get(f"{dataset_key}_spei4")
+                    if spei_data is not None:
+                        var1_ts = DataProcessor.detrend_data(DataProcessor.filter_by_season(spei_data, season))
                 else:  # 'pr' or 'tas'
                     pr_tas_seasonal = datasets_reanalysis.get(f"{dataset_key}_{config['var1_key']}_box_mean")
                     if pr_tas_seasonal is not None:
                         var1_ts = DataProcessor.detrend_data(DataProcessor.filter_by_season(pr_tas_seasonal, season))
 
-                # 2. Get the second timeseries (predictor: jet index or SPEI)
+                # 2. Get the second timeseries (predictor: jet, SPEI, or AMO)
                 var2_ts = None
                 if config['var2_key'] == 'spei4':
                     spei_data = datasets_reanalysis.get(f"{dataset_key}_spei4")
                     if spei_data is not None:
-                        # Das SPEI-Signal ist bereits eine Anomalie, wir können es direkt detrenden
                         var2_ts = DataProcessor.detrend_data(DataProcessor.filter_by_season(spei_data, season))
+                elif config['var2_key'] == 'amo':
+                    if amo_data:
+                        # For teleconnections, we often use the detrended index
+                        var2_ts = amo_data.get(f"amo_{season_lower}_detrended")
                 else: # It's a jet index
                     jet_data_key = f"{dataset_key}_{season_lower}_{config['var2_key']}_data"
                     var2_ts = jet_data_reanalysis.get(jet_data_key, {}).get('jet')
@@ -1094,7 +1104,6 @@ class StorylineAnalyzer:
                 _, _, r_val, p_val, _ = StatsAnalyzer.calculate_regression(vals2, vals1)
 
                 if not np.isnan(r_val):
-                    # Create a descriptive label for the plot
                     base_label = config['title'].replace(f"{season} ", "").replace("vs", "vs.")
                     if "Jet" in base_label:
                         base_label = base_label.replace("Jet", "Jet Index")
@@ -1446,3 +1455,30 @@ class StorylineAnalyzer:
                 logging.info(f"  - Calculated {len(slopes)} future temporal slopes for {key} at +{gwl}°C GWL.")
 
         return future_slopes
+    
+    @staticmethod
+    def calculate_spatial_spei(datasets, dataset_key, scale=4):
+        """
+        Calculates a gridded SPEI field for a given dataset.
+        """
+        logging.info(f"Calculating spatial SPEI-{scale} for {dataset_key}...")
+        pr_monthly_full = datasets.get(f'{dataset_key}_pr_monthly')
+        tas_monthly_full = datasets.get(f'{dataset_key}_tas_monthly')
+        
+        if pr_monthly_full is None or tas_monthly_full is None:
+            logging.error(f"Cannot calculate spatial SPEI for {dataset_key}: Missing monthly pr or tas data.")
+            return None
+        
+        # We need a representative latitude for the entire grid for Thornthwaite.
+        # A central latitude is a reasonable approximation for this.
+        if 'lat' in pr_monthly_full.dims:
+            # For the gridded calculation, we pass the actual latitude DataArray
+            lat_input = pr_monthly_full.lat
+        else:
+            logging.error("Cannot calculate spatial SPEI: 'lat' dimension missing.")
+            return None
+            
+        spatial_spei = DataProcessor.calculate_spei(
+            pr_monthly_full, tas_monthly_full, lat=lat_input, scale=scale
+        )
+        return spatial_spei

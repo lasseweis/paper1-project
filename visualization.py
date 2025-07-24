@@ -1552,6 +1552,8 @@ class Visualizer:
         plt.savefig(filename, dpi=300)
         plt.close(fig)
         
+    # Komplette, korrigierte Funktion für visualization.py
+
     @staticmethod
     def plot_spatial_spei_map(spatial_spei_data, time_slice, title, filename="spatial_spei_map.png"):
         """
@@ -1561,7 +1563,9 @@ class Visualizer:
         Visualizer.ensure_plot_dir_exists()
 
         try:
-            spei_slice = spatial_spei_data.sel(time=time_slice, method='nearest')
+            # Konvertiere den Zeit-String in einen richtigen Zeitstempel, bevor er verwendet wird
+            time_stamp = pd.to_datetime(time_slice)
+            spei_slice = spatial_spei_data.sel(time=time_stamp, method='nearest')
         except Exception as e:
             logging.error(f"Could not select time slice '{time_slice}' for SPEI map: {e}")
             return

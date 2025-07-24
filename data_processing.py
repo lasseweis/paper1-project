@@ -620,6 +620,8 @@ class DataProcessor:
         
         return pet_monthly
 
+    # Komplette, korrigierte Funktion für data_processing.py
+
     @staticmethod
     def calculate_spei(pr_monthly, tas_monthly, lat, scale=4):
         """
@@ -674,7 +676,6 @@ class DataProcessor:
                 input_core_dims=[['time']],
                 output_core_dims=[['time']],
                 vectorize=True,  # Ensures the function is applied over non-core dims
-                dask="parallelized",
                 output_dtypes=[valid_balance.dtype]
             )
             spei_ts = spei_values.rename(f'spei_{scale}')

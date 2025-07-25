@@ -574,7 +574,7 @@ class ClimateAnalysis:
                             u850_change_data,
                             Config(),
                             future_period=future_period,
-                            historical_period=historical_period,
+                            historical_period=hist_period,
                             filename=os.path.basename(u850_change_plot_filename)
                         )
                     else:

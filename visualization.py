@@ -1551,53 +1551,6 @@ class Visualizer:
         filename = os.path.join(Config.PLOT_DIR, 'spei_drought_analysis_seasonal_comparison.png')
         plt.savefig(filename, dpi=300)
         plt.close(fig)
-        
-    # Komplette, korrigierte Funktion für visualization.py
-
-    @staticmethod
-    def plot_spatial_spei_map(spatial_spei_data, time_slice, title, filename="spatial_spei_map.png"):
-        """
-        Plots a single map of spatial SPEI for a specific time slice.
-        """
-        logging.info(f"Plotting spatial SPEI map for {time_slice}...")
-        Visualizer.ensure_plot_dir_exists()
-
-        try:
-            # Konvertiere den Zeit-String in einen richtigen Zeitstempel, bevor er verwendet wird
-            time_stamp = pd.to_datetime(time_slice)
-            spei_slice = spatial_spei_data.sel(time=time_stamp, method='nearest')
-        except Exception as e:
-            logging.error(f"Could not select time slice '{time_slice}' for SPEI map: {e}")
-            return
-            
-        fig, ax = plt.subplots(figsize=(12, 8), subplot_kw={'projection': ccrs.PlateCarree()})
-        
-        ax.set_extent(Config.PLOT_MAP_EXTENT, crs=ccrs.PlateCarree())
-        ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=0)
-        ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
-        ax.add_feature(cfeature.BORDERS, linestyle=':', linewidth=0.5)
-        gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
-        gl.top_labels = gl.right_labels = False
-
-        lons, lats = np.meshgrid(spei_slice.lon, spei_slice.lat)
-        cmap = 'BrBG'
-        vmin, vmax = -2.5, 2.5
-        
-        cf = ax.pcolormesh(lons, lats, spei_slice.values, cmap=cmap, vmin=vmin, vmax=vmax,
-                           transform=ccrs.PlateCarree(), shading='auto')
-        
-        cbar = fig.colorbar(cf, ax=ax, orientation='vertical', pad=0.05, aspect=30, extend='both')
-        cbar.set_label('SPEI Value (Standard Deviations)')
-        
-        ax.set_title(title, fontsize=14, weight='bold')
-        
-        filepath = os.path.join(Config.PLOT_DIR, filename)
-        plt.savefig(filepath, dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        logging.info(f"Saved spatial SPEI map to {filepath}")
-        
-    # In lasseweis/paper1-project/paper1-project-plot/visualization.py
-# ERSETZE die vorherige Plot-Funktion `plot_spatial_spei_analysis_maps` hiermit:
 
     @staticmethod
     def plot_spatial_spei_analysis_maps(

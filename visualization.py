@@ -40,7 +40,8 @@ class Visualizer:
     @staticmethod
     def plot_regression_map(ax, slopes, p_values, lons, lats, title, box_coords,
                           season_label, variable, ua_seasonal_mean=None,
-                          show_jet_boxes=False, significance_level=0.05, std_dev_predictor=None):
+                          show_jet_boxes=False, significance_level=0.05, std_dev_predictor=None,
+                          stipple_skip=2): # NEU: Parameter für die Punktdichte
         """Helper function to create a single regression map panel."""
         ax.set_extent(Config.PLOT_MAP_EXTENT, crs=ccrs.PlateCarree())
         ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=0)
@@ -77,8 +78,19 @@ class Visualizer:
 
         if p_values is not None and slopes is not None:
             sig_mask = (p_values < significance_level) & np.isfinite(slopes)
-            if np.any(sig_mask):
-                 ax.scatter(lons_plot[sig_mask], lats_plot[sig_mask], s=1, color='dimgray', marker='.',
+            
+            # NEU: Logik zur Ausdünnung der Punkte
+            if stipple_skip > 1:
+                # Erstelle eine Maske, die nur jeden 'stipple_skip'-ten Punkt auswählt
+                points_to_plot_mask = np.zeros_like(sig_mask, dtype=bool)
+                points_to_plot_mask[::stipple_skip, ::stipple_skip] = True
+                final_mask = sig_mask & points_to_plot_mask
+            else:
+                final_mask = sig_mask
+
+            if np.any(final_mask):
+                 # GEÄNDERT: Kleinere Punktgröße (s=0.2) und Verwendung der 'final_mask'
+                 ax.scatter(lons_plot[final_mask], lats_plot[final_mask], s=0.2, color='dimgray', marker='.',
                             alpha=0.6, transform=ccrs.PlateCarree())
 
         box_lon_min, box_lon_max, box_lat_min, box_lat_max = box_coords

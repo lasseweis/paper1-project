@@ -41,7 +41,7 @@ class Visualizer:
     def plot_regression_map(ax, slopes, p_values, lons, lats, title, box_coords,
                           season_label, variable, ua_seasonal_mean=None,
                           show_jet_boxes=False, significance_level=0.05, std_dev_predictor=None,
-                          stipple_skip=2): # NEU: Parameter für die Punktdichte
+                          stipple_skip=None, dataset_key=None): # MODIFIED: Added dataset_key
         """Helper function to create a single regression map panel."""
         ax.set_extent(Config.PLOT_MAP_EXTENT, crs=ccrs.PlateCarree())
         ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=0)
@@ -79,17 +79,25 @@ class Visualizer:
         if p_values is not None and slopes is not None:
             sig_mask = (p_values < significance_level) & np.isfinite(slopes)
             
-            # NEU: Logik zur Ausdünnung der Punkte
-            if stipple_skip > 1:
-                # Erstelle eine Maske, die nur jeden 'stipple_skip'-ten Punkt auswählt
+            # --- MODIFIED BLOCK: DYNAMIC STIPPLE SKIP ---
+            # Set default skip value
+            skip_val = 2
+            # If the dataset is ERA5, use a larger skip value
+            if dataset_key == Config.DATASET_ERA5:
+                skip_val = 8
+            # Allow manual override from function call
+            if stipple_skip is not None:
+                skip_val = stipple_skip
+            
+            if skip_val > 1:
                 points_to_plot_mask = np.zeros_like(sig_mask, dtype=bool)
-                points_to_plot_mask[::stipple_skip, ::stipple_skip] = True
+                points_to_plot_mask[::skip_val, ::skip_val] = True
                 final_mask = sig_mask & points_to_plot_mask
             else:
                 final_mask = sig_mask
+            # --- END MODIFIED BLOCK ---
 
             if np.any(final_mask):
-                 # GEÄNDERT: Kleinere Punktgröße (s=0.2) und Verwendung der 'final_mask'
                  ax.scatter(lons_plot[final_mask], lats_plot[final_mask], s=0.2, color='dimgray', marker='.',
                             alpha=0.6, transform=ccrs.PlateCarree())
 
@@ -118,11 +126,13 @@ class Visualizer:
         # Plot PR panels
         winter_pr_data = all_season_data['Winter']
         ax_pr_winter = fig.add_subplot(gs[0, 0], projection=ccrs.PlateCarree())
-        cf_pr, label_pr = Visualizer.plot_regression_map(ax_pr_winter, winter_pr_data.get('slopes_pr'), winter_pr_data.get('p_values_pr'), winter_pr_data.get('lons'), winter_pr_data.get('lats'), f"{dataset_key}: U850 vs PR Box Index", box_coords, "DJF", 'pr', ua_seasonal_mean=winter_pr_data.get('ua850_mean'), std_dev_predictor=winter_pr_data.get('std_dev_pr'))
+        # MODIFIED: Pass dataset_key to the plotting function
+        cf_pr, label_pr = Visualizer.plot_regression_map(ax_pr_winter, winter_pr_data.get('slopes_pr'), winter_pr_data.get('p_values_pr'), winter_pr_data.get('lons'), winter_pr_data.get('lats'), f"{dataset_key}: U850 vs PR Box Index", box_coords, "DJF", 'pr', ua_seasonal_mean=winter_pr_data.get('ua850_mean'), std_dev_predictor=winter_pr_data.get('std_dev_pr'), dataset_key=dataset_key)
 
         summer_pr_data = all_season_data['Summer']
         ax_pr_summer = fig.add_subplot(gs[0, 1], projection=ccrs.PlateCarree())
-        Visualizer.plot_regression_map(ax_pr_summer, summer_pr_data.get('slopes_pr'), summer_pr_data.get('p_values_pr'), summer_pr_data.get('lons'), summer_pr_data.get('lats'), f"{dataset_key}: U850 vs PR Box Index", box_coords, "JJA", 'pr', ua_seasonal_mean=summer_pr_data.get('ua850_mean'), std_dev_predictor=summer_pr_data.get('std_dev_pr'))
+        # MODIFIED: Pass dataset_key to the plotting function
+        Visualizer.plot_regression_map(ax_pr_summer, summer_pr_data.get('slopes_pr'), summer_pr_data.get('p_values_pr'), summer_pr_data.get('lons'), summer_pr_data.get('lats'), f"{dataset_key}: U850 vs PR Box Index", box_coords, "JJA", 'pr', ua_seasonal_mean=summer_pr_data.get('ua850_mean'), std_dev_predictor=summer_pr_data.get('std_dev_pr'), dataset_key=dataset_key)
 
         if cf_pr:
             cax_pr = fig.add_subplot(gs[0, 2]); fig.colorbar(cf_pr, cax=cax_pr, extend='both', label=label_pr)
@@ -130,17 +140,18 @@ class Visualizer:
         # Plot TAS panels
         winter_tas_data = all_season_data['Winter']
         ax_tas_winter = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
-        cf_tas, label_tas = Visualizer.plot_regression_map(ax_tas_winter, winter_tas_data.get('slopes_tas'), winter_tas_data.get('p_values_tas'), winter_tas_data.get('lons'), winter_tas_data.get('lats'), f"{dataset_key}: U850 vs TAS Box Index", box_coords, "DJF", 'tas', ua_seasonal_mean=winter_tas_data.get('ua850_mean'), std_dev_predictor=winter_tas_data.get('std_dev_tas'))
+        # MODIFIED: Pass dataset_key to the plotting function
+        cf_tas, label_tas = Visualizer.plot_regression_map(ax_tas_winter, winter_tas_data.get('slopes_tas'), winter_tas_data.get('p_values_tas'), winter_tas_data.get('lons'), winter_tas_data.get('lats'), f"{dataset_key}: U850 vs TAS Box Index", box_coords, "DJF", 'tas', ua_seasonal_mean=winter_tas_data.get('ua850_mean'), std_dev_predictor=winter_tas_data.get('std_dev_tas'), dataset_key=dataset_key)
 
         summer_tas_data = all_season_data['Summer']
         ax_tas_summer = fig.add_subplot(gs[1, 1], projection=ccrs.PlateCarree())
-        Visualizer.plot_regression_map(ax_tas_summer, summer_tas_data.get('slopes_tas'), summer_tas_data.get('p_values_tas'), summer_tas_data.get('lons'), summer_tas_data.get('lats'), f"{dataset_key}: U850 vs TAS Box Index", box_coords, "JJA", 'tas', ua_seasonal_mean=summer_tas_data.get('ua850_mean'), std_dev_predictor=summer_tas_data.get('std_dev_tas'))
+        # MODIFIED: Pass dataset_key to the plotting function
+        Visualizer.plot_regression_map(ax_tas_summer, summer_tas_data.get('slopes_tas'), summer_tas_data.get('p_values_tas'), summer_tas_data.get('lons'), summer_tas_data.get('lats'), f"{dataset_key}: U850 vs TAS Box Index", box_coords, "JJA", 'tas', ua_seasonal_mean=summer_tas_data.get('ua850_mean'), std_dev_predictor=summer_tas_data.get('std_dev_tas'), dataset_key=dataset_key)
 
         if cf_tas:
             cax_tas = fig.add_subplot(gs[1, 2]); fig.colorbar(cf_tas, cax=cax_tas, extend='both', label=label_tas)
             
         plt.suptitle(f"{dataset_key}: U850 Regression onto Box Climate Indices (Detrended, Normalized Predictors)", fontsize=14, weight='bold')
-        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
         fig.tight_layout(rect=[0, 0, 0.95, 0.95])
         filename = os.path.join(Config.PLOT_DIR, f'regression_maps_norm_{dataset_key}.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -202,8 +213,13 @@ class Visualizer:
                                     transform=ccrs.PlateCarree())
                 
                 sig_mask = (data_20crv3['p_values'] < 0.05) & np.isfinite(data_20crv3['slopes'])
-                if np.any(sig_mask):
-                    ax1.scatter(lons_plot[sig_mask], lats_plot[sig_mask], s=0.5, color='dimgray', marker='.',
+                # MODIFIED: Stipple skip logic for 20CRv3 (default is 2)
+                stipple_skip_20crv3 = 2
+                points_to_plot_mask_20crv3 = np.zeros_like(sig_mask, dtype=bool)
+                points_to_plot_mask_20crv3[::stipple_skip_20crv3, ::stipple_skip_20crv3] = True
+                final_mask_20crv3 = sig_mask & points_to_plot_mask_20crv3
+                if np.any(final_mask_20crv3):
+                    ax1.scatter(lons_plot[final_mask_20crv3], lats_plot[final_mask_20crv3], s=0.5, color='dimgray', marker='.',
                                 alpha=0.4, transform=ccrs.PlateCarree())
                 
                 if jet_box_coords:
@@ -239,8 +255,13 @@ class Visualizer:
                                     transform=ccrs.PlateCarree())
                 
                 sig_mask = (data_era5['p_values'] < 0.05) & np.isfinite(data_era5['slopes'])
-                if np.any(sig_mask):
-                    ax2.scatter(lons_plot[sig_mask], lats_plot[sig_mask], s=0.5, color='dimgray', marker='.',
+                # MODIFIED: Stipple skip logic for ERA5 (set to 8)
+                stipple_skip_era5 = 8
+                points_to_plot_mask_era5 = np.zeros_like(sig_mask, dtype=bool)
+                points_to_plot_mask_era5[::stipple_skip_era5, ::stipple_skip_era5] = True
+                final_mask_era5 = sig_mask & points_to_plot_mask_era5
+                if np.any(final_mask_era5):
+                    ax2.scatter(lons_plot[final_mask_era5], lats_plot[final_mask_era5], s=0.5, color='dimgray', marker='.',
                                 alpha=0.4, transform=ccrs.PlateCarree())
                                 
                 if jet_box_coords:
@@ -270,7 +291,6 @@ class Visualizer:
             row_idx += 1
         
         plt.suptitle(f"Correlation Maps of Jet Variations and Climate ({season}, Detrended)", fontsize=16, weight='bold')
-        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
         fig.tight_layout(rect=[0, 0, 0.95, 0.96])
         filename = os.path.join(Config.PLOT_DIR, f'jet_correlation_maps_{season.lower()}.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -1588,12 +1608,15 @@ class Visualizer:
         fig, axs = plt.subplots(1, 3, figsize=(24, 7), subplot_kw={'projection': ccrs.PlateCarree()})
         plt.subplots_adjust(wspace=0.15, hspace=0.2)
 
-        # --- Allgemeine Einstellungen ---
+        # --- General Settings ---
         extent_box = [Config.BOX_LON_MIN - 2, Config.BOX_LON_MAX + 2, Config.BOX_LAT_MIN - 2, Config.BOX_LAT_MAX + 2]
         analysis_box_rect = mpatches.Rectangle(
             (Config.BOX_LON_MIN, Config.BOX_LAT_MIN), Config.BOX_LON_MAX - Config.BOX_LON_MIN, Config.BOX_LAT_MAX - Config.BOX_LAT_MIN,
             fill=False, edgecolor='lime', linewidth=2.5, zorder=10
         )
+        
+        # MODIFIED: Determine stipple skip value based on dataset
+        stipple_skip = 8 if title_prefix == Config.DATASET_ERA5 else 2
 
         def setup_map_ax(ax):
             ax.set_extent(extent_box, crs=ccrs.PlateCarree())
@@ -1614,7 +1637,7 @@ class Visualizer:
             cf1 = ax1.pcolormesh(lons, lats, spei_slice.values, cmap='BrBG', vmin=-2.5, vmax=2.5, transform=ccrs.PlateCarree(), shading='auto')
             cbar1 = fig.colorbar(cf1, ax=ax1, orientation='vertical', pad=0.02, aspect=25, extend='both', shrink=0.8)
             cbar1.set_label('SPEI Value')
-            ax1.set_title(f"a) SPEI-4 am {time_stamp.strftime('%Y-%m-%d')}", fontsize=12)
+            ax1.set_title(f"a) SPEI-4 on {time_stamp.strftime('%Y-%m-%d')}", fontsize=12)
         except Exception as e:
             ax1.text(0.5, 0.5, "SPEI Data Error", transform=ax1.transAxes, ha='center', va='center')
             logging.error(f"Could not create SPEI slice panel: {e}")
@@ -1628,10 +1651,15 @@ class Visualizer:
             cf2 = ax2.pcolormesh(lons, lats, discharge_corr_map.values, cmap='PiYG', vmin=-0.7, vmax=0.7, transform=ccrs.PlateCarree(), shading='auto')
             if p_values_corr is not None:
                 sig_mask = (p_values_corr < 0.05) & np.isfinite(discharge_corr_map)
-                ax2.scatter(lons[sig_mask], lats[sig_mask], s=2, color='black', marker='.', alpha=0.7, transform=ccrs.PlateCarree())
+                # MODIFIED: Apply stipple skip logic
+                points_to_plot_mask = np.zeros_like(sig_mask, dtype=bool)
+                points_to_plot_mask[::stipple_skip, ::stipple_skip] = True
+                final_mask = sig_mask & points_to_plot_mask
+                ax2.scatter(lons[final_mask], lats[final_mask], s=2, color='black', marker='.', alpha=0.7, transform=ccrs.PlateCarree())
+
             cbar2 = fig.colorbar(cf2, ax=ax2, orientation='vertical', pad=0.02, aspect=25, extend='both', shrink=0.8)
-            cbar2.set_label('Korrelationskoeffizient (r)')
-            ax2.set_title(f"b) Korrelation: Lokaler SPEI vs. Abfluss ({season})", fontsize=12)
+            cbar2.set_label('Correlation Coefficient (r)')
+            ax2.set_title(f"b) Correlation: Local SPEI vs. Discharge ({season})", fontsize=12)
         else:
             ax2.text(0.5, 0.5, "Correlation Data Error", transform=ax2.transAxes, ha='center', va='center')
 
@@ -1641,18 +1669,23 @@ class Visualizer:
         gl3.left_labels = False
         if discharge_regr_slopes is not None:
             lons, lats = np.meshgrid(discharge_regr_slopes.lon, discharge_regr_slopes.lat)
-            vmax = np.nanpercentile(np.abs(discharge_regr_slopes), 98) # Dynamisches Limit für bessere Farben
+            vmax = np.nanpercentile(np.abs(discharge_regr_slopes), 98) # Dynamic limit for better colors
             cf3 = ax3.pcolormesh(lons, lats, discharge_regr_slopes.values, cmap='RdYlBu', vmin=-vmax, vmax=vmax, transform=ccrs.PlateCarree(), shading='auto')
             if p_values_regr is not None:
                 sig_mask = (p_values_regr < 0.05) & np.isfinite(discharge_regr_slopes)
-                ax3.scatter(lons[sig_mask], lats[sig_mask], s=2, color='black', marker='.', alpha=0.7, transform=ccrs.PlateCarree())
+                # MODIFIED: Apply stipple skip logic
+                points_to_plot_mask = np.zeros_like(sig_mask, dtype=bool)
+                points_to_plot_mask[::stipple_skip, ::stipple_skip] = True
+                final_mask = sig_mask & points_to_plot_mask
+                ax3.scatter(lons[final_mask], lats[final_mask], s=2, color='black', marker='.', alpha=0.7, transform=ccrs.PlateCarree())
+
             cbar3 = fig.colorbar(cf3, ax=ax3, orientation='vertical', pad=0.02, aspect=25, extend='both', shrink=0.8)
-            cbar3.set_label('Abflussänderung [m³/s] pro Std.Abw. SPEI')
-            ax3.set_title(f"c) Einfluss: Lokaler SPEI auf Abfluss ({season})", fontsize=12)
+            cbar3.set_label('Discharge Change [m³/s] per Std.Dev. of SPEI')
+            ax3.set_title(f"c) Influence: Local SPEI on Discharge ({season})", fontsize=12)
         else:
             ax3.text(0.5, 0.5, "Regression Data Error", transform=ax3.transAxes, ha='center', va='center')
         
-        fig.suptitle(f"{title_prefix}: Räumliche Dürreanalyse und hydrologischer Zusammenhang ({season})", fontsize=16, weight='bold')
+        fig.suptitle(f"{title_prefix}: Spatial Drought Analysis and Hydrological Link ({season})", fontsize=16, weight='bold')
         fig.tight_layout(rect=[0, 0, 1, 0.94])
         
         filepath = os.path.join(Config.PLOT_DIR, filename)

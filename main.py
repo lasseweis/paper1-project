@@ -218,15 +218,15 @@ class ClimateAnalysis:
 
         Visualizer.ensure_plot_dir_exists()
         cmip6_results = None
-        regression_results = {} # Wird nur gefüllt, wenn die Plots tatsächlich erstellt werden.
-        
-        # Erstelle eine Instanz der zentralen Analyseklasse
+        regression_results = {} # Will only be filled if the plots are actually created.
+
+        # Create an instance of the central analysis class
         storyline_analyzer = StorylineAnalyzer(config=Config)
 
 
-        # --- PART 1: GRUNDLAGEN-BERECHNUNGEN ---
-        # Diese Basis-Daten und Jet-Indizes werden immer geladen/berechnet,
-        # da sie für potenziell mehrere, unterschiedliche Analysen benötigt werden.
+        # --- PART 1: BASIC CALCULATIONS ---
+        # These base data and jet indices are always loaded/calculated,
+        # as they are needed for potentially multiple, different analyses.
         logging.info("\n--- Processing Reanalysis Datasets ---")
         datasets_reanalysis = {
             **ClimateAnalysis.process_20crv3_data(),
@@ -236,34 +236,34 @@ class ClimateAnalysis:
             logging.critical("Failed to process reanalysis datasets. Aborting.")
             return None
 
-        # --- START: SPEI-Berechnung für Reanalyse-Datensätze ---
+        # --- START: SPEI Calculation for Reanalysis Datasets ---
         logging.info("\n--- Calculating SPEI for Reanalysis Datasets ---")
         for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
             logging.info(f"  Calculating SPEI for {dset_key}...")
-            
-            # Lade die monatlichen Daten für das gesamte Gebiet
+
+            # Load the monthly data for the entire area
             pr_monthly_full = datasets_reanalysis.get(f'{dset_key}_pr_monthly')
             tas_monthly_full = datasets_reanalysis.get(f'{dset_key}_tas_monthly')
 
             if pr_monthly_full is not None and tas_monthly_full is not None:
-                # Berechne den räumlichen Mittelwert über die Analyse-Box
+                # Calculate the spatial mean over the analysis box
                 pr_box_monthly = DataProcessor.calculate_spatial_mean(pr_monthly_full, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
                 tas_box_monthly = DataProcessor.calculate_spatial_mean(tas_monthly_full, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
 
                 if pr_box_monthly is not None and tas_box_monthly is not None:
-                    # Bestimme die zentrale geografische Breite der Box für die PET-Berechnung
+                    # Determine the central geographical latitude of the box for PET calculation
                     lat_center_of_box = (Config.BOX_LAT_MIN + Config.BOX_LAT_MAX) / 2
-                    
-                    # Berechne den SPEI mit einer Zeitskala von 4 Monaten
+
+                    # Calculate SPEI with a time scale of 4 months
                     spei4 = DataProcessor.calculate_spei(pr_box_monthly, tas_box_monthly, lat=lat_center_of_box, scale=4)
-                    
+
                     if spei4 is not None:
-                        # Für die weitere Analyse benötigen wir die saisonalen Koordinaten
+                        # For further analysis, we need the seasonal coordinates
                         spei4_seasonal = DataProcessor.assign_season_to_dataarray(spei4)
                         datasets_reanalysis[f'{dset_key}_spei4'] = spei4_seasonal
                         logging.info(f"    Successfully calculated SPEI-4 for {dset_key}.")
-        # --- ENDE: SPEI-Berechnung ---
-        
+        # --- END: SPEI Calculation ---
+
         discharge_data_loaded = ClimateAnalysis.process_discharge_data(Config.DISCHARGE_FILE)
         amo_data_loaded = ClimateAnalysis.load_amo_index(Config.AMO_INDEX_FILE)
 
@@ -281,14 +281,14 @@ class ClimateAnalysis:
                 if jet_lat is not None:
                     jet_data_reanalysis[f'{dset_key}_{season_lower}_lat_data'] = {'jet': DataProcessor.detrend_data(jet_lat)}
 
-        # --- AB HIER: PLOT-SPEZIFISCHE BERECHNUNG UND ERSTELLUNG ---
+        # --- FROM HERE: PLOT-SPECIFIC CALCULATION AND CREATION ---
 
         logging.info("\n--- Checking for Reanalysis Regression Maps ---")
         regression_period = (1981, 2010)
         for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
             regression_plot_filename = os.path.join(Config.PLOT_DIR, f'regression_maps_norm_{dset_key}.png')
             if not os.path.exists(regression_plot_filename):
-                logging.info(f"Plot '{regression_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
+                logging.info(f"Plot '{regression_plot_filename}' not found. Calculating data and creating plot...")
                 results = StorylineAnalyzer.calculate_regression_maps(
                     datasets=datasets_reanalysis,
                     dataset_key=dset_key,
@@ -298,44 +298,89 @@ class ClimateAnalysis:
                     regression_results[dset_key] = results
                     Visualizer.plot_regression_analysis(results, dset_key)
                 else:
-                    logging.warning(f"Konnte Regression für {dset_key} nicht berechnen.")
+                    logging.warning(f"Could not calculate regression for {dset_key}.")
             else:
-                logging.info(f"Plot '{regression_plot_filename}' existiert bereits. Überspringe Berechnung und Erstellung.")
+                logging.info(f"Plot '{regression_plot_filename}' already exists. Skipping calculation and creation.")
         
+        # --- NEW SECTION FOR SINGLE CMIP6 MODEL REGRESSION PLOTS ---
+        logging.info("\n\n--- Checking for Single CMIP6 Model Regression Maps ---")
+        single_model_plot_filename = os.path.join(Config.PLOT_DIR, "regression_maps_norm_CMIP6_single_models.png")
+        if not os.path.exists(single_model_plot_filename):
+            logging.info(f"Plot '{single_model_plot_filename}' not found. Calculating data and creating plot...")
+
+            # Ensure CMIP6 results are loaded
+            if cmip6_results is None:
+                try:
+                    cmip6_results = storyline_analyzer.analyze_cmip6_changes_at_gwl()
+                except Exception as e:
+                    logging.error(f"Failed to run CMIP6 analysis for single model plots: {e}")
+                    cmip6_results = {} # Prevents subsequent errors
+
+            if cmip6_results and 'cmip6_model_data_loaded' in cmip6_results:
+                # Select four models for the plot
+                # Ensure these models are present in your `REQUIRED_MODEL_SCENARIOS` configuration
+                models_to_plot = ["ACCESS-CM2_ssp585", "MPI-ESM1-2-HR_ssp585", "IPSL-CM6A-LR_ssp585", "MIROC6_ssp585"]
+                single_model_regression_data = {}
+
+                for model_key in models_to_plot:
+                    if model_key in cmip6_results['cmip6_model_data_loaded']:
+                        model_data = cmip6_results['cmip6_model_data_loaded'][model_key]
+                        # Use the new function to calculate regression for this one model
+                        results = StorylineAnalyzer.calculate_single_model_regression_maps(
+                            model_data,
+                            model_key,
+                            historical_period=(1995, 2014) # Standard IPCC reference period
+                        )
+                        if results:
+                            single_model_regression_data[model_key] = results
+                    else:
+                        logging.warning(f"Data for selected model {model_key} not found in preloaded data.")
+
+                if single_model_regression_data:
+                    # Call the new plotting function
+                    Visualizer.plot_cmip6_model_regression_analysis(single_model_regression_data, models_to_plot)
+                else:
+                    logging.warning("Could not generate data for any of the selected models. Skipping plot.")
+            else:
+                logging.warning("Skipping single CMIP6 model regression plot: CMIP6 results not available.")
+        else:
+            logging.info(f"Plot '{single_model_plot_filename}' already exists. Skipping calculation and creation.")
+
+
         logging.info("\n\n--- Checking for Reanalysis Jet Index Comparison Timeseries ---")
         jet_indices_plot_filename = os.path.join(Config.PLOT_DIR, "jet_indices_comparison_seasonal_detrended.png")
         if not os.path.exists(jet_indices_plot_filename):
             if jet_data_reanalysis:
-                logging.info(f"Plot '{jet_indices_plot_filename}' nicht gefunden, wird erstellt...")
+                logging.info(f"Plot '{jet_indices_plot_filename}' not found, creating...")
                 Visualizer.plot_jet_indices_comparison(jet_data_reanalysis)
             else:
                 logging.warning("Skipping jet index comparison plot, no data was generated.")
         else:
-            logging.info(f"Plot '{jet_indices_plot_filename}' existiert bereits. Überspringe Erstellung.")
+            logging.info(f"Plot '{jet_indices_plot_filename}' already exists. Skipping creation.")
 
         logging.info("\n\n--- Checking for Reanalysis Jet Impact Comparison Maps ---")
         for season in ['Winter', 'Summer']:
             jet_impact_plot_filename = os.path.join(Config.PLOT_DIR, f'jet_impact_regression_maps_{season.lower()}.png')
             if not os.path.exists(jet_impact_plot_filename):
-                logging.info(f"Plot '{jet_impact_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
+                logging.info(f"Plot '{jet_impact_plot_filename}' not found. Calculating data and creating plot...")
                 impact_20crv3 = StorylineAnalyzer.calculate_jet_impact_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_20CRV3, season)
                 impact_era5 = StorylineAnalyzer.calculate_jet_impact_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_ERA5, season)
 
                 data_20crv3 = impact_20crv3.get(season)
                 data_era5 = impact_era5.get(season)
-                
+
                 if data_20crv3 and data_era5:
                     Visualizer.plot_jet_impact_comparison_maps(data_20crv3, data_era5, season)
                 else:
                     logging.warning(f"Skipping combined jet impact plot for {season}, data missing for one or both reanalyses.")
             else:
-                logging.info(f"Plot '{jet_impact_plot_filename}' existiert bereits. Überspringe Berechnung und Erstellung.")
+                logging.info(f"Plot '{jet_impact_plot_filename}' already exists. Skipping calculation and creation.")
 
         logging.info("\n\n--- Checking for Reanalysis Jet Correlation Maps ---")
         for season in ['Winter', 'Summer']:
             jet_corr_plot_filename = os.path.join(Config.PLOT_DIR, f'jet_correlation_maps_{season.lower()}.png')
             if not os.path.exists(jet_corr_plot_filename):
-                logging.info(f"Plot '{jet_corr_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
+                logging.info(f"Plot '{jet_corr_plot_filename}' not found. Calculating data and creating plot...")
                 corr_20crv3 = StorylineAnalyzer.calculate_jet_correlation_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_20CRV3, season)
                 corr_era5 = StorylineAnalyzer.calculate_jet_correlation_maps(datasets_reanalysis, jet_data_reanalysis, Config.DATASET_ERA5, season)
 
@@ -344,22 +389,22 @@ class ClimateAnalysis:
                 else:
                     logging.warning(f"Skipping jet correlation plot for {season}, data missing for one or both reanalyses.")
             else:
-                logging.info(f"Plot '{jet_corr_plot_filename}' existiert bereits. Überspringe Berechnung und Erstellung.")
+                logging.info(f"Plot '{jet_corr_plot_filename}' already exists. Skipping calculation and creation.")
 
         logging.info("\n\n--- Checking for Correlation Timeseries & Bar Charts ---")
         for season in ['Winter', 'Summer']:
             season_lower = season.lower()
-            
+
             corr_timeseries_filename = os.path.join(Config.PLOT_DIR, f'{season_lower}_correlations_comparison_detrended.png')
             if not os.path.exists(corr_timeseries_filename):
-                logging.info(f"Plot '{corr_timeseries_filename}' nicht gefunden, wird erstellt...")
+                logging.info(f"Plot '{corr_timeseries_filename}' not found, creating...")
                 Visualizer.plot_correlation_timeseries_comparison(datasets_reanalysis, jet_data_reanalysis, discharge_data_loaded, season)
             else:
-                logging.info(f"Plot '{corr_timeseries_filename}' existiert bereits. Überspringe Erstellung.")
+                logging.info(f"Plot '{corr_timeseries_filename}' already exists. Skipping creation.")
 
             corr_barchart_filename = os.path.join(Config.PLOT_DIR, f'correlation_matrix_comparison_{season_lower}_detrended_grouped.png')
             if not os.path.exists(corr_barchart_filename):
-                logging.info(f"Plot '{corr_barchart_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
+                logging.info(f"Plot '{corr_barchart_filename}' not found. Calculating data and creating plot...")
                 correlation_data_for_bar_chart = StorylineAnalyzer.analyze_all_correlations_for_bar_chart(
                     datasets_reanalysis, jet_data_reanalysis, discharge_data_loaded, amo_data_loaded, season
                 )
@@ -368,13 +413,13 @@ class ClimateAnalysis:
                 else:
                     logging.warning(f"No correlation data generated for {season} bar chart, skipping plot.")
             else:
-                logging.info(f"Plot '{corr_barchart_filename}' existiert bereits. Überspringe Berechnung und Erstellung.")
+                logging.info(f"Plot '{corr_barchart_filename}' already exists. Skipping calculation and creation.")
 
         logging.info("\n\n--- Checking for AMO-Jet Correlation Plot ---")
         window_size_amo = 15
         amo_plot_filename = os.path.join(Config.PLOT_DIR, f'amo_jet_correlations_comparison_rolling_{window_size_amo}yr.png')
         if not os.path.exists(amo_plot_filename):
-            logging.info(f"Plot '{amo_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
+            logging.info(f"Plot '{amo_plot_filename}' not found. Calculating data and creating plot...")
             if amo_data_loaded:
                 amo_correlation_data = StorylineAnalyzer.analyze_amo_jet_correlations_for_plot(jet_data_reanalysis, amo_data_loaded, window_size_amo)
                 if amo_correlation_data and any(amo_correlation_data.values()):
@@ -384,31 +429,31 @@ class ClimateAnalysis:
             else:
                 logging.warning("AMO data could not be loaded, skipping AMO-Jet correlation analysis and plotting.")
         else:
-            logging.info(f"Plot '{amo_plot_filename}' existiert bereits. Überspringe Berechnung und Erstellung.")
-            
+            logging.info(f"Plot '{amo_plot_filename}' already exists. Skipping calculation and creation.")
+
         logging.info("\n\n--- Checking for Seasonal Drought Analysis Plot ---")
         drought_plot_filename = os.path.join(Config.PLOT_DIR, 'spei_drought_analysis_seasonal_comparison.png')
         if not os.path.exists(drought_plot_filename):
-            logging.info(f"Plot '{drought_plot_filename}' nicht gefunden, wird erstellt...")
+            logging.info(f"Plot '{drought_plot_filename}' not found, creating...")
             if any(f'{dset}_spei4' in datasets_reanalysis for dset in [Config.DATASET_20CRV3, Config.DATASET_ERA5]):
                 Visualizer.plot_seasonal_drought_analysis(datasets_reanalysis, scale=4)
             else:
                 logging.warning("Skipping seasonal drought plot: No SPEI data was calculated.")
         else:
-            logging.info(f"Plot '{drought_plot_filename}' existiert bereits. Überspringe Erstellung.")
+            logging.info(f"Plot '{drought_plot_filename}' already exists. Skipping creation.")
 
-        # === FINALE VERSION: Kombinierter SPEI-, Korrelations- und Einfluss-Plot ===
+        # === FINAL VERSION: Combined SPEI, Correlation, and Influence Plot ===
         logging.info("\n\n--- Checking for Combined Spatial SPEI & Discharge Analysis Map ---")
         combined_spei_plot_filename = os.path.join(Config.PLOT_DIR, 'spatial_spei_discharge_analysis_era5_summer.png')
         if not os.path.exists(combined_spei_plot_filename):
-            logging.info(f"Plot '{combined_spei_plot_filename}' nicht gefunden. Berechne und erstelle Plot...")
-            
-            # Daten laden
+            logging.info(f"Plot '{combined_spei_plot_filename}' not found. Calculating and creating plot...")
+
+            # Load data
             spatial_spei_era5 = StorylineAnalyzer.calculate_spatial_spei(datasets_reanalysis, Config.DATASET_ERA5, scale=4)
             summer_discharge_ts = discharge_data_loaded.get('summer_discharge')
-            
+
             if spatial_spei_era5 is not None and summer_discharge_ts is not None:
-                # 1. Berechne die Korrelationskarte
+                # 1. Calculate the correlation map
                 corr_map, p_vals_corr = StorylineAnalyzer.calculate_spei_on_discharge_map(
                     spatial_spei_data=spatial_spei_era5,
                     discharge_timeseries=summer_discharge_ts,
@@ -416,15 +461,15 @@ class ClimateAnalysis:
                     analysis_type='correlation'
                 )
 
-                # 2. Berechne die Regressionskarte
+                # 2. Calculate the regression map
                 regr_slopes, p_vals_regr = StorylineAnalyzer.calculate_spei_on_discharge_map(
                     spatial_spei_data=spatial_spei_era5,
                     discharge_timeseries=summer_discharge_ts,
                     season='Summer',
                     analysis_type='regression'
                 )
-                
-                # 3. Erstelle den kombinierten 1x3 Plot
+
+                # 3. Create the combined 1x3 plot
                 Visualizer.plot_spatial_spei_analysis_maps(
                     spatial_spei_data=spatial_spei_era5,
                     discharge_corr_map=corr_map,
@@ -437,34 +482,35 @@ class ClimateAnalysis:
                     filename=os.path.basename(combined_spei_plot_filename)
                 )
             else:
-                logging.warning("Konnte kombinierten SPEI/Discharge-Analyseplot nicht erstellen, da Daten fehlen.")
+                logging.warning("Could not create combined SPEI/Discharge analysis plot, data is missing.")
         else:
-            logging.info(f"Plot '{combined_spei_plot_filename}' existiert bereits. Überspringe Erstellung.")
-        # === ENDE FINALE VERSION ===
+            logging.info(f"Plot '{combined_spei_plot_filename}' already exists. Skipping creation.")
+        # === END FINAL VERSION ===
 
         # --- PART 2: CMIP6 AND STORYLINE ANALYSIS ---
         logging.info("\n\n--- Analyzing CMIP6 Data and Storylines ---")
         try:
-            cmip6_results = storyline_analyzer.analyze_cmip6_changes_at_gwl()
+            if cmip6_results is None: # Load only if not already loaded
+                cmip6_results = storyline_analyzer.analyze_cmip6_changes_at_gwl()
             
             if cmip6_results:
                 gwl_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_changes_vs_gwl.png")
                 if not os.path.exists(gwl_plot_filename):
-                    logging.info(f"Plot '{gwl_plot_filename}' nicht gefunden, wird erstellt...")
+                    logging.info(f"Plot '{gwl_plot_filename}' not found, creating...")
                     Visualizer.plot_jet_changes_vs_gwl(cmip6_results)
                 else:
-                    logging.info(f"Plot '{gwl_plot_filename}' existiert bereits. Überspringe Erstellung.")
+                    logging.info(f"Plot '{gwl_plot_filename}' already exists. Skipping creation.")
             else:
                 logging.warning("CMIP6 analysis did not produce results. Skipping subsequent plots.")
         except Exception as e:
             logging.error(f"A critical error occurred during the CMIP6/Storyline analysis phase: {e}")
             logging.error(traceback.format_exc())
-            
+
         # --- PART 3: CLIMATE EVOLUTION TIMESERIES PLOT ---
         logging.info("\n\n--- Checking for Climate Indices Evolution Timeseries ---")
         evolution_plot_filename = os.path.join(Config.PLOT_DIR, "climate_indices_evolution.png")
         if not os.path.exists(evolution_plot_filename):
-            logging.info(f"Plot '{evolution_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
+            logging.info(f"Plot '{evolution_plot_filename}' not found. Calculating data and creating plot...")
             if cmip6_results and datasets_reanalysis:
                 cmip6_plot_data, reanalysis_plot_data = StorylineAnalyzer.analyze_timeseries_for_projection_plot(
                     cmip6_results, datasets_reanalysis, Config()
@@ -478,23 +524,23 @@ class ClimateAnalysis:
             else:
                 logging.warning("Skipping climate evolution plot: Missing CMIP6 results or reanalysis data.")
         else:
-            logging.info(f"Plot '{evolution_plot_filename}' existiert bereits. Überspringe Erstellung.")
-            
+            logging.info(f"Plot '{evolution_plot_filename}' already exists. Skipping creation.")
+
         # --- PART 4: BETA-OBS CALCULATION, MODEL FIDELITY & CMIP6 SCATTER PLOTS ---
         logging.info("\n\n--- Calculating Betas, Checking Model Fidelity & Future Slopes, and Plotting Comparisons ---")
-        
+
         if cmip6_results and datasets_reanalysis and jet_data_reanalysis:
             beta_obs_slopes = StorylineAnalyzer.calculate_reanalysis_betas(
-                datasets_reanalysis, 
-                jet_data_reanalysis, 
+                datasets_reanalysis,
+                jet_data_reanalysis,
                 dataset_key=Config.DATASET_ERA5
             )
-            
+
             fidelity_future_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_fidelity_vs_future_temporal_slopes.png")
             if not os.path.exists(fidelity_future_plot_filename):
                 if beta_obs_slopes:
                     logging.info(f"Plot '{fidelity_future_plot_filename}' not found, calculating data and plotting...")
-                    
+
                     historical_period_for_fidelity = (1981, 2010)
                     cmip6_historical_slopes = StorylineAnalyzer.calculate_historical_slopes_comparison(
                         beta_obs_slopes=beta_obs_slopes,
@@ -532,32 +578,32 @@ class ClimateAnalysis:
                         )
         else:
             logging.warning("Skipping all Fidelity/Scatter plots due to missing cmip6_results, reanalysis, or jet data.")
-            
+
         # --- PART 5: JET INTER-RELATIONSHIP SCATTER PLOTS ---
         logging.info("\n\n--- Plotting CMIP6 Jet Inter-relationship Scatter Plots ---")
         if cmip6_results:
             inter_rel_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_combined_gwl.png")
             if not os.path.exists(inter_rel_plot_filename):
                 if cmip6_results.get('mmm_changes'):
-                     Visualizer.plot_jet_inter_relationship_scatter_combined_gwl(
-                         cmip6_results=cmip6_results
-                     )
+                    Visualizer.plot_jet_inter_relationship_scatter_combined_gwl(
+                        cmip6_results=cmip6_results
+                    )
                 else:
                     logging.warning(f"Skipping combined jet inter-relationship scatter plot: No data found in cmip6_results.")
             else:
-                logging.info(f"Plot '{inter_rel_plot_filename}' existiert bereits. Überspringe Erstellung.")
+                logging.info(f"Plot '{inter_rel_plot_filename}' already exists. Skipping creation.")
         else:
             logging.warning("Skipping CMIP6 jet inter-relationship scatter plots due to missing cmip6_results.")
-            
+
         #CMIP6 MMM Analysis
         logging.info("\n\n--- Checking for CMIP6 U850 Change Maps ---")
         u850_change_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_mmm_u850_change_djf_jja.png")
         if not os.path.exists(u850_change_plot_filename):
-            logging.info(f"Plot '{u850_change_plot_filename}' nicht gefunden. Berechne Daten und erstelle Plot...")
+            logging.info(f"Plot '{u850_change_plot_filename}' not found. Calculating data and creating plot...")
             if cmip6_results and 'cmip6_model_data_loaded' in cmip6_results:
                 future_period = (2070, 2099)
                 hist_period = (Config.CMIP6_ANOMALY_REF_START, Config.CMIP6_ANOMALY_REF_END)
-                
+
                 preloaded_data = cmip6_results['cmip6_model_data_loaded']
                 models_for_calc = sorted(list(set(key.split('_')[0] for key in preloaded_data.keys())))
 
@@ -578,15 +624,15 @@ class ClimateAnalysis:
                             filename=os.path.basename(u850_change_plot_filename)
                         )
                     else:
-                        logging.warning("Berechnung der U850-Änderungsdaten fehlgeschlagen.")
+                        logging.warning("Calculation of U850 change data failed.")
                 else:
-                    logging.warning("Keine Modelle für die U850-Änderungsberechnung verfügbar.")
+                    logging.warning("No models available for U850 change calculation.")
             else:
-                logging.warning("Überspringe U850-Änderungsplot: CMIP6-Ergebnisse fehlen.")
+                logging.warning("Skipping U850 change plot: CMIP6 results are missing.")
         else:
-            logging.info(f"Plot '{u850_change_plot_filename}' existiert bereits. Überspringe Erstellung.")
+            logging.info(f"Plot '{u850_change_plot_filename}' already exists. Skipping creation.")
 
-        # --- FINALE ZUSAMMENFASSUNGEN ---
+        # --- FINAL SUMMARIES ---
         if cmip6_results:
             model_status = cmip6_results.get('model_run_status')
             if model_status:
@@ -624,7 +670,7 @@ class ClimateAnalysis:
                                 models_with_timings = []
                                 for model_key in models:
                                     threshold_year = gwl_years_data.get(model_key, {}).get(gwl)
-                                    
+
                                     if threshold_year:
                                         window = Config.GWL_YEARS_WINDOW
                                         start_year = threshold_year - window // 2
@@ -632,25 +678,25 @@ class ClimateAnalysis:
                                         models_with_timings.append(f"{model_key} ({start_year}-{end_year})")
                                     else:
                                         models_with_timings.append(model_key)
-                                
-                                logging.info(f"    - {storyline_type}: {', '.join(models_with_timings)} ({len(models)})")
+
+                                    logging.info(f"    - {storyline_type}: {', '.join(models_with_timings)} ({len(models)})")
                             else:
                                 logging.info(f"    - {storyline_type}: No models in range.")
-                
+
                 logging.info("\n------------------------------------------")
-                logging.info("\nErläuterung zum Format:")
-                logging.info("  - Jede Zeile listet die Modelle auf, deren projizierte Änderung einem bestimmten Storyline-Typ entspricht.")
-                logging.info("  - Beispiel: 'Modell-XYZ_ssp585 (2040-2059)'")
-                logging.info(f"    - 'Modell-XYZ_ssp585': Name des Klimamodells und das verwendete Szenario.")
-                logging.info(f"    - '(2040-2059)': Der {Config.GWL_YEARS_WINDOW}-jährige Analysezeitraum. Dieser Zeitraum ist um das Jahr zentriert, in dem das jeweilige Modell zum ersten Mal das entsprechende Global Warming Level (GWL) erreicht.")
+                logging.info("\nExplanation of the format:")
+                logging.info("  - Each line lists the models whose projected change corresponds to a specific storyline type.")
+                logging.info("  - Example: 'Model-XYZ_ssp585 (2040-2059)'")
+                logging.info(f"    - 'Model-XYZ_ssp585': Name of the climate model and the scenario used.")
+                logging.info(f"    - '(2040-2059)': The {Config.GWL_YEARS_WINDOW}-year analysis period. This period is centered around the year in which the respective model first reaches the corresponding Global Warming Level (GWL).")
                 logging.info("------------------------------------------")
-        
+
         logging.info("\n\n=====================================================")
         logging.info("=== FULL ANALYSIS COMPLETED ===")
         logging.info(f"All plots saved to: {Config.PLOT_DIR}")
         logging.info(f"Log file saved to: {log_filename}")
         logging.info("=====================================================\n")
-        
+
         return regression_results
     
 def main():

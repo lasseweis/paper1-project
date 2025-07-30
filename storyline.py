@@ -1572,3 +1572,54 @@ class StorylineAnalyzer:
 
         logging.info(f"Successfully calculated {analysis_type} map.")
         return map_data, p_values
+    
+    @staticmethod
+    def calculate_single_model_regression_maps(model_data, model_key, historical_period=(1995, 2014)):
+        """Calculates regression maps for a single CMIP6 model."""
+        logging.info(f"\nCalculating single-model regression maps for {model_key} for period {historical_period}...")
+        if not model_data or not all(v in model_data for v in ['ua', 'pr', 'tas']):
+            logging.warning(f"  Skipping {model_key} due to missing data.")
+            return {}
+
+        hist_start, hist_end = historical_period
+        seasonal_means = {}
+        try:
+            for var in ['ua', 'pr', 'tas']:
+                monthly_hist = model_data[var].sel(time=slice(str(hist_start), str(hist_end)))
+                if monthly_hist.time.size == 0:
+                    raise ValueError(f"No data for {var} in period {historical_period}")
+                seasonal_full = DataProcessor.assign_season_to_dataarray(monthly_hist)
+                seasonal_means[var] = DataProcessor.calculate_seasonal_means(seasonal_full).load()
+        except Exception as e:
+            logging.error(f"  Error processing data for {model_key}: {e}")
+            return {}
+
+        box_coords = (Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
+        pr_box = DataProcessor.calculate_spatial_mean(seasonal_means['pr'], *box_coords)
+        tas_box = DataProcessor.calculate_spatial_mean(seasonal_means['tas'], *box_coords)
+
+        pr_box_detrended = DataProcessor.detrend_data(pr_box)
+        tas_box_detrended = DataProcessor.detrend_data(tas_box)
+        ua_detrended = DataProcessor.detrend_data(seasonal_means['ua'])
+
+        regression_results = {}
+        for season in ['Winter', 'Summer']:
+            logging.info(f"  - Processing {season} for {model_key}")
+            pr_idx_norm = StatsAnalyzer.normalize(DataProcessor.filter_by_season(pr_box_detrended, season))
+            tas_idx_norm = StatsAnalyzer.normalize(DataProcessor.filter_by_season(tas_box_detrended, season))
+            ua_season_detrended = DataProcessor.filter_by_season(ua_detrended, season)
+
+            slopes_pr, p_values_pr = StorylineAnalyzer._calculate_regression_for_variable(pr_idx_norm, ua_season_detrended)
+            slopes_tas, p_values_tas = StorylineAnalyzer._calculate_regression_for_variable(tas_idx_norm, ua_season_detrended)
+            ua850_mean_orig = DataProcessor.filter_by_season(seasonal_means['ua'], season).mean(dim='season_year', skipna=True)
+
+            regression_results[season] = {
+                'slopes_pr': slopes_pr, 'p_values_pr': p_values_pr,
+                'slopes_tas': slopes_tas, 'p_values_tas': p_values_tas,
+                'ua850_mean': ua850_mean_orig.values if ua850_mean_orig is not None else None,
+                'lons': ua_season_detrended.lon.values if 'lon' in ua_season_detrended.coords else None,
+                'lats': ua_season_detrended.lat.values if 'lat' in ua_season_detrended.coords else None,
+                'std_dev_pr': DataProcessor.filter_by_season(pr_box_detrended, season).std().item(),
+                'std_dev_tas': DataProcessor.filter_by_season(tas_box_detrended, season).std().item(),
+            }
+        return regression_results

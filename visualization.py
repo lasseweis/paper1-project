@@ -1710,3 +1710,91 @@ class Visualizer:
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved combined SPEI/Discharge analysis plot to {filepath}")
+        
+    @staticmethod
+    def plot_cmip6_model_regression_analysis(all_model_data, model_keys, dataset_key_prefix="CMIP6"):
+        """Creates a 4x4 panel plot for regression maps of individual models."""
+        logging.info(f"Plotting single-model U850 vs Box Index regression maps for {model_keys}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        if not all_model_data or not all(m in all_model_data for m in model_keys):
+            logging.warning("Skipping single-model regression plot: Data for one or more models is missing.")
+            return
+
+        # Create a 4x5 grid: 4 rows for models, 4 columns for plots, 1 for the colorbars
+        fig = plt.figure(figsize=(22, 18))
+        gs = gridspec.GridSpec(4, 5, width_ratios=[10, 10, 10, 10, 1], height_ratios=[1, 1, 1, 1], wspace=0.3, hspace=0.4)
+        box_coords = [Config.BOX_LON_MIN, Config.BOX_LON_MAX, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX]
+
+        # Global references for the colorbars
+        cf_pr_ref, cf_tas_ref = None, None
+        label_pr_ref, label_tas_ref = "", ""
+
+        for i, model_key in enumerate(model_keys):
+            model_data = all_model_data.get(model_key, {})
+            if not model_data:
+                for j in range(4):
+                    ax = fig.add_subplot(gs[i, j])
+                    ax.text(0.5, 0.5, f"Data for {model_key}\nnot available", ha='center', va='center', transform=ax.transAxes)
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                continue
+
+            # --- Precipitation Plots (PR) ---
+            winter_data = model_data.get('Winter', {})
+            ax_pr_winter = fig.add_subplot(gs[i, 0], projection=ccrs.PlateCarree())
+            cf_pr, label_pr = Visualizer.plot_regression_map(
+                ax_pr_winter, winter_data.get('slopes_pr'), winter_data.get('p_values_pr'),
+                winter_data.get('lons'), winter_data.get('lats'),
+                f"{model_key.split('_')[0]}", box_coords, "DJF PR", 'pr',
+                ua_seasonal_mean=winter_data.get('ua850_mean'),
+                std_dev_predictor=winter_data.get('std_dev_pr'), dataset_key=model_key, stipple_skip=1
+            )
+            if cf_pr is not None: cf_pr_ref, label_pr_ref = cf_pr, label_pr
+
+            summer_data = model_data.get('Summer', {})
+            ax_pr_summer = fig.add_subplot(gs[i, 1], projection=ccrs.PlateCarree())
+            cf_pr, _ = Visualizer.plot_regression_map(
+                ax_pr_summer, summer_data.get('slopes_pr'), summer_data.get('p_values_pr'),
+                summer_data.get('lons'), summer_data.get('lats'),
+                f"{model_key.split('_')[0]}", box_coords, "JJA PR", 'pr',
+                ua_seasonal_mean=summer_data.get('ua850_mean'),
+                std_dev_predictor=summer_data.get('std_dev_pr'), dataset_key=model_key, stipple_skip=1
+            )
+            if cf_pr is not None and cf_pr_ref is None: cf_pr_ref = cf_pr
+
+
+            # --- Temperature Plots (TAS) ---
+            ax_tas_winter = fig.add_subplot(gs[i, 2], projection=ccrs.PlateCarree())
+            cf_tas, label_tas = Visualizer.plot_regression_map(
+                ax_tas_winter, winter_data.get('slopes_tas'), winter_data.get('p_values_tas'),
+                winter_data.get('lons'), winter_data.get('lats'),
+                f"{model_key.split('_')[0]}", box_coords, "DJF TAS", 'tas',
+                ua_seasonal_mean=winter_data.get('ua850_mean'),
+                std_dev_predictor=winter_data.get('std_dev_tas'), dataset_key=model_key, stipple_skip=1
+            )
+            if cf_tas is not None: cf_tas_ref, label_tas_ref = cf_tas, label_tas
+
+            ax_tas_summer = fig.add_subplot(gs[i, 3], projection=ccrs.PlateCarree())
+            cf_tas, _ = Visualizer.plot_regression_map(
+                ax_tas_summer, summer_data.get('slopes_tas'), summer_data.get('p_values_tas'),
+                summer_data.get('lons'), summer_data.get('lats'),
+                f"{model_key.split('_')[0]}", box_coords, "JJA TAS", 'tas',
+                ua_seasonal_mean=summer_data.get('ua850_mean'),
+                std_dev_predictor=summer_data.get('std_dev_tas'), dataset_key=model_key, stipple_skip=1
+            )
+            if cf_tas is not None and cf_tas_ref is None: cf_tas_ref = cf_tas
+
+        # Add shared colorbars
+        if cf_pr_ref:
+            cax_pr = fig.add_subplot(gs[:2, 4])
+            fig.colorbar(cf_pr_ref, cax=cax_pr, extend='both', label=label_pr_ref)
+        if cf_tas_ref:
+            cax_tas = fig.add_subplot(gs[2:, 4])
+            fig.colorbar(cf_tas_ref, cax=cax_tas, extend='both', label=label_tas_ref)
+
+        plt.suptitle("CMIP6 Single Model U850 Regression onto Box Climate Indices (1995-2014)", fontsize=18, weight='bold')
+        fig.tight_layout(rect=[0, 0, 0.95, 0.96])
+        filename = os.path.join(Config.PLOT_DIR, f'regression_maps_norm_{dataset_key_prefix}_single_models.png')
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)

@@ -1508,7 +1508,9 @@ class StorylineAnalyzer:
         # 1. Prepare data: Filter by season and detrend
         spei_seasonal = DataProcessor.filter_by_season(spatial_spei_data, season)
         spei_detrended = DataProcessor.detrend_data(spei_seasonal)
-        discharge_detrended = discharge_timeseries  # Assumed to be already detrended from main workflow
+        
+        # FIX: Explicitly detrend the discharge timeseries here to make the function robust.
+        discharge_detrended = DataProcessor.detrend_data(discharge_timeseries)
 
         if spei_detrended is None or discharge_detrended is None:
             logging.error("Detrending failed for SPEI or discharge data.")

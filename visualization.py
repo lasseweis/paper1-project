@@ -84,7 +84,7 @@ class Visualizer:
             skip_val = 2
             # If the dataset is ERA5, use a larger skip value
             if dataset_key == Config.DATASET_ERA5:
-                skip_val = 8
+                skip_val = 7
             # Allow manual override from function call
             if stipple_skip is not None:
                 skip_val = stipple_skip
@@ -256,7 +256,7 @@ class Visualizer:
                 
                 sig_mask = (data_era5['p_values'] < 0.05) & np.isfinite(data_era5['slopes'])
                 # MODIFIED: Stipple skip logic for ERA5 (set to 8)
-                stipple_skip_era5 = 8
+                stipple_skip_era5 = 7
                 points_to_plot_mask_era5 = np.zeros_like(sig_mask, dtype=bool)
                 points_to_plot_mask_era5[::stipple_skip_era5, ::stipple_skip_era5] = True
                 final_mask_era5 = sig_mask & points_to_plot_mask_era5
@@ -458,6 +458,7 @@ class Visualizer:
         """
         Creates a comparison plot (8 subplots) for jet impact regressions for a given season.
         Compares 20CRv3 and ERA5 side-by-side for different jet indices and variables.
+        NOW WITH CORRECTED STIPPLING.
         """
         logging.info(f"Plotting combined jet impact regression maps for {season}...")
         Visualizer.ensure_plot_dir_exists()
@@ -481,15 +482,15 @@ class Visualizer:
             # Define jet and analysis box properties
             if 'speed' in key:
                 jet_box_coords = (Config.JET_SPEED_BOX_LON_MIN, Config.JET_SPEED_BOX_LON_MAX,
-                                  Config.JET_SPEED_BOX_LAT_MIN, Config.JET_SPEED_BOX_LAT_MAX)
+                                Config.JET_SPEED_BOX_LAT_MIN, Config.JET_SPEED_BOX_LAT_MAX)
                 jet_box_edgecolor = 'blue'
             elif 'lat' in key:
                 jet_box_coords = (Config.JET_LAT_BOX_LON_MIN, Config.JET_LAT_BOX_LON_MAX,
-                                  Config.JET_LAT_BOX_LAT_MIN, Config.JET_LAT_BOX_LAT_MAX)
+                                Config.JET_LAT_BOX_LAT_MIN, Config.JET_LAT_BOX_LAT_MAX)
                 jet_box_edgecolor = 'red'
             
             analysis_box_coords = (Config.BOX_LON_MIN, Config.BOX_LON_MAX, 
-                                   Config.BOX_LAT_MIN, Config.BOX_LAT_MAX)
+                                Config.BOX_LAT_MIN, Config.BOX_LAT_MAX)
 
             # --- Subplot for 20CRv3 ---
             data_20crv3 = impact_data_20crv3.get(key)
@@ -511,21 +512,27 @@ class Visualizer:
                                     cmap=config['cmap'], vmin=config['vmin'], vmax=config['vmax'],
                                     transform=ccrs.PlateCarree())
                 
+                # --- START OF CHANGE: 20CRv3 Stippling ---
                 if 'p_values' in data_20crv3:
                     sig_mask = (data_20crv3['p_values'] < 0.05) & np.isfinite(data_20crv3['slopes'])
-                    if np.any(sig_mask):
-                        ax1.scatter(lons_plot[sig_mask], lats_plot[sig_mask], s=0.5, color='dimgray', marker='.',
+                    stipple_skip_20crv3 = 2 # Set skip value for 20CRv3
+                    points_to_plot_mask = np.zeros_like(sig_mask, dtype=bool)
+                    points_to_plot_mask[::stipple_skip_20crv3, ::stipple_skip_20crv3] = True
+                    final_mask = sig_mask & points_to_plot_mask
+                    if np.any(final_mask):
+                        ax1.scatter(lons_plot[final_mask], lats_plot[final_mask], s=0.5, color='dimgray', marker='.',
                                     alpha=0.4, transform=ccrs.PlateCarree())
+                # --- END OF CHANGE ---
                 
                 # Draw boxes
                 lon_min, lon_max, lat_min, lat_max = jet_box_coords
                 ax1.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
-                                  fill=False, edgecolor=jet_box_edgecolor, linewidth=1.5, linestyle='--',
-                                  zorder=10, transform=ccrs.PlateCarree()))
+                                fill=False, edgecolor=jet_box_edgecolor, linewidth=1.5, linestyle='--',
+                                zorder=10, transform=ccrs.PlateCarree()))
                 lon_min, lon_max, lat_min, lat_max = analysis_box_coords
                 ax1.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
-                                             fill=False, edgecolor='lime', linewidth=2, linestyle='-',
-                                             zorder=10, transform=ccrs.PlateCarree()))
+                                            fill=False, edgecolor='lime', linewidth=2, linestyle='-',
+                                            zorder=10, transform=ccrs.PlateCarree()))
             else:
                 ax1.text(0.5, 0.5, "Data not available", transform=ax1.transAxes, ha='center', va='center')
 
@@ -544,27 +551,32 @@ class Visualizer:
                 gl.top_labels = gl.right_labels = False; gl.left_labels = False
                 gl.xlabel_style = {'size': 8}; gl.ylabel_style = {'size': 8}
 
-                # Use the same mappable for the colorbar, even if it's from the other plot
                 cf_era5 = ax2.pcolormesh(lons_plot, lats_plot, data_era5['slopes'], shading='auto',
                                     cmap=config['cmap'], vmin=config['vmin'], vmax=config['vmax'],
                                     transform=ccrs.PlateCarree())
-                if cf is None: cf = cf_era5 # Fallback if 20CRv3 data was missing
+                if cf is None: cf = cf_era5
 
+                # --- START OF CHANGE: ERA5 Stippling ---
                 if 'p_values' in data_era5:
                     sig_mask = (data_era5['p_values'] < 0.05) & np.isfinite(data_era5['slopes'])
-                    if np.any(sig_mask):
-                        ax2.scatter(lons_plot[sig_mask], lats_plot[sig_mask], s=0.5, color='dimgray', marker='.',
+                    stipple_skip_era5 = 7 # Set skip value for ERA5
+                    points_to_plot_mask = np.zeros_like(sig_mask, dtype=bool)
+                    points_to_plot_mask[::stipple_skip_era5, ::stipple_skip_era5] = True
+                    final_mask = sig_mask & points_to_plot_mask
+                    if np.any(final_mask):
+                        ax2.scatter(lons_plot[final_mask], lats_plot[final_mask], s=0.5, color='dimgray', marker='.',
                                     alpha=0.4, transform=ccrs.PlateCarree())
+                # --- END OF CHANGE ---
                 
                 # Draw boxes
                 lon_min, lon_max, lat_min, lat_max = jet_box_coords
                 ax2.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
-                                                 fill=False, edgecolor=jet_box_edgecolor, linewidth=1.5, linestyle='--',
-                                                 zorder=10, transform=ccrs.PlateCarree()))
+                                                fill=False, edgecolor=jet_box_edgecolor, linewidth=1.5, linestyle='--',
+                                                zorder=10, transform=ccrs.PlateCarree()))
                 lon_min, lon_max, lat_min, lat_max = analysis_box_coords
                 ax2.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
-                                             fill=False, edgecolor='lime', linewidth=2, linestyle='-',
-                                             zorder=10, transform=ccrs.PlateCarree()))
+                                            fill=False, edgecolor='lime', linewidth=2, linestyle='-',
+                                            zorder=10, transform=ccrs.PlateCarree()))
             else:
                 ax2.text(0.5, 0.5, "Data not available", transform=ax2.transAxes, ha='center', va='center')
 
@@ -583,7 +595,6 @@ class Visualizer:
             row_idx += 1
         
         plt.suptitle(f"Regression of Climate Variables on Jet Variations ({season}, Detrended)", fontsize=16, weight='bold')
-        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
         fig.tight_layout(rect=[0, 0, 0.95, 0.96])
         filename = os.path.join(Config.PLOT_DIR, f'jet_impact_regression_maps_{season.lower()}.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -1623,7 +1634,7 @@ class Visualizer:
         )
         
         # MODIFIED: Determine stipple skip value based on dataset
-        stipple_skip = 8 if title_prefix == Config.DATASET_ERA5 else 2
+        stipple_skip = 7 if title_prefix == Config.DATASET_ERA5 else 2
 
         def setup_map_ax(ax):
             ax.set_extent(extent_box, crs=ccrs.PlateCarree())

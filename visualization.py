@@ -300,9 +300,10 @@ class Visualizer:
     def plot_jet_changes_vs_gwl(cmip6_results, filename="cmip6_jet_changes_vs_gwl.png"):
         """
         Plots CMIP6 jet index changes vs GWL, with percentile spread.
-        MODIFIZIERT, um ein 2x2-Raster für Winter/Sommer und Geschwindigkeit/Breite zu erstellen.
+        MODIFIED to create a 2x2 grid for Winter/Summer and Speed/Latitude.
+        NOW INCLUDES tolerance error bars for storylines.
         """
-        logging.info("Plotting Jet Changes vs GWL (2x2 layout)...")
+        logging.info("Plotting Jet Changes vs GWL (2x2 layout with Storyline Tolerances)...")
         Visualizer.ensure_plot_dir_exists()
 
         if not cmip6_results or 'all_individual_model_deltas_for_plot' not in cmip6_results:
@@ -312,15 +313,12 @@ class Visualizer:
         all_deltas = cmip6_results['all_individual_model_deltas_for_plot']
         mmm_changes = cmip6_results.get('mmm_changes', {})
         
-        # --- MODIFIKATION START ---
-        # Definieren Sie die vier Indizes, die explizit geplottet werden sollen.
         jet_indices_to_plot = ['JJA_JetLat', 'JJA_JetSpeed', 'DJF_JetLat', 'DJF_JetSpeed']
         
-        # Ändern Sie das Layout auf 2x2 Subplots.
         fig, axs = plt.subplots(2, 2, figsize=(15, 12), sharex=True, squeeze=False)
-        axs = axs.flatten() # Vereinfacht die Iteration über die Achsen.
-        # --- MODIFIKATION ENDE ---
+        axs = axs.flatten()
 
+        # --- Legend Setup ---
         master_legend_handles = [
             plt.Line2D([0], [0], color='darkgray', lw=0.8, marker='.', markersize=4, linestyle='-'),
             mpatches.Patch(color='lightcoral', alpha=0.4),
@@ -340,8 +338,6 @@ class Visualizer:
         }
 
         used_storyline_types = set()
-        # Hinweis: Diese Logik funktioniert weiterhin korrekt. Für Indizes ohne Storyline-Definition
-        # werden einfach keine speziellen Marker geplottet.
         for jet_idx in Config.STORYLINE_JET_CHANGES:
             for gwl in Config.STORYLINE_JET_CHANGES.get(jet_idx, {}):
                 for storyline_type in Config.STORYLINE_JET_CHANGES[jet_idx][gwl]:
@@ -352,15 +348,18 @@ class Visualizer:
                 style = storyline_styles[storyline_type]
                 master_legend_handles.append(
                     plt.Line2D([0], [0], marker=style['marker'], color='w',
-                               markerfacecolor=style['color'], markeredgecolor='k', markersize=9)
+                            markerfacecolor=style['color'], markeredgecolor='k', markersize=9)
                 )
                 master_legend_labels.append(f'Storyline: {storyline_type}')
-
-        # Die Schleife iteriert nun über die vier definierten Indizes und füllt das 2x2-Raster.
+        
+        # NEW: Add legend entry for tolerance bars
+        master_legend_handles.append(plt.Line2D([0], [0], color='gray', lw=1.5, ls='-', marker='_'))
+        master_legend_labels.append('Storyline Classification Tolerance')
+        # --- End Legend Setup ---
+        
         for i, jet_idx in enumerate(jet_indices_to_plot):
             ax = axs[i]
             
-            # Der Rest der Plot-Logik für jeden Subplot bleibt identisch.
             deltas_by_gwl = all_deltas.get(jet_idx)
             if not deltas_by_gwl:
                 ax.text(0.5, 0.5, f"No data for\n{jet_idx}", ha='center', va='center', transform=ax.transAxes)
@@ -398,19 +397,32 @@ class Visualizer:
             mmm_values = [mmm_changes[gwl].get(jet_idx, np.nan) for gwl in gwls_main]
             ax.plot(gwls_main, mmm_values, marker='o', linestyle='-', color='black', lw=2.5, markersize=7)
 
+            # --- MODIFIED BLOCK: PLOT STORYLINES WITH ERROR BARS ---
             for gwl, storylines in Config.STORYLINE_JET_CHANGES.get(jet_idx, {}).items():
+                # Define tolerance based on the jet index name
+                tolerance = 0.25 if 'Speed' in jet_idx else 0.35
+                
                 for name, value in storylines.items():
                     if name in storyline_styles:
                         style = storyline_styles[name]
-                        ax.scatter(gwl, value,
-                                   marker=style['marker'],
-                                   color=style['color'],
-                                   s=style['s'],
-                                   edgecolor='black',
-                                   linewidth=0.8,
-                                   zorder=5)
-
-            # Titel und Labels werden dynamisch erstellt
+                        # Use ax.errorbar instead of ax.scatter
+                        ax.errorbar(
+                            x=gwl, 
+                            y=value,
+                            yerr=tolerance,  # The vertical error bar
+                            marker=style['marker'],
+                            color=style['color'],
+                            markersize=style['s'] / 7, # Adjust markersize, as 's' in scatter scales differently
+                            markeredgecolor='black',
+                            markeredgewidth=0.8,
+                            linestyle='none', # No connecting line
+                            capsize=4,       # Size of the caps at the end of the error bars
+                            elinewidth=1.5,  # Thickness of the error bars
+                            ecolor='gray',   # Color of the error bars
+                            zorder=5
+                        )
+            # --- END OF MODIFIED BLOCK ---
+            
             season_title = "Summer (JJA)" if "JJA" in jet_idx else "Winter (DJF)"
             index_type_title = "Jet Latitude" if "Lat" in jet_idx else "Jet Speed"
             
@@ -420,7 +432,6 @@ class Visualizer:
             elif 'Speed' in jet_idx: ylabel += ' (m/s)'
             ax.set_ylabel(ylabel)
             
-            # X-Achsen-Label nur für die untere Reihe
             if i >= 2:
                 ax.set_xlabel('Global Warming Level (°C)')
                 
@@ -428,18 +439,14 @@ class Visualizer:
             ax.grid(True, linestyle=':', alpha=0.6)
             ax.axhline(0, color='grey', lw=0.8)
         
-        # --- MODIFIKATION START ---
-        # Passen Sie die Position der Legende für das neue Layout an.
         fig.legend(handles=master_legend_handles, labels=master_legend_labels,
-                   loc='lower center',
-                   bbox_to_anchor=(0.5, -0.02), # Y-Position angepasst
-                   ncol=3, # Angepasst für bessere Darstellung
-                   fontsize=11,
-                   frameon=True)
+                loc='lower center',
+                bbox_to_anchor=(0.5, -0.02),
+                ncol=4, # Increased to 4 columns for the new legend entry
+                fontsize=11,
+                frameon=True)
 
-        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
         fig.tight_layout(rect=[0, 0.06, 1, 0.95])
-        # --- MODIFIKATION ENDE ---
         
         fig.suptitle("CMIP6 Projected Jet Changes vs. Global Warming Level", fontsize=16, weight='bold')
         filepath = os.path.join(Config.PLOT_DIR, filename)

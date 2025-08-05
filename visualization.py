@@ -1199,7 +1199,7 @@ class Visualizer:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved expanded CMIP6 scatter comparison plot to {filename}")
-        
+
     @staticmethod
     def _plot_single_jet_relationship_panel(ax, cmip6_results, gwl_to_plot, x_jet_key, y_jet_key, title):
         """Helper function to draw one panel of the jet inter-relationship scatter plot."""
@@ -1218,10 +1218,10 @@ class Visualizer:
         x_vals = np.array([x_deltas[m] for m in common_models])
         y_vals = np.array([y_deltas[m] for m in common_models])
 
-        # Scatter plot
+        # Scatter plot for individual models
         ax.scatter(x_vals, y_vals, color='teal', alpha=0.7, s=30, label=f'CMIP6 Models (N={len(common_models)})')
 
-        # Linear regression fit
+        # Linear regression fit for individual models
         slope, intercept, r_value, p_value, _ = StatsAnalyzer.calculate_regression(x_vals, y_vals)
         if not np.isnan(slope):
             x_fit = np.array(ax.get_xlim())
@@ -1233,6 +1233,16 @@ class Visualizer:
             
             ax.plot(x_fit, y_fit, color='black', linestyle='--', linewidth=1.5,
                     label=f'Fit (r={r_value:.2f}{p_str})')
+
+        # --- START OF NEW CODE: Plot the Multi-Model Mean (MMM) ---
+        mmm_changes = cmip6_results.get('mmm_changes', {})
+        mmm_x = mmm_changes.get(gwl_to_plot, {}).get(x_jet_key)
+        mmm_y = mmm_changes.get(gwl_to_plot, {}).get(y_jet_key)
+
+        if mmm_x is not None and mmm_y is not None:
+            ax.scatter(mmm_x, mmm_y, color='red', marker='X', s=120, zorder=10,
+                       edgecolor='black', linewidth=1.5, label='Multi-Model Mean')
+        # --- END OF NEW CODE ---
 
         # Formatting
         def get_axis_label(key):
@@ -1254,7 +1264,7 @@ class Visualizer:
     def plot_jet_inter_relationship_scatter_combined_gwl(cmip6_results):
         """
         Creates a combined scatter plot showing the relationship between jet indices
-        across CMIP6 models for all specified Global Warming Levels.
+        across CMIP6 models for all specified Global Warming Levels, separated by season.
         """
         if not cmip6_results or 'all_individual_model_deltas_for_plot' not in cmip6_results:
             logging.warning("Cannot plot combined jet inter-relationship scatter: Missing CMIP6 results.")
@@ -1263,44 +1273,47 @@ class Visualizer:
         gwls_to_plot = Config.GLOBAL_WARMING_LEVELS
         n_gwls = len(gwls_to_plot)
         if n_gwls == 0:
+            logging.warning("No global warming levels to plot. Skipping jet inter-relationship plot.")
             return
 
-        logging.info(f"Plotting combined CMIP6 jet inter-relationship scatter for GWLs: {gwls_to_plot}...")
+        logging.info(f"Plotting seasonal CMIP6 jet inter-relationship scatter for GWLs: {gwls_to_plot}...")
         Visualizer.ensure_plot_dir_exists()
 
+        # Create a subplot grid: one row per GWL, two columns (Winter, Summer)
         fig, axs = plt.subplots(n_gwls, 2, figsize=(14, 5.5 * n_gwls), squeeze=False)
 
         for i, gwl in enumerate(gwls_to_plot):
-            # Panel 1: Winter Speed vs Summer Lat
+            # --- Panel 1 (Left): Winter (DJF) Speed vs. Latitude ---
             Visualizer._plot_single_jet_relationship_panel(
                 ax=axs[i, 0],
                 cmip6_results=cmip6_results,
                 gwl_to_plot=gwl,
                 x_jet_key='DJF_JetSpeed',
-                y_jet_key='JJA_JetLat',
-                title=f'Winter Speed vs. Summer Lat ({gwl}°C GWL)'
+                y_jet_key='DJF_JetLat',
+                title=f'Winter: Speed vs. Latitude ({gwl}°C GWL)'
             )
-            # Panel 2: Winter Speed vs Winter Lat
+            
+            # --- Panel 2 (Right): Summer (JJA) Speed vs. Latitude ---
             Visualizer._plot_single_jet_relationship_panel(
                 ax=axs[i, 1],
                 cmip6_results=cmip6_results,
                 gwl_to_plot=gwl,
-                x_jet_key='DJF_JetSpeed',
-                y_jet_key='DJF_JetLat',
-                title=f'Winter Speed vs. Winter Lat ({gwl}°C GWL)'
+                x_jet_key='JJA_JetSpeed',
+                y_jet_key='JJA_JetLat',
+                title=f'Summer: Speed vs. Latitude ({gwl}°C GWL)'
             )
 
+        # Set main title and save the figure
         ref_period = f"{Config.CMIP6_ANOMALY_REF_START}-{Config.CMIP6_ANOMALY_REF_END}"
-        fig.suptitle(f"CMIP6 Jet Index Inter-relationships\n"
+        fig.suptitle(f"CMIP6 Jet Index Inter-relationships by Season\n"
                      f"(Changes relative to {ref_period})",
                      fontsize=16, weight='bold')
 
-        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
         fig.tight_layout(rect=[0, 0, 1, 0.95])
-        filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_combined_gwl.png")
+        filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_seasonal.png") # Adjusted filename
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved combined CMIP6 jet inter-relationship scatter plot to {filename}")
+        logging.info(f"Saved seasonal CMIP6 jet inter-relationship scatter plot to {filename}")
 
     @staticmethod
     def plot_u850_change_map(ax, u850_change_data, historical_mean_contours,

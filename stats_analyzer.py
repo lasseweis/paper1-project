@@ -11,6 +11,7 @@ import xarray as xr
 import logging
 import traceback
 from scipy.stats import linregress
+import statsmodels.api as sm
 
 class StatsAnalyzer:
     """A collection of statistical analysis utilities."""
@@ -228,3 +229,42 @@ class StatsAnalyzer:
             'mean_intensity': np.mean(intensities) if len(intensities) > 0 else np.nan,
             'peak_intensity': np.min(peak_intensities) if len(peak_intensities) > 0 else np.nan
         }
+
+    @staticmethod
+    def calculate_multiple_regression(y, x_vars):
+        """
+        Calculates multiple linear regression.
+
+        Parameters:
+        -----------
+        y : array-like
+            The dependent variable (e.g., precipitation).
+        x_vars : dict
+            A dictionary where keys are variable names and values are their time series (e.g., {'speed': jet_speed_ts, 'lat': jet_lat_ts}).
+
+        Returns:
+        --------
+        dict
+            A dictionary of coefficients (betas) for each x variable.
+        """
+        # Create a pandas DataFrame from the input
+        df_dict = {'y': y}
+        df_dict.update(x_vars)
+        df = pd.DataFrame(df_dict).dropna()
+
+        if len(df) < 10: # Need enough data points
+            logging.warning("Not enough valid data points for multiple regression.")
+            return None
+
+        # Prepare the data for statsmodels
+        Y = df['y']
+        X = df[list(x_vars.keys())]
+        X = sm.add_constant(X) # Adds the intercept (beta_0) to the model
+
+        try:
+            model = sm.OLS(Y, X).fit()
+            # Return a dictionary of the coefficients, excluding the intercept
+            return model.params.drop('const').to_dict()
+        except Exception as e:
+            logging.error(f"Error during multiple regression: {e}")
+            return None

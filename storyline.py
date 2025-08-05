@@ -1623,3 +1623,63 @@ class StorylineAnalyzer:
                 'std_dev_tas': DataProcessor.filter_by_season(tas_box_detrended, season).std().item(),
             }
         return regression_results
+    
+    @staticmethod
+    def calculate_reanalysis_betas(datasets_reanalysis, jet_data_reanalysis, dataset_key='ERA5'):
+        """
+        Calculates the multivariate regression slopes (beta_obs) between jet indices 
+        (speed and latitude) and climate impacts for a specific reanalysis dataset.
+        """
+        logging.info(f"Calculating multivariate beta_obs slopes from {dataset_key} reanalysis...")
+        beta_obs_slopes = {}
+        
+        # Define the relationships to analyze
+        impact_configs = [
+            {'season': 'Winter', 'impact_var': 'tas'},
+            {'season': 'Winter', 'impact_var': 'pr'},
+            {'season': 'Summer', 'impact_var': 'tas'},
+            {'season': 'Summer', 'impact_var': 'pr'}
+        ]
+
+        for config in impact_configs:
+            season = config['season']
+            impact_var = config['impact_var']
+            
+            # --- Get impact variable timeseries (Y) ---
+            impact_box_mean = datasets_reanalysis.get(f"{dataset_key}_{impact_var}_box_mean")
+            if impact_box_mean is None: continue
+            
+            y_ts = DataProcessor.detrend_data(
+                DataProcessor.filter_by_season(impact_box_mean, season)
+            )
+
+            # --- Get predictor timeseries (X1, X2) ---
+            x_speed_ts = jet_data_reanalysis.get(f"{dataset_key}_{season.lower()}_speed_data", {}).get('jet')
+            x_lat_ts = jet_data_reanalysis.get(f"{dataset_key}_{season.lower()}_lat_data", {}).get('jet')
+            
+            if y_ts is None or x_speed_ts is None or x_lat_ts is None:
+                logging.warning(f"Skipping beta calculation for {season} {impact_var} due to missing data.")
+                continue
+
+            # --- Align data to common years ---
+            df = pd.DataFrame({
+                'impact': y_ts,
+                'speed': x_speed_ts,
+                'lat': x_lat_ts
+            }).dropna()
+
+            if len(df) < 10: continue
+
+            # --- Calculate multiple regression ---
+            betas = StatsAnalyzer.calculate_multiple_regression(
+                y=df['impact'],
+                x_vars={'speed': df['speed'], 'lat': df['lat']}
+            )
+            
+            if betas:
+                # Store the dictionary of betas (e.g., {'speed': 0.4, 'lat': -0.6})
+                beta_key = f"{'DJF' if season == 'Winter' else 'JJA'}_{impact_var}"
+                beta_obs_slopes[beta_key] = betas
+                logging.info(f"  - Calculated Betas for {beta_key}: Speed={betas.get('speed', 0):.3f}, Lat={betas.get('lat', 0):.3f}")
+
+        return beta_obs_slopes

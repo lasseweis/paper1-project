@@ -1484,7 +1484,12 @@ class StorylineAnalyzer:
         return spatial_spei
 
     @staticmethod
-    def calculate_spei_on_discharge_map(spatial_spei_data, discharge_timeseries, season, analysis_type='correlation'):
+    def calculate_spei_on_discharge_map(
+        spatial_spei_data,
+        discharge_timeseries,
+        season,
+        analysis_type='correlation'
+    ):
         """
         Calculates a spatial map of either correlation or regression slope, showing
         the relationship between the local SPEI at each grid cell (predictor, X) 
@@ -1509,8 +1514,12 @@ class StorylineAnalyzer:
         spei_seasonal = DataProcessor.filter_by_season(spatial_spei_data, season)
         spei_detrended = DataProcessor.detrend_data(spei_seasonal)
         
-        # FIX: Explicitly detrend the discharge timeseries here to make the function robust.
-        discharge_detrended = DataProcessor.detrend_data(discharge_timeseries)
+        # --- START DER KORREKTUR ---
+        # The discharge timeseries is already detrended when loaded.
+        # We assign it directly to the 'discharge_detrended' variable
+        # instead of calling the detrend function again.
+        discharge_detrended = discharge_timeseries
+        # --- ENDE DER KORREKTUR ---
 
         if spei_detrended is None or discharge_detrended is None:
             logging.error("Detrending failed for SPEI or discharge data.")
@@ -1624,16 +1633,17 @@ class StorylineAnalyzer:
             }
         return regression_results
     
+# In storyline.py
+
     @staticmethod
     def calculate_reanalysis_betas(datasets_reanalysis, jet_data_reanalysis, dataset_key='ERA5'):
         """
-        Calculates the multivariate regression slopes (beta_obs) between jet indices 
+        Calculates the multivariate regression slopes (beta_obs) between jet indices
         (speed and latitude) and climate impacts for a specific reanalysis dataset.
         """
         logging.info(f"Calculating multivariate beta_obs slopes from {dataset_key} reanalysis...")
         beta_obs_slopes = {}
-        
-        # Define the relationships to analyze
+
         impact_configs = [
             {'season': 'Winter', 'impact_var': 'tas'},
             {'season': 'Winter', 'impact_var': 'pr'},
@@ -1644,40 +1654,42 @@ class StorylineAnalyzer:
         for config in impact_configs:
             season = config['season']
             impact_var = config['impact_var']
-            
-            # --- Get impact variable timeseries (Y) ---
-            impact_box_mean = datasets_reanalysis.get(f"{dataset_key}_{impact_var}_box_mean")
-            if impact_box_mean is None: continue
-            
+
+            y_ts_raw = datasets_reanalysis.get(f"{dataset_key}_{impact_var}_box_mean")
+            if y_ts_raw is None: continue
+
             y_ts = DataProcessor.detrend_data(
-                DataProcessor.filter_by_season(impact_box_mean, season)
+                DataProcessor.filter_by_season(y_ts_raw, season)
             )
 
-            # --- Get predictor timeseries (X1, X2) ---
             x_speed_ts = jet_data_reanalysis.get(f"{dataset_key}_{season.lower()}_speed_data", {}).get('jet')
             x_lat_ts = jet_data_reanalysis.get(f"{dataset_key}_{season.lower()}_lat_data", {}).get('jet')
-            
+
             if y_ts is None or x_speed_ts is None or x_lat_ts is None:
                 logging.warning(f"Skipping beta calculation for {season} {impact_var} due to missing data.")
                 continue
 
-            # --- Align data to common years ---
-            df = pd.DataFrame({
-                'impact': y_ts,
-                'speed': x_speed_ts,
-                'lat': x_lat_ts
-            }).dropna()
-
-            if len(df) < 10: continue
-
-            # --- Calculate multiple regression ---
-            betas = StatsAnalyzer.calculate_multiple_regression(
-                y=df['impact'],
-                x_vars={'speed': df['speed'], 'lat': df['lat']}
-            )
+            # --- START OF CORRECTION ---
+            # Align all timeseries to a common time index before passing to the regression function.
+            # This is the crucial step to fix the "All arrays must be of the same length" error.
+            ds = xr.Dataset({'impact': y_ts, 'speed': x_speed_ts, 'lat': x_lat_ts})
             
+            # dropna() will align the timeseries by the 'season_year' dimension and
+            # remove any timesteps where any of the variables have a NaN value.
+            ds_common = ds.dropna(dim='season_year', how='any')
+
+            if ds_common.season_year.size < 10:
+                logging.warning(f"Not enough common valid data points for multivariate regression for {season} {impact_var}.")
+                continue
+            
+            # Pass the now-aligned DataArrays to the regression function
+            betas = StatsAnalyzer.calculate_multiple_regression(
+                y=ds_common['impact'],
+                x_vars={'speed': ds_common['speed'], 'lat': ds_common['lat']}
+            )
+            # --- END OF CORRECTION ---
+
             if betas:
-                # Store the dictionary of betas (e.g., {'speed': 0.4, 'lat': -0.6})
                 beta_key = f"{'DJF' if season == 'Winter' else 'JJA'}_{impact_var}"
                 beta_obs_slopes[beta_key] = betas
                 logging.info(f"  - Calculated Betas for {beta_key}: Speed={betas.get('speed', 0):.3f}, Lat={betas.get('lat', 0):.3f}")

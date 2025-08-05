@@ -1494,15 +1494,6 @@ class StorylineAnalyzer:
         Calculates a spatial map of either correlation or regression slope, showing
         the relationship between the local SPEI at each grid cell (predictor, X) 
         and a single discharge timeseries (response, Y).
-
-        Args:
-            spatial_spei_data (xr.DataArray): Gridded SPEI data with time, lat, lon dimensions.
-            discharge_timeseries (xr.DataArray): 1D discharge timeseries.
-            season (str): The season to analyze ('Winter' or 'Summer').
-            analysis_type (str): 'correlation' or 'regression'.
-
-        Returns:
-            tuple: A tuple of (map_data, p_values), both as xarray.DataArrays.
         """
         logging.info(f"Calculating {analysis_type} map for local SPEI's influence on discharge for {season}...")
         
@@ -1510,22 +1501,32 @@ class StorylineAnalyzer:
             logging.error(f"Cannot calculate {analysis_type} map: Missing SPEI or discharge data.")
             return None, None
 
-        # 1. Prepare data: Filter by season and detrend
-        spei_seasonal = DataProcessor.filter_by_season(spatial_spei_data, season)
-        spei_detrended = DataProcessor.detrend_data(spei_seasonal)
+        # 1. Sicherstellen, dass die saisonalen Koordinaten vorhanden sind.
+        if 'season' not in spatial_spei_data.coords:
+            spei_with_seasons = DataProcessor.assign_season_to_dataarray(spatial_spei_data)
+            if spei_with_seasons is None:
+                logging.error("Failed to assign season coordinates to SPEI data.")
+                return None, None
+        else:
+            spei_with_seasons = spatial_spei_data
         
-        # --- START DER KORREKTUR ---
-        # The discharge timeseries is already detrended when loaded.
-        # We assign it directly to the 'discharge_detrended' variable
-        # instead of calling the detrend function again.
-        discharge_detrended = discharge_timeseries
-        # --- ENDE DER KORREKTUR ---
-
+        # 2. Nach Saison filtern und zu saisonalen Mittelwerten aggregieren
+        spei_filtered = DataProcessor.filter_by_season(spei_with_seasons, season)
+        if spei_filtered is None:
+            logging.error(f"Filtering SPEI data for season '{season}' resulted in None.")
+            return None, None
+        
+        spei_seasonal_mean = spei_filtered.groupby('season_year').mean(dim='time', skipna=True)
+        
+        # 3. Detrenden
+        spei_detrended = DataProcessor.detrend_data(spei_seasonal_mean)
+        discharge_detrended = discharge_timeseries # Ist bereits detrended
+        
         if spei_detrended is None or discharge_detrended is None:
-            logging.error("Detrending failed for SPEI or discharge data.")
+            logging.error("Detrending failed for SPEI or discharge data. Check previous steps.")
             return None, None
             
-        # 2. Align data to common years. This is critical for correct regression.
+        # 4. Daten auf gemeinsame Jahre ausrichten
         common_years, idx_spei, idx_discharge = np.intersect1d(
             spei_detrended.season_year.values,
             discharge_detrended.season_year.values,
@@ -1539,31 +1540,29 @@ class StorylineAnalyzer:
         spei_common = spei_detrended.isel(season_year=idx_spei).load()
         discharge_common = discharge_detrended.isel(season_year=idx_discharge).load()
 
-        # 3. Define predictor (X) and response (Y) fields
-        # Predictor X: SPEI field. For regression, it's normalized.
-        # Response Y:  Discharge timeseries.
+        # 5. Prädiktor (X) und Response (Y) definieren
         if analysis_type == 'regression':
-            # Normalize predictor (SPEI) to get slope in units of [m³/s per std.dev. of SPEI]
             predictor_field = StatsAnalyzer.normalize(spei_common)
-        else: # For correlation, raw values are fine
+        else: 
             predictor_field = spei_common
         
-        response_values = discharge_common.values
+        # === START DER KORREKTUR ===
+        # Behalten Sie die Abflussdaten als xarray.DataArray, damit xarray
+        # das Broadcasting korrekt durchführen kann.
+        response_da = discharge_common
+        # === ENDE DER KORREKTUR ===
 
-        # 4. Use xr.apply_ufunc for efficient, parallelized grid-cell-wise computation
+        # 6. Grid-weise Regression/Korrelation durchführen
         def regression_on_grid(predictor_ts, response_ts):
-            # This function is applied to each grid cell's timeseries.
+            # Diese Funktion wird jetzt für jede Zelle mit zwei 1D-Arrays aufgerufen.
             slope, _, r_value, p_value, _ = StatsAnalyzer.calculate_regression(predictor_ts, response_ts)
-            
-            # For correlation, return r_value; for regression, return slope
             result = r_value if analysis_type == 'correlation' else slope
             return np.array([result, p_value])
 
-        # Apply the function along the 'season_year' dimension
         regression_results = xr.apply_ufunc(
             regression_on_grid,
             predictor_field,
-            response_values,
+            response_da, # Übergeben Sie hier das DataArray
             input_core_dims=[['season_year'], ['season_year']],
             output_core_dims=[['outputs']],
             exclude_dims=set(('season_year',)),
@@ -1572,7 +1571,7 @@ class StorylineAnalyzer:
             dask_gufunc_kwargs={'output_sizes': {'outputs': 2}}
         ).compute()
 
-        # 5. Separate the results back into data and p-value maps
+        # 7. Ergebnisse aufteilen
         map_data = regression_results.isel(outputs=0)
         p_values = regression_results.isel(outputs=1)
         

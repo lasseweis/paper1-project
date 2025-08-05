@@ -1546,11 +1546,7 @@ class StorylineAnalyzer:
         else: 
             predictor_field = spei_common
         
-        # === START DER KORREKTUR ===
-        # Behalten Sie die Abflussdaten als xarray.DataArray, damit xarray
-        # das Broadcasting korrekt durchführen kann.
         response_da = discharge_common
-        # === ENDE DER KORREKTUR ===
 
         # 6. Grid-weise Regression/Korrelation durchführen
         def regression_on_grid(predictor_ts, response_ts):
@@ -1562,10 +1558,11 @@ class StorylineAnalyzer:
         regression_results = xr.apply_ufunc(
             regression_on_grid,
             predictor_field,
-            response_da, # Übergeben Sie hier das DataArray
+            response_da,
             input_core_dims=[['season_year'], ['season_year']],
             output_core_dims=[['outputs']],
             exclude_dims=set(('season_year',)),
+            vectorize=True,  # This line is added
             dask="parallelized",
             output_dtypes=[predictor_field.dtype],
             dask_gufunc_kwargs={'output_sizes': {'outputs': 2}}

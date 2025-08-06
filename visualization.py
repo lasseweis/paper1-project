@@ -1190,7 +1190,7 @@ class Visualizer:
         ref_period_gwl = f"{Config.CMIP6_PRE_INDUSTRIAL_REF_START}-{Config.CMIP6_PRE_INDUSTRIAL_REF_END}"
         fig.suptitle(f"CMIP6 Projected Changes at {gwl_to_plot}°C Global Warming Level\n"
                      f"(Changes relative to {ref_period_changes}; GWL defined relative to {ref_period_gwl})",
-                     fontsize=16, weight='bold') # Schriftgröße angepasst für bessere Lesbarkeit
+                     fontsize=16, weight='bold') 
         # --- ENDE DER ÄNDERUNG ---
         
         # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
@@ -1238,7 +1238,8 @@ class Visualizer:
             ax.scatter(mmm_x, mmm_y, color='red', marker='X', s=120, zorder=10,
                     edgecolor='black', linewidth=1.5, label='Multi-Model Mean')
 
-        # === NEW PART: DRAW STORYLINE ELLIPSES ===
+        # === NEW PART: DRAW STORYLINE ELLIPSES AND PREPARE LEGEND HANDLES ===
+        storyline_legend_handles = []
         if storyline_defs and storyline_radius:
             std_dev_x = np.std(x_vals)
             std_dev_y = np.std(y_vals)
@@ -1260,6 +1261,9 @@ class Visualizer:
                     zorder=2
                 )
                 ax.add_patch(ellipse)
+                # Create a legend handle for this storyline
+                storyline_legend_handles.append(mpatches.Patch(color=color, label=name, alpha=0.4))
+
         # === END OF NEW PART ===
 
         # Formatting
@@ -1275,8 +1279,12 @@ class Visualizer:
         ax.axhline(0, color='grey', lw=0.7); ax.axvline(0, color='grey', lw=0.7)
         
         # --- START DER ÄNDERUNG ---
+        # Kombiniert die existierenden Legenden-Handles mit den neuen für die Storylines
+        handles, labels = ax.get_legend_handles_labels()
+        handles.extend(storyline_legend_handles)
+        
         # Platziert die Legende unterhalb des jeweiligen Subplots
-        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2), ncol=3, fontsize=9)
+        ax.legend(handles=handles, loc='upper center', bbox_to_anchor=(0.5, -0.2), ncol=3, fontsize=9)
         # --- ENDE DER ÄNDERUNG ---
 
 
@@ -1285,7 +1293,7 @@ class Visualizer:
         """
         Creates a combined scatter plot showing the relationship between jet indices
         across CMIP6 models for all GWLs, separated by season.
-        NOW PLOTS STORYLINE ELLIPSES.
+        NOW PLOTS STORYLINE ELLIPSES and includes them in the legend.
         """
         if not cmip6_results or 'all_individual_model_deltas_for_plot' not in cmip6_results:
             logging.warning("Cannot plot combined jet inter-relationship scatter: Missing CMIP6 results.")
@@ -1338,10 +1346,10 @@ class Visualizer:
 
         # --- START DER ÄNDERUNG ---
         # Passe das Layout an, um Platz für die Legenden unter den Plots zu schaffen
-        fig.tight_layout(rect=[0, 0, 1, 0.95], h_pad=4.0)
+        fig.tight_layout(rect=[0, 0, 1, 0.95], h_pad=5.0) # h_pad vergrößert für mehr Abstand
         # --- ENDE DER ÄNDERUNG ---
         
-        filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_seasonal.png")
+        filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_seasonal_with_legend.png") # Neuer Dateiname
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved seasonal CMIP6 jet inter-relationship scatter plot to {filename}")

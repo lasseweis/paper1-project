@@ -1202,7 +1202,7 @@ class Visualizer:
 
     @staticmethod
     def _plot_single_jet_relationship_panel(ax, cmip6_results, gwl_to_plot, x_jet_key, y_jet_key, title,
-                                          storyline_defs=None, storyline_radius=None):
+                                        storyline_defs=None, storyline_radius=None):
         """Helper function to draw one panel of the jet inter-relationship scatter plot."""
         all_deltas = cmip6_results.get('all_individual_model_deltas_for_plot', {})
         
@@ -1236,7 +1236,7 @@ class Visualizer:
         mmm_y = mmm_changes.get(gwl_to_plot, {}).get(y_jet_key)
         if mmm_x is not None and mmm_y is not None:
             ax.scatter(mmm_x, mmm_y, color='red', marker='X', s=120, zorder=10,
-                       edgecolor='black', linewidth=1.5, label='Multi-Model Mean')
+                    edgecolor='black', linewidth=1.5, label='Multi-Model Mean')
 
         # === NEW PART: DRAW STORYLINE ELLIPSES ===
         if storyline_defs and storyline_radius:
@@ -1273,7 +1273,12 @@ class Visualizer:
         ax.set_title(title, fontsize=11)
         ax.grid(True, linestyle=':', alpha=0.6)
         ax.axhline(0, color='grey', lw=0.7); ax.axvline(0, color='grey', lw=0.7)
-        ax.legend(fontsize=8, loc='best')
+        
+        # --- START DER ÄNDERUNG ---
+        # Platziert die Legende unterhalb des jeweiligen Subplots
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2), ncol=3, fontsize=9)
+        # --- ENDE DER ÄNDERUNG ---
+
 
     @staticmethod
     def plot_jet_inter_relationship_scatter_combined_gwl(cmip6_results):
@@ -1299,7 +1304,7 @@ class Visualizer:
         logging.info(f"Plotting seasonal CMIP6 jet inter-relationship scatter for GWLs: {gwls_to_plot}...")
         Visualizer.ensure_plot_dir_exists()
 
-        fig, axs = plt.subplots(n_gwls, 2, figsize=(14, 5.5 * n_gwls), squeeze=False)
+        fig, axs = plt.subplots(n_gwls, 2, figsize=(14, 6.5 * n_gwls), squeeze=False) # Höhe angepasst
 
         for i, gwl in enumerate(gwls_to_plot):
             # Panel 1 (Left): Winter (DJF)
@@ -1328,10 +1333,14 @@ class Visualizer:
 
         ref_period = f"{Config.CMIP6_ANOMALY_REF_START}-{Config.CMIP6_ANOMALY_REF_END}"
         fig.suptitle(f"CMIP6 Jet Index Inter-relationships by Season\n"
-                     f"(Changes relative to {ref_period})",
-                     fontsize=16, weight='bold')
+                    f"(Changes relative to {ref_period})",
+                    fontsize=16, weight='bold')
 
-        fig.tight_layout(rect=[0, 0, 1, 0.95])
+        # --- START DER ÄNDERUNG ---
+        # Passe das Layout an, um Platz für die Legenden unter den Plots zu schaffen
+        fig.tight_layout(rect=[0, 0, 1, 0.95], h_pad=4.0)
+        # --- ENDE DER ÄNDERUNG ---
+        
         filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_seasonal.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)

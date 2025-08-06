@@ -342,11 +342,17 @@ class StorylineAnalyzer:
             'failed_models': final_failed_models
         }
 
-        # --- NEU: Klassifiziere Modelle in Storylines ---
-        storyline_classification = self.classify_models_into_storylines(
+        # --- Classify models into storylines (two methods) ---
+        # Method 1: Original 1D classification for GWL plot
+        storyline_classification_1d = self.classify_models_into_storylines(
             all_deltas, self.config.STORYLINE_JET_CHANGES
         )
-        # --- ENDE NEU ---
+        # Method 2: New 2D classification for scatter plots
+        storyline_classification_2d = self.classify_models_into_storylines_2d(
+            all_deltas,
+            self.config.STORYLINE_JET_CHANGES_2D,
+            self.config.STORYLINE_RADIUS
+        )
 
         return {
             'gwl_threshold_years': gwl_thresholds,
@@ -357,7 +363,8 @@ class StorylineAnalyzer:
             'all_individual_model_deltas_for_plot': all_deltas,
             'mmm_changes': mmm_changes,
             'model_run_status': model_run_status,
-            'storyline_classification': storyline_classification # Hinzugefügter Wert
+            'storyline_classification': storyline_classification_1d, 
+            'storyline_classification_2d': storyline_classification_2d
         }
     
     def calculate_storyline_impacts(self, cmip6_results, beta_obs_slopes):

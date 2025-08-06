@@ -679,7 +679,7 @@ class ClimateAnalysis:
                                     else:
                                         models_with_timings.append(model_key)
 
-                                    logging.info(f"    - {storyline_type}: {', '.join(models_with_timings)} ({len(models)})")
+                                logging.info(f"    - {storyline_type}: {', '.join(models_with_timings)} ({len(models)})")
                             else:
                                 logging.info(f"    - {storyline_type}: No models in range.")
 
@@ -690,6 +690,34 @@ class ClimateAnalysis:
                 logging.info(f"    - 'Model-XYZ_ssp585': Name of the climate model and the scenario used.")
                 logging.info(f"    - '(2040-2059)': The {Config.GWL_YEARS_WINDOW}-year analysis period. This period is centered around the year in which the respective model first reaches the corresponding Global Warming Level (GWL).")
                 logging.info("------------------------------------------")
+                
+        # --- START: NEUER BLOCK FÜR 2D STORYLINE LOGGING ---
+        storyline_classification_2d = cmip6_results.get('storyline_classification_2d')
+        if storyline_classification_2d:
+            logging.info("\n\n--- CMIP6 Model 2D Storyline Classification (for Scatter Plots) ---")
+            radius = Config.STORYLINE_RADIUS
+            logging.info(f"Models are classified based on a normalized Euclidean distance (Radius: {radius} std. dev.).")
+
+            for gwl, storylines in sorted(storyline_classification_2d.items()):
+                if gwl not in Config.GLOBAL_WARMING_LEVELS:
+                    continue
+                logging.info(f"\nGWL +{gwl}°C:")
+                if not storylines:
+                    logging.info("  No models were classified for this GWL.")
+                    continue
+                    
+                for storyline_key, models in sorted(storylines.items()):
+                    season = 'Winter (DJF)' if 'DJF' in storyline_key else 'Summer (JJA)'
+                    storyline_name = storyline_key.replace('DJF_', '').replace('JJA_', '')
+                        
+                    if models:
+                        logging.info(f"  - Storyline '{storyline_name}' ({season}):")
+                        logging.info(f"    - Models ({len(models)}): {', '.join(sorted(models))}")
+                    else:
+                        logging.info(f"  - Storyline '{storyline_name}' ({season}): No models classified.")
+
+            logging.info("-----------------------------------------------------------------")
+            # --- ENDE: NEUER BLOCK FÜR 2D STORYLINE LOGGING ---
 
         logging.info("\n\n=====================================================")
         logging.info("=== FULL ANALYSIS COMPLETED ===")

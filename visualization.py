@@ -1260,8 +1260,6 @@ class Visualizer:
                     zorder=2
                 )
                 ax.add_patch(ellipse)
-                ax.plot(center_x, center_y, marker='o', markersize=8, color=color,
-                        markeredgecolor='black', label=name)
         # === END OF NEW PART ===
 
         # Formatting

@@ -145,3 +145,37 @@ class Config:
     DATASET_20CRV3 = "20CRv3"
     DATASET_ERA5 = "ERA5"
     N_PROCESSES = max(1, multiprocessing.cpu_count() - 4)
+    
+    # --- NEW: 2D Storyline Definitions (for Scatter Plots) ---
+    # These definitions are based on the (Speed, Lat) coordinate space.
+    # The radius is applied in a normalized space (units of standard deviation).
+    STORYLINE_RADIUS = 0.5  # Radius in units of std. dev.
+
+    # Format: {'Season': {GWL: {'StorylineName': (Center_Speed, Center_Lat)}}}
+    STORYLINE_JET_CHANGES_2D = {
+        'DJF': {
+            2.0: {
+                'Core Mean':                      (0.17, -0.08),
+                'Extreme High-Speed, North-Shift':(+0.8, +1.5),
+                'Extreme Low-Speed, South-Shift': (-0.5, -1.5),
+            },
+            3.0: {
+                'Core Mean':                      (+0.25, -0.2),
+                'Extreme High-Speed, North-Shift':(+0.8, +2.5),
+                'Extreme Low-Speed, South-Shift': (-0.3, -2.0),
+                'Extreme High-Speed, South-Shift':(+1.1, -1.0),
+            }
+        },
+        'JJA': {
+            2.0: {
+                'Core Mean':                      (-0.1, +0.6),
+                'Extreme Low-Speed, North-Shift': (-0.4, +1.5),
+                'Extreme High-Speed, South-Shift':(+0.2, +0.1),
+            },
+            3.0: {
+                'Core Mean':                      (-0.15, +1.1),
+                'Extreme Low-Speed, North-Shift': (-0.5,  +2.0),
+                'Extreme High-Speed, South-Shift':(+0.3,  +0.2),
+            }
+        }
+    }

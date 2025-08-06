@@ -1201,7 +1201,8 @@ class Visualizer:
         logging.info(f"Saved expanded CMIP6 scatter comparison plot to {filename}")
 
     @staticmethod
-    def _plot_single_jet_relationship_panel(ax, cmip6_results, gwl_to_plot, x_jet_key, y_jet_key, title):
+    def _plot_single_jet_relationship_panel(ax, cmip6_results, gwl_to_plot, x_jet_key, y_jet_key, title,
+                                          storyline_defs=None, storyline_radius=None):
         """Helper function to draw one panel of the jet inter-relationship scatter plot."""
         all_deltas = cmip6_results.get('all_individual_model_deltas_for_plot', {})
         
@@ -1213,36 +1214,55 @@ class Visualizer:
             ax.set_title(title, fontsize=10)
             return
 
-        # Align data using model keys
         common_models = sorted(list(set(x_deltas.keys()) & set(y_deltas.keys())))
         x_vals = np.array([x_deltas[m] for m in common_models])
         y_vals = np.array([y_deltas[m] for m in common_models])
 
         # Scatter plot for individual models
-        ax.scatter(x_vals, y_vals, color='teal', alpha=0.7, s=30, label=f'CMIP6 Models (N={len(common_models)})')
+        ax.scatter(x_vals, y_vals, color='teal', alpha=0.5, s=25, label=f'CMIP6 Models (N={len(common_models)})')
 
-        # Linear regression fit for individual models
+        # Linear regression
         slope, intercept, r_value, p_value, _ = StatsAnalyzer.calculate_regression(x_vals, y_vals)
         if not np.isnan(slope):
             x_fit = np.array(ax.get_xlim())
             y_fit = intercept + slope * x_fit
-            
-            p_str = ""
-            if p_value < 0.01: p_str = " (p<0.01)"
-            elif p_value < 0.05: p_str = " (p<0.05)"
-            
+            p_str = " (p<0.05)" if p_value < 0.05 else ""
             ax.plot(x_fit, y_fit, color='black', linestyle='--', linewidth=1.5,
                     label=f'Fit (r={r_value:.2f}{p_str})')
 
-        # --- START OF NEW CODE: Plot the Multi-Model Mean (MMM) ---
+        # Multi-Model Mean (MMM)
         mmm_changes = cmip6_results.get('mmm_changes', {})
         mmm_x = mmm_changes.get(gwl_to_plot, {}).get(x_jet_key)
         mmm_y = mmm_changes.get(gwl_to_plot, {}).get(y_jet_key)
-
         if mmm_x is not None and mmm_y is not None:
             ax.scatter(mmm_x, mmm_y, color='red', marker='X', s=120, zorder=10,
                        edgecolor='black', linewidth=1.5, label='Multi-Model Mean')
-        # --- END OF NEW CODE ---
+
+        # === NEW PART: DRAW STORYLINE ELLIPSES ===
+        if storyline_defs and storyline_radius:
+            std_dev_x = np.std(x_vals)
+            std_dev_y = np.std(y_vals)
+            season = x_jet_key.split('_')[0]
+            
+            relevant_storylines = storyline_defs.get(season, {}).get(gwl_to_plot, {})
+            storyline_colors = plt.cm.get_cmap('viridis', len(relevant_storylines))
+            
+            for i, (name, (center_x, center_y)) in enumerate(relevant_storylines.items()):
+                color = storyline_colors(i)
+                ellipse = mpatches.Ellipse(
+                    xy=(center_x, center_y),
+                    width=2 * storyline_radius * std_dev_x,
+                    height=2 * storyline_radius * std_dev_y,
+                    angle=0,
+                    edgecolor=color,
+                    facecolor=color,
+                    alpha=0.25,
+                    zorder=2
+                )
+                ax.add_patch(ellipse)
+                ax.plot(center_x, center_y, marker='o', markersize=8, color=color,
+                        markeredgecolor='black', label=name)
+        # === END OF NEW PART ===
 
         # Formatting
         def get_axis_label(key):
@@ -1250,21 +1270,19 @@ class Visualizer:
             if "Lat" in key: label += ' (°Lat)'
             elif "Speed" in key: label += ' (m/s)'
             return label
-
         ax.set_xlabel(get_axis_label(x_jet_key), fontsize=9)
         ax.set_ylabel(get_axis_label(y_jet_key), fontsize=9)
         ax.set_title(title, fontsize=11)
         ax.grid(True, linestyle=':', alpha=0.6)
-        ax.axhline(0, color='grey', lw=0.7)
-        ax.axvline(0, color='grey', lw=0.7)
-        ax.legend(fontsize=8)
-
+        ax.axhline(0, color='grey', lw=0.7); ax.axvline(0, color='grey', lw=0.7)
+        ax.legend(fontsize=8, loc='best')
 
     @staticmethod
     def plot_jet_inter_relationship_scatter_combined_gwl(cmip6_results):
         """
         Creates a combined scatter plot showing the relationship between jet indices
-        across CMIP6 models for all specified Global Warming Levels, separated by season.
+        across CMIP6 models for all GWLs, separated by season.
+        NOW PLOTS STORYLINE ELLIPSES.
         """
         if not cmip6_results or 'all_individual_model_deltas_for_plot' not in cmip6_results:
             logging.warning("Cannot plot combined jet inter-relationship scatter: Missing CMIP6 results.")
@@ -1276,41 +1294,47 @@ class Visualizer:
             logging.warning("No global warming levels to plot. Skipping jet inter-relationship plot.")
             return
 
+        # Get storyline definitions from config
+        storyline_defs = Config.STORYLINE_JET_CHANGES_2D
+        storyline_radius = Config.STORYLINE_RADIUS
+
         logging.info(f"Plotting seasonal CMIP6 jet inter-relationship scatter for GWLs: {gwls_to_plot}...")
         Visualizer.ensure_plot_dir_exists()
 
-        # Create a subplot grid: one row per GWL, two columns (Winter, Summer)
         fig, axs = plt.subplots(n_gwls, 2, figsize=(14, 5.5 * n_gwls), squeeze=False)
 
         for i, gwl in enumerate(gwls_to_plot):
-            # --- Panel 1 (Left): Winter (DJF) Speed vs. Latitude ---
+            # Panel 1 (Left): Winter (DJF)
             Visualizer._plot_single_jet_relationship_panel(
                 ax=axs[i, 0],
                 cmip6_results=cmip6_results,
                 gwl_to_plot=gwl,
                 x_jet_key='DJF_JetSpeed',
                 y_jet_key='DJF_JetLat',
-                title=f'Winter: Speed vs. Latitude ({gwl}°C GWL)'
+                title=f'Winter: Speed vs. Latitude ({gwl}°C GWL)',
+                storyline_defs=storyline_defs,
+                storyline_radius=storyline_radius
             )
             
-            # --- Panel 2 (Right): Summer (JJA) Speed vs. Latitude ---
+            # Panel 2 (Right): Summer (JJA)
             Visualizer._plot_single_jet_relationship_panel(
                 ax=axs[i, 1],
                 cmip6_results=cmip6_results,
                 gwl_to_plot=gwl,
                 x_jet_key='JJA_JetSpeed',
                 y_jet_key='JJA_JetLat',
-                title=f'Summer: Speed vs. Latitude ({gwl}°C GWL)'
+                title=f'Summer: Speed vs. Latitude ({gwl}°C GWL)',
+                storyline_defs=storyline_defs,
+                storyline_radius=storyline_radius
             )
 
-        # Set main title and save the figure
         ref_period = f"{Config.CMIP6_ANOMALY_REF_START}-{Config.CMIP6_ANOMALY_REF_END}"
         fig.suptitle(f"CMIP6 Jet Index Inter-relationships by Season\n"
                      f"(Changes relative to {ref_period})",
                      fontsize=16, weight='bold')
 
         fig.tight_layout(rect=[0, 0, 1, 0.95])
-        filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_seasonal.png") # Adjusted filename
+        filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_seasonal.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved seasonal CMIP6 jet inter-relationship scatter plot to {filename}")

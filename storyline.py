@@ -342,11 +342,17 @@ class StorylineAnalyzer:
             'failed_models': final_failed_models
         }
 
-        # --- NEU: Klassifiziere Modelle in Storylines ---
-        storyline_classification = self.classify_models_into_storylines(
+        # --- Classify models into storylines (two methods) ---
+        # Method 1: Original 1D classification for GWL plot
+        storyline_classification_1d = self.classify_models_into_storylines(
             all_deltas, self.config.STORYLINE_JET_CHANGES
         )
-        # --- ENDE NEU ---
+        # Method 2: New 2D classification for scatter plots
+        storyline_classification_2d = self.classify_models_into_storylines_2d(
+            all_deltas,
+            self.config.STORYLINE_JET_CHANGES_2D,
+            self.config.STORYLINE_RADIUS
+        )
 
         return {
             'gwl_threshold_years': gwl_thresholds,
@@ -357,7 +363,8 @@ class StorylineAnalyzer:
             'all_individual_model_deltas_for_plot': all_deltas,
             'mmm_changes': mmm_changes,
             'model_run_status': model_run_status,
-            'storyline_classification': storyline_classification # Hinzugefügter Wert
+            'storyline_classification': storyline_classification_1d, 
+            'storyline_classification_2d': storyline_classification_2d
         }
     
     def calculate_storyline_impacts(self, cmip6_results, beta_obs_slopes):
@@ -454,6 +461,74 @@ class StorylineAnalyzer:
                             models_in_storyline.append(model_key)
                     
                     classification_results[gwl][jet_index][storyline_type] = sorted(models_in_storyline)
+        return classification_results
+    
+    @staticmethod
+    def classify_models_into_storylines_2d(all_deltas, storyline_defs_2d, radius):
+        """
+        Classifies CMIP6 models into 2D storylines using a NORMALIZED Euclidean distance.
+        This method accounts for different scales on the x and y axes.
+
+        Parameters:
+        -----------
+        all_deltas : dict
+            Calculated changes for each model, metric, and GWL.
+        storyline_defs_2d : dict
+            The 2D storyline center definitions from the Config class.
+        radius : float
+            The RADIUS IN UNITS OF STANDARD DEVIATION.
+
+        Returns:
+        --------
+        dict
+            Nested dictionary with the classification results.
+        """
+        logging.info(f"Classifying models into 2D storylines using NORMALIZED distance with a radius of {radius} std. dev...")
+        classification_results = {}
+
+        for season, gwl_storylines in storyline_defs_2d.items():
+            jet_speed_key = f'{season}_JetSpeed'
+            jet_lat_key = f'{season}_JetLat'
+            
+            for gwl, storylines in gwl_storylines.items():
+                if gwl not in classification_results:
+                    classification_results[gwl] = {}
+
+                # Step 1: Collect all relevant data
+                model_deltas_speed = all_deltas.get(jet_speed_key, {}).get(gwl, {})
+                model_deltas_lat = all_deltas.get(jet_lat_key, {}).get(gwl, {})
+                common_models = set(model_deltas_speed.keys()) & set(model_deltas_lat.keys())
+
+                if not common_models: continue
+
+                # Step 2: Calculate standard deviations for normalization
+                speed_values = np.array([model_deltas_speed[m] for m in common_models])
+                lat_values = np.array([model_deltas_lat[m] for m in common_models])
+
+                std_dev_speed = np.std(speed_values)
+                std_dev_lat = np.std(lat_values)
+
+                if std_dev_speed < 1e-9 or std_dev_lat < 1e-9: continue
+                
+                for storyline_type, (center_speed, center_lat) in storylines.items():
+                    storyline_key = f"{season}_{storyline_type}"
+                    if storyline_key not in classification_results[gwl]:
+                        classification_results[gwl][storyline_key] = []
+                    
+                    # Step 3: Normalize the storyline center
+                    norm_center_speed = center_speed / std_dev_speed
+                    norm_center_lat = center_lat / std_dev_lat
+
+                    for model_key in common_models:
+                        norm_model_speed = model_deltas_speed[model_key] / std_dev_speed
+                        norm_model_lat = model_deltas_lat[model_key] / std_dev_lat
+
+                        # Step 4: Calculate distance in normalized space
+                        distance = np.sqrt((norm_model_speed - norm_center_speed)**2 + (norm_model_lat - norm_center_lat)**2)
+
+                        if distance <= radius:
+                            classification_results[gwl][storyline_key].append(model_key)
+                            
         return classification_results
     
     def calculate_cmip6_u850_change_fields(self,

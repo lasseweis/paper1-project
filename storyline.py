@@ -392,26 +392,20 @@ class StorylineAnalyzer:
         Returns:
         --------
         dict
-            A nested dictionary with the final storyline impacts.
-            Format: {gwl: {impact_variable: {storyline_type: impact_value}}}
+            A nested dictionary with the final storyline impacts and their components.
+            Format: {gwl: {impact_variable: {storyline_type: {'total': value, 'mmm_comp': value, 'jet_adj': value}}}}
         """
         logging.info("\n--- Calculating Final Storyline Impacts (Multivariate Approach) ---")
         
-        # Validate required inputs
         if 'mmm_changes' not in cmip6_results or not beta_obs_slopes:
             logging.error("Cannot calculate storyline impacts: Missing MMM changes or beta_obs slopes.")
             return None
 
-        # Get storyline definitions from the config
         storyline_defs_2d = self.config.STORYLINE_JET_CHANGES_2D
         mmm_changes = cmip6_results['mmm_changes']
         final_storyline_impacts = {gwl: {} for gwl in self.config.GLOBAL_WARMING_LEVELS}
 
-        # Define which impact variables to calculate for each season
-        impact_map = {
-            'DJF': ['pr', 'tas'],
-            'JJA': ['pr', 'tas']
-        }
+        impact_map = {'DJF': ['pr', 'tas'], 'JJA': ['pr', 'tas']}
 
         for gwl in self.config.GLOBAL_WARMING_LEVELS:
             if mmm_changes.get(gwl) is None:
@@ -420,52 +414,45 @@ class StorylineAnalyzer:
             
             logging.info(f"\n  Processing Impacts for GWL +{gwl}°C...")
 
-            # Iterate through seasons (DJF, JJA)
             for season, impact_vars in impact_map.items():
-                
-                # Get the projected changes for the Multi-Model Mean (MMM) for this season
                 delta_speed_mmm = mmm_changes[gwl].get(f'{season}_JetSpeed')
                 delta_lat_mmm = mmm_changes[gwl].get(f'{season}_JetLat')
 
-                # Iterate through impact variables (pr, tas)
                 for var in impact_vars:
-                    impact_key = f'{season}_{var}' # e.g., 'DJF_pr'
+                    impact_key = f'{season}_{var}'
                     final_storyline_impacts[gwl][impact_key] = {}
 
-                    # Get the multivariate betas for this specific impact variable
                     betas = beta_obs_slopes.get(impact_key)
                     beta_speed = betas.get('speed') if betas else None
                     beta_lat = betas.get('lat') if betas else None
-                    
-                    # Get the projected MMM change for the impact variable itself
                     impact_mmm = mmm_changes[gwl].get(impact_key)
                     
-                    # Check if all necessary components are available
                     if any(v is None for v in [delta_speed_mmm, delta_lat_mmm, beta_speed, beta_lat, impact_mmm]):
                         logging.warning(f"    SKIP {impact_key}: Missing a component (MMM change or beta).")
                         continue
                     
                     logging.info(f"    Calculating impacts for {impact_key}...")
 
-                    # Get the relevant 2D storylines for this season and GWL
                     storylines = storyline_defs_2d.get(season, {}).get(gwl, {})
                     if not storylines:
                         logging.warning(f"      No 2D storylines defined for {season} at GWL {gwl}°C.")
                         continue
 
-                    # Apply the multivariate formula for each storyline
                     for storyline_type, (delta_speed_storyline, delta_lat_storyline) in storylines.items():
                         
-                        # The core of the calculation
                         impact_adjustment = (beta_speed * (delta_speed_storyline - delta_speed_mmm)) + \
                                             (beta_lat * (delta_lat_storyline - delta_lat_mmm))
                         
                         final_impact = impact_mmm + impact_adjustment
                         
-                        final_storyline_impacts[gwl][impact_key][storyline_type] = final_impact
-                        logging.info(f"      -> {storyline_type:<28}: Final Change = {final_impact:+.2f}")
+                        # Store all components
+                        final_storyline_impacts[gwl][impact_key][storyline_type] = {
+                            'total': final_impact,
+                            'mmm_comp': impact_mmm,
+                            'jet_adj': impact_adjustment
+                        }
+                        logging.info(f"      -> {storyline_type:<28}: Total={final_impact:+.2f} (MMM={impact_mmm:+.2f}, JetAdj={impact_adjustment:+.2f})")
 
-        # Return the dictionary with calculated impacts, filtering out empty entries
         return {gwl: impacts for gwl, impacts in final_storyline_impacts.items() if impacts}
     
     @staticmethod

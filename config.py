@@ -157,36 +157,36 @@ class Config:
             2.0: {
                 # Winter @ +2.0°C (Plot oben links)
                 'Core Mean (MMM)':                (0.17, -0.08), # Zentrum
-                'Fast Jet & Northward Shift':     (0.5, 1.2),    # Oben Rechts
-                'Slow Jet & Northward Shift':     (-0.3, 1.0),   # Oben Links
-                'Slow Jet & Southward Shift':     (-0.4, -1.2),  # Unten Links
-                'Fast Jet & Southward Shift':     (0.6, -1.0),   # Unten Rechts
+                'Fast Jet & Northward Shift':     (0.7, 1.4),    # Oben Rechts
+                'Slow Jet & Northward Shift':     (-0.4, 1.2),   # Oben Links
+                'Slow Jet & Southward Shift':     (-0.5, -1.2),  # Unten Links
+                'Fast Jet & Southward Shift':     (0.6, -1.3),   # Unten Rechts
             },
             3.0: {
                 # Winter @ +3.0°C (Plot unten links)
-                'Core Mean (MMM)':                (0.25, -0.1),  # Zentrum
-                'Fast Jet & Northward Shift':     (0.8, 1.5),    # Oben Rechts
-                'Slow Jet & Northward Shift':     (-0.2, 1.8),   # Oben Links
-                'Slow Jet & Southward Shift':     (0.0, -1.5),   # Unten Links
-                'Fast Jet & Southward Shift':     (0.7, -1.0),   # Unten Rechts
+                'Core Mean (MMM)':                (0.3, -0.1),  # Zentrum
+                'Fast Jet & Northward Shift':     (1.2, 0.8),    # Oben Rechts
+                'Slow Jet & Northward Shift':     (-0.3, 1.3),   # Oben Links
+                'Slow Jet & Southward Shift':     (-0.3, -1.0),   # Unten Links
+                'Fast Jet & Southward Shift':     (0.9, -1.8),   # Unten Rechts
             }
         },
         'JJA': {
             2.0: {
                 # Sommer @ +2.0°C (Plot oben rechts)
                 'Core Mean (MMM)':                (-0.1, 0.6),   # Zentrum
-                'Fast Jet & Northward Shift':     (0.1, 1.2),    # Oben Rechts
-                'Slow Jet & Northward Shift':     (-0.4, 1.4),   # Oben Links
-                'Slow Jet & Southward Shift':     (-0.3, 0.0),   # Unten Links
-                'Fast Jet & Southward Shift':     (0.2, -0.2),   # Unten Rechts
+                'Fast Jet & Northward Shift':     (0.15, 1.2),    # Oben Rechts
+                'Slow Jet & Northward Shift':     (-0.3, 1.9),   # Oben Links
+                'Slow Jet & Southward Shift':     (-0.15, -1.0),   # Unten Links
+                'Fast Jet & Southward Shift':     (0.2, -0.4),   # Unten Rechts
             },
             3.0: {
                 # Sommer @ +3.0°C (Plot unten rechts)
                 'Core Mean (MMM)':                (-0.15, 1.1),  # Zentrum
                 'Fast Jet & Northward Shift':     (0.1, 1.9),    # Oben Rechts
-                'Slow Jet & Northward Shift':     (-0.4, 2.0),   # Oben Links
-                'Slow Jet & Southward Shift':     (-0.5, 0.5),   # Unten Links
-                'Fast Jet & Southward Shift':     (0.2, 0.5),    # Unten Rechts
+                'Slow Jet & Northward Shift':     (-0.4, 2.2),   # Oben Links
+                'Slow Jet & Southward Shift':     (-0.25, -0.5),   # Unten Links
+                'Fast Jet & Southward Shift':     (0.15, 0.0),    # Unten Rechts
             }
         }
     }

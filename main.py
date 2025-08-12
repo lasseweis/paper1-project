@@ -209,6 +209,8 @@ class ClimateAnalysis:
             logging.error(traceback.format_exc())
             return {}
 
+# In main.py, inside the ClimateAnalysis class
+
     @staticmethod
     def run_full_analysis():
         """Main static method to execute the entire analysis workflow."""
@@ -222,7 +224,6 @@ class ClimateAnalysis:
 
         # Create an instance of the central analysis class
         storyline_analyzer = StorylineAnalyzer(config=Config)
-
 
         # --- PART 1: BASIC CALCULATIONS ---
         # These base data and jet indices are always loaded/calculated,
@@ -318,7 +319,6 @@ class ClimateAnalysis:
 
             if cmip6_results and 'cmip6_model_data_loaded' in cmip6_results:
                 # Select four models for the plot
-                # Ensure these models are present in your `REQUIRED_MODEL_SCENARIOS` configuration
                 models_to_plot = ["ACCESS-CM2_ssp585", "MPI-ESM1-2-HR_ssp585", "IPSL-CM6A-LR_ssp585", "MIROC6_ssp585"]
                 single_model_regression_data = {}
 
@@ -337,7 +337,6 @@ class ClimateAnalysis:
                         logging.warning(f"Data for selected model {model_key} not found in preloaded data.")
 
                 if single_model_regression_data:
-                    # Call the new plotting function
                     Visualizer.plot_cmip6_model_regression_analysis(single_model_regression_data, models_to_plot)
                 else:
                     logging.warning("Could not generate data for any of the selected models. Skipping plot.")
@@ -345,7 +344,6 @@ class ClimateAnalysis:
                 logging.warning("Skipping single CMIP6 model regression plot: CMIP6 results not available.")
         else:
             logging.info(f"Plot '{single_model_plot_filename}' already exists. Skipping calculation and creation.")
-
 
         logging.info("\n\n--- Checking for Reanalysis Jet Index Comparison Timeseries ---")
         jet_indices_plot_filename = os.path.join(Config.PLOT_DIR, "jet_indices_comparison_seasonal_detrended.png")
@@ -442,51 +440,34 @@ class ClimateAnalysis:
         else:
             logging.info(f"Plot '{drought_plot_filename}' already exists. Skipping creation.")
 
-        # === FINAL VERSION: Combined SPEI, Correlation, and Influence Plot ===
         logging.info("\n\n--- Checking for Combined Spatial SPEI & Discharge Analysis Map ---")
         combined_spei_plot_filename = os.path.join(Config.PLOT_DIR, 'spatial_spei_discharge_analysis_era5_summer.png')
         if not os.path.exists(combined_spei_plot_filename):
             logging.info(f"Plot '{combined_spei_plot_filename}' not found. Calculating and creating plot...")
 
-            # Load data
             spatial_spei_era5 = StorylineAnalyzer.calculate_spatial_spei(datasets_reanalysis, Config.DATASET_ERA5, scale=4)
             summer_discharge_ts = discharge_data_loaded.get('summer_discharge')
 
             if spatial_spei_era5 is not None and summer_discharge_ts is not None:
-                # 1. Calculate the correlation map
                 corr_map, p_vals_corr = StorylineAnalyzer.calculate_spei_on_discharge_map(
-                    spatial_spei_data=spatial_spei_era5,
-                    discharge_timeseries=summer_discharge_ts,
-                    season='Summer',
-                    analysis_type='correlation'
+                    spatial_spei_data=spatial_spei_era5, discharge_timeseries=summer_discharge_ts,
+                    season='Summer', analysis_type='correlation'
                 )
-
-                # 2. Calculate the regression map
                 regr_slopes, p_vals_regr = StorylineAnalyzer.calculate_spei_on_discharge_map(
-                    spatial_spei_data=spatial_spei_era5,
-                    discharge_timeseries=summer_discharge_ts,
-                    season='Summer',
-                    analysis_type='regression'
+                    spatial_spei_data=spatial_spei_era5, discharge_timeseries=summer_discharge_ts,
+                    season='Summer', analysis_type='regression'
                 )
-
-                # 3. Create the combined 1x3 plot
                 Visualizer.plot_spatial_spei_analysis_maps(
-                    spatial_spei_data=spatial_spei_era5,
-                    discharge_corr_map=corr_map,
-                    p_values_corr=p_vals_corr,
-                    discharge_regr_slopes=regr_slopes,
-                    p_values_regr=p_vals_regr,
-                    time_slice='2003-08-15',
-                    season='Summer',
-                    title_prefix='ERA5',
+                    spatial_spei_data=spatial_spei_era5, discharge_corr_map=corr_map, p_values_corr=p_vals_corr,
+                    discharge_regr_slopes=regr_slopes, p_values_regr=p_vals_regr,
+                    time_slice='2003-08-15', season='Summer', title_prefix='ERA5',
                     filename=os.path.basename(combined_spei_plot_filename)
                 )
             else:
                 logging.warning("Could not create combined SPEI/Discharge analysis plot, data is missing.")
         else:
             logging.info(f"Plot '{combined_spei_plot_filename}' already exists. Skipping creation.")
-        # === END FINAL VERSION ===
-
+        
         # --- PART 2: CMIP6 AND STORYLINE ANALYSIS ---
         logging.info("\n\n--- Analyzing CMIP6 Data and Storylines ---")
         try:
@@ -526,47 +507,64 @@ class ClimateAnalysis:
         else:
             logging.info(f"Plot '{evolution_plot_filename}' already exists. Skipping creation.")
 
-        # --- PART 4: BETA-OBS CALCULATION, MODEL FIDELITY & CMIP6 SCATTER PLOTS ---
-        logging.info("\n\n--- Calculating Betas, Checking Model Fidelity & Future Slopes, and Plotting Comparisons ---")
+        # =================================================================================
+        # === NEUER UND FINALER BLOCK FÜR BETA-BERECHNUNG, IMPACTS UND VERGLEICHS-PLOTS ===
+        # =================================================================================
+        logging.info("\n\n--- Calculating Betas, Final Impacts, and Plotting Comparisons ---")
 
         if cmip6_results and datasets_reanalysis and jet_data_reanalysis:
-            beta_obs_slopes = StorylineAnalyzer.calculate_reanalysis_betas(
+            # Step 1: Calculate multivariate betas from reanalysis
+            beta_obs_slopes = storyline_analyzer.calculate_reanalysis_betas(
                 datasets_reanalysis,
                 jet_data_reanalysis,
                 dataset_key=Config.DATASET_ERA5
             )
 
-            fidelity_future_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_fidelity_vs_future_temporal_slopes.png")
-            if not os.path.exists(fidelity_future_plot_filename):
-                if beta_obs_slopes:
-                    logging.info(f"Plot '{fidelity_future_plot_filename}' not found, calculating data and plotting...")
+            # Step 2: Calculate the final storyline impacts using these betas
+            if beta_obs_slopes:
+                final_impacts = storyline_analyzer.calculate_storyline_impacts(
+                    cmip6_results=cmip6_results,
+                    beta_obs_slopes=beta_obs_slopes
+                )
 
-                    historical_period_for_fidelity = (1981, 2010)
-                    cmip6_historical_slopes = StorylineAnalyzer.calculate_historical_slopes_comparison(
-                        beta_obs_slopes=beta_obs_slopes,
-                        cmip6_data_loaded=cmip6_results.get('cmip6_model_data_loaded', {}),
-                        jet_data_reanalysis=jet_data_reanalysis,
-                        historical_period=historical_period_for_fidelity
+                # Step 3: Create the new summary bar chart with the final impacts
+                if final_impacts:
+                    Visualizer.plot_storyline_impact_barchart(
+                        storyline_impacts=final_impacts,
+                        config=Config()
                     )
-
-                    cmip6_future_temporal_slopes = StorylineAnalyzer.calculate_future_temporal_slopes(
-                        cmip6_results=cmip6_results,
-                        beta_keys=list(beta_obs_slopes.keys()),
-                        gwls_to_analyze=Config.GLOBAL_WARMING_LEVELS
-                    )
-
-                    Visualizer.plot_model_fidelity_comparison(
-                        cmip6_historical_slopes=cmip6_historical_slopes,
-                        cmip6_future_temporal_slopes=cmip6_future_temporal_slopes,
-                        beta_obs_slopes=beta_obs_slopes,
-                        historical_period=historical_period_for_fidelity,
-                        gwls_to_plot=Config.GLOBAL_WARMING_LEVELS
-                    )
-                else:
-                    logging.warning("Skipping temporal slope comparison plot: beta_obs slopes could not be calculated.")
             else:
-                logging.info(f"Plot '{fidelity_future_plot_filename}' already exists. Skipping.")
+                logging.warning("Skipping final storyline impact calculation and plot: Multivariate betas are missing.")
 
+            # --- Subsequent plots that depend on these results ---
+            
+            # Plot for Model Fidelity Comparison
+            fidelity_future_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_fidelity_vs_future_temporal_slopes.png")
+            if not os.path.exists(fidelity_future_plot_filename) and beta_obs_slopes:
+                logging.info(f"Plot '{fidelity_future_plot_filename}' not found, calculating data and plotting...")
+                historical_period_for_fidelity = (1981, 2010)
+                cmip6_historical_slopes = storyline_analyzer.calculate_historical_slopes_comparison(
+                    beta_obs_slopes=beta_obs_slopes,
+                    cmip6_data_loaded=cmip6_results.get('cmip6_model_data_loaded', {}),
+                    jet_data_reanalysis=jet_data_reanalysis,
+                    historical_period=historical_period_for_fidelity
+                )
+                cmip6_future_temporal_slopes = storyline_analyzer.calculate_future_temporal_slopes(
+                    cmip6_results=cmip6_results,
+                    beta_keys=list(beta_obs_slopes.keys()),
+                    gwls_to_analyze=Config.GLOBAL_WARMING_LEVELS
+                )
+                Visualizer.plot_model_fidelity_comparison(
+                    cmip6_historical_slopes=cmip6_historical_slopes,
+                    cmip6_future_temporal_slopes=cmip6_future_temporal_slopes,
+                    beta_obs_slopes=beta_obs_slopes,
+                    historical_period=historical_period_for_fidelity,
+                    gwls_to_plot=Config.GLOBAL_WARMING_LEVELS
+                )
+            elif os.path.exists(fidelity_future_plot_filename):
+                 logging.info(f"Plot '{fidelity_future_plot_filename}' already exists. Skipping.")
+
+            # Plots for CMIP6 Scatter Comparison
             if beta_obs_slopes:
                 for gwl in Config.GLOBAL_WARMING_LEVELS:
                     scatter_plot_filename = os.path.join(Config.PLOT_DIR, f"cmip6_scatter_comparison_gwl_{gwl:.1f}_extended.png")
@@ -577,12 +575,16 @@ class ClimateAnalysis:
                             gwl_to_plot=gwl
                         )
         else:
-            logging.warning("Skipping all Fidelity/Scatter plots due to missing cmip6_results, reanalysis, or jet data.")
+            logging.warning("Skipping all Fidelity/Scatter/Impact plots due to missing cmip6_results, reanalysis, or jet data.")
+        
+        # =================================================================================
+        # === ENDE DES NEUEN BLOCKS ===
+        # =================================================================================
 
         # --- PART 5: JET INTER-RELATIONSHIP SCATTER PLOTS ---
         logging.info("\n\n--- Plotting CMIP6 Jet Inter-relationship Scatter Plots ---")
         if cmip6_results:
-            inter_rel_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_combined_gwl.png")
+            inter_rel_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_seasonal_with_legend.png")
             if not os.path.exists(inter_rel_plot_filename):
                 if cmip6_results.get('mmm_changes'):
                     Visualizer.plot_jet_inter_relationship_scatter_combined_gwl(
@@ -595,7 +597,7 @@ class ClimateAnalysis:
         else:
             logging.warning("Skipping CMIP6 jet inter-relationship scatter plots due to missing cmip6_results.")
 
-        #CMIP6 MMM Analysis
+        # --- CMIP6 MMM Analysis ---
         logging.info("\n\n--- Checking for CMIP6 U850 Change Maps ---")
         u850_change_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_mmm_u850_change_djf_jja.png")
         if not os.path.exists(u850_change_plot_filename):
@@ -603,10 +605,8 @@ class ClimateAnalysis:
             if cmip6_results and 'cmip6_model_data_loaded' in cmip6_results:
                 future_period = (2070, 2099)
                 hist_period = (Config.CMIP6_ANOMALY_REF_START, Config.CMIP6_ANOMALY_REF_END)
-
                 preloaded_data = cmip6_results['cmip6_model_data_loaded']
                 models_for_calc = sorted(list(set(key.split('_')[0] for key in preloaded_data.keys())))
-
                 if models_for_calc:
                     u850_change_data = storyline_analyzer.calculate_cmip6_u850_change_fields(
                         models_to_run=models_for_calc,
@@ -657,7 +657,6 @@ class ClimateAnalysis:
             if storyline_classification and gwl_years_data:
                 logging.info("\n\n--- CMIP6 Model Storyline Classification ---")
                 scenario = Config.CMIP6_SCENARIOS[0] if Config.CMIP6_SCENARIOS else ''
-
                 for gwl, jet_indices in sorted(storyline_classification.items()):
                     if gwl not in Config.GLOBAL_WARMING_LEVELS:
                         continue
@@ -670,7 +669,6 @@ class ClimateAnalysis:
                                 models_with_timings = []
                                 for model_key in models:
                                     threshold_year = gwl_years_data.get(model_key, {}).get(gwl)
-
                                     if threshold_year:
                                         window = Config.GWL_YEARS_WINDOW
                                         start_year = threshold_year - window // 2
@@ -678,11 +676,9 @@ class ClimateAnalysis:
                                         models_with_timings.append(f"{model_key} ({start_year}-{end_year})")
                                     else:
                                         models_with_timings.append(model_key)
-
                                 logging.info(f"    - {storyline_type}: {', '.join(models_with_timings)} ({len(models)})")
                             else:
                                 logging.info(f"    - {storyline_type}: No models in range.")
-
                 logging.info("\n------------------------------------------")
                 logging.info("\nExplanation of the format:")
                 logging.info("  - Each line lists the models whose projected change corresponds to a specific storyline type.")
@@ -691,13 +687,11 @@ class ClimateAnalysis:
                 logging.info(f"    - '(2040-2059)': The {Config.GWL_YEARS_WINDOW}-year analysis period. This period is centered around the year in which the respective model first reaches the corresponding Global Warming Level (GWL).")
                 logging.info("------------------------------------------")
                 
-        # --- START: NEUER BLOCK FÜR 2D STORYLINE LOGGING ---
         storyline_classification_2d = cmip6_results.get('storyline_classification_2d')
         if storyline_classification_2d:
             logging.info("\n\n--- CMIP6 Model 2D Storyline Classification (for Scatter Plots) ---")
             radius = Config.STORYLINE_RADIUS
             logging.info(f"Models are classified based on a normalized Euclidean distance (Radius: {radius} std. dev.).")
-
             for gwl, storylines in sorted(storyline_classification_2d.items()):
                 if gwl not in Config.GLOBAL_WARMING_LEVELS:
                     continue
@@ -705,19 +699,15 @@ class ClimateAnalysis:
                 if not storylines:
                     logging.info("  No models were classified for this GWL.")
                     continue
-                    
                 for storyline_key, models in sorted(storylines.items()):
                     season = 'Winter (DJF)' if 'DJF' in storyline_key else 'Summer (JJA)'
                     storyline_name = storyline_key.replace('DJF_', '').replace('JJA_', '')
-                        
                     if models:
                         logging.info(f"  - Storyline '{storyline_name}' ({season}):")
                         logging.info(f"    - Models ({len(models)}): {', '.join(sorted(models))}")
                     else:
                         logging.info(f"  - Storyline '{storyline_name}' ({season}): No models classified.")
-
             logging.info("-----------------------------------------------------------------")
-            # --- ENDE: NEUER BLOCK FÜR 2D STORYLINE LOGGING ---
 
         logging.info("\n\n=====================================================")
         logging.info("=== FULL ANALYSIS COMPLETED ===")

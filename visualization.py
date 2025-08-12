@@ -1184,14 +1184,11 @@ class Visualizer:
                 title=config['title']
             )
         
-        # --- START DER ÄNDERUNG ---
-        # Hier wird der Titel der gesamten Abbildung angepasst
         ref_period_changes = f"{Config.CMIP6_ANOMALY_REF_START}-{Config.CMIP6_ANOMALY_REF_END}"
         ref_period_gwl = f"{Config.CMIP6_PRE_INDUSTRIAL_REF_START}-{Config.CMIP6_PRE_INDUSTRIAL_REF_END}"
         fig.suptitle(f"CMIP6 Projected Changes at {gwl_to_plot}°C Global Warming Level\n"
                      f"(Changes relative to {ref_period_changes}; GWL defined relative to {ref_period_gwl})",
                      fontsize=16, weight='bold') 
-        # --- ENDE DER ÄNDERUNG ---
         
         # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
         fig.tight_layout(rect=[0, 0, 1, 0.94]) # Top-Wert angepasst, um Platz für den längeren Titel zu schaffen
@@ -1850,3 +1847,119 @@ class Visualizer:
         filename = os.path.join(Config.PLOT_DIR, f'regression_maps_norm_{dataset_key_prefix}_single_models.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
+        
+    # In visualization.py
+
+    @staticmethod
+    def plot_storyline_impact_barchart(storyline_impacts, config):
+        """
+        Creates a high-quality, publication-ready 2x2 bar chart panel to visualize
+        the final impacts for different 2D storylines.
+
+        Parameters:
+        -----------
+        storyline_impacts : dict
+            The nested dictionary with final calculated impacts from the
+            StorylineAnalyzer.calculate_storyline_impacts method.
+        config : Config
+            The project configuration object.
+        """
+        logging.info("Plotting final storyline impacts bar chart...")
+        Visualizer.ensure_plot_dir_exists()
+
+        if not storyline_impacts or not any(storyline_impacts.values()):
+            logging.warning("Cannot plot storyline impacts: Input data is empty.")
+            return
+
+        # --- 1. Plotting Setup & Aesthetics ---
+        # Aesthetics inspired by high-impact scientific journals
+        plt.style.use('seaborn-v0_8-ticks')
+        matplotlib.rcParams['font.family'] = 'sans-serif'
+        matplotlib.rcParams['font.sans-serif'] = ['Arial', 'Helvetica']
+        matplotlib.rcParams['axes.edgecolor'] = 'black'
+        matplotlib.rcParams['axes.linewidth'] = 0.8
+        matplotlib.rcParams['xtick.color'] = 'black'
+        matplotlib.rcParams['ytick.color'] = 'black'
+
+        fig, axs = plt.subplots(2, 2, figsize=(16, 12), sharey='row')
+
+        gwls_to_plot = config.GLOBAL_WARMING_LEVELS # e.g., [2.0, 3.0]
+        
+        # Define colors for the GWL bars
+        gwl_colors = {
+            2.0: '#2b83ba',  # Blue
+            3.0: '#d7191c'   # Red
+        }
+
+        # Define which impacts go into which subplot
+        plot_grid = {
+            (0, 0): {'key': 'DJF_pr', 'title': 'a) Winter (DJF) Precipitation'},
+            (0, 1): {'key': 'JJA_pr', 'title': 'b) Summer (JJA) Precipitation'},
+            (1, 0): {'key': 'DJF_tas', 'title': 'c) Winter (DJF) Temperature'},
+            (1, 1): {'key': 'JJA_tas', 'title': 'd) Summer (JJA) Temperature'}
+        }
+
+        # --- 2. Data Processing and Plotting Loop ---
+        for (row, col), plot_info in plot_grid.items():
+            ax = axs[row, col]
+            impact_key = plot_info['key']
+            
+            # Collect data for this specific impact variable
+            plot_data = {}
+            # Use the storyline definitions from config to ensure consistent ordering
+            season = impact_key.split('_')[0]
+            storyline_names_ordered = list(config.STORYLINE_JET_CHANGES_2D.get(season, {}).get(gwls_to_plot[0], {}).keys())
+
+            for storyline_name in storyline_names_ordered:
+                plot_data[storyline_name] = []
+                for gwl in gwls_to_plot:
+                    impact_value = storyline_impacts.get(gwl, {}).get(impact_key, {}).get(storyline_name, np.nan)
+                    plot_data[storyline_name].append(impact_value)
+            
+            # Create a pandas DataFrame for easy plotting and ensure correct order
+            df = pd.DataFrame(plot_data, index=[f'+{gwl}°C' for gwl in gwls_to_plot]).T
+            df = df.loc[storyline_names_ordered] # Enforce storyline order
+            
+            if df.isnull().all().all():
+                ax.text(0.5, 0.5, "Data not available", ha='center', va='center', transform=ax.transAxes)
+            else:
+                # Create the grouped bar plot
+                df.plot(kind='barh', ax=ax, color=[gwl_colors.get(gwl) for gwl in gwls_to_plot], width=0.7, zorder=10)
+
+            # --- 3. Subplot Formatting ---
+            ax.set_title(plot_info['title'], loc='left', fontsize=14, weight='bold')
+            ax.axvline(0, color='black', linestyle='--', linewidth=0.8, zorder=5)
+            ax.grid(axis='x', linestyle=':', color='gray', alpha=0.5)
+
+            # Set specific x-axis labels for Temperature and Precipitation
+            if 'pr' in impact_key:
+                ax.set_xlabel('Change in Precipitation (%)', fontsize=12)
+            else: # 'tas'
+                ax.set_xlabel('Change in Temperature (°C)', fontsize=12)
+
+            ax.tick_params(axis='both', which='major', labelsize=11)
+            # Make y-tick labels more readable by adding line breaks
+            ax.set_yticklabels([label.get_text().replace(' & ', ' &\n') for label in ax.get_yticklabels()])
+            ax.set_ylabel("") # Remove default y-axis label
+
+            # Remove legend from individual subplots
+            if ax.get_legend():
+                ax.get_legend().remove()
+
+        # --- 4. Final Figure Formatting ---
+        # Create a single, shared legend for the entire figure
+        handles = [mpatches.Patch(color=color, label=f'GWL +{gwl}°C') for gwl, color in gwl_colors.items()]
+        fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.5, -0.02), ncol=len(gwls_to_plot), fontsize=12, frameon=False)
+        
+        # Add the main title and a subtitle specifying the analysis region
+        main_title = "Projected Climate Impacts for Different Jet Stream Storylines"
+        subtitle = f"Impacts calculated for the Central European analysis box ({config.BOX_LAT_MIN}°N-{config.BOX_LAT_MAX}°N, {config.BOX_LON_MIN}°E-{config.BOX_LON_MAX}°E)"
+        fig.suptitle(f"{main_title}\n{subtitle}", fontsize=16, weight='bold')
+
+        # Adjust layout to prevent overlap and make space for titles/legend
+        fig.tight_layout(rect=[0, 0.03, 1, 0.93])
+        
+        filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved storyline impacts summary plot to {filename}")

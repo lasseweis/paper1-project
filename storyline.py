@@ -366,49 +366,107 @@ class StorylineAnalyzer:
             'storyline_classification': storyline_classification_1d, 
             'storyline_classification_2d': storyline_classification_2d
         }
-    
+
     def calculate_storyline_impacts(self, cmip6_results, beta_obs_slopes):
-        """Calculates the impact changes for each defined storyline."""
-        logging.info("\n--- Calculating Storyline Impacts ---")
+        """
+        Calculates the final impact changes for each defined 2D storyline using
+        a multivariate approach.
+
+        This method applies the pre-calculated multivariate sensitivities (betas)
+        to the projected CMIP6 changes for each storyline.
+
+        The formula used is:
+        Impact_Storyline = Impact_MMM + 
+                           β_speed * (ΔSpeed_Storyline - ΔSpeed_MMM) + 
+                           β_lat * (ΔLat_Storyline - ΔLat_MMM)
+
+        Parameters:
+        -----------
+        cmip6_results : dict
+            The main CMIP6 analysis results, containing MMM changes and storyline definitions.
+        beta_obs_slopes : dict
+            A dictionary with the multivariate regression coefficients (betas) derived
+            from reanalysis data. Expected format: 
+            {'DJF_pr': {'speed': beta_val, 'lat': beta_val}, ...}
+
+        Returns:
+        --------
+        dict
+            A nested dictionary with the final storyline impacts.
+            Format: {gwl: {impact_variable: {storyline_type: impact_value}}}
+        """
+        logging.info("\n--- Calculating Final Storyline Impacts (Multivariate Approach) ---")
+        
+        # Validate required inputs
         if 'mmm_changes' not in cmip6_results or not beta_obs_slopes:
-            logging.error("Cannot calculate storyline impacts due to missing MMM changes or beta_obs slopes.")
+            logging.error("Cannot calculate storyline impacts: Missing MMM changes or beta_obs slopes.")
             return None
 
-        storyline_impacts = {gwl: {} for gwl in self.config.GLOBAL_WARMING_LEVELS}
-        storyline_defs = self.config.STORYLINE_JET_CHANGES
+        # Get storyline definitions from the config
+        storyline_defs_2d = self.config.STORYLINE_JET_CHANGES_2D
         mmm_changes = cmip6_results['mmm_changes']
+        final_storyline_impacts = {gwl: {} for gwl in self.config.GLOBAL_WARMING_LEVELS}
 
+        # Define which impact variables to calculate for each season
         impact_map = {
-            'DJF_pr': {'jet_index': 'DJF_JetSpeed', 'beta_key': 'DJF_JetSpeed_vs_pr'},
-            'DJF_tas': {'jet_index': 'DJF_JetSpeed', 'beta_key': 'DJF_JetSpeed_vs_tas'},
-            'JJA_pr': {'jet_index': 'JJA_JetLat', 'beta_key': 'JJA_JetLat_vs_pr'},
-            'JJA_tas': {'jet_index': 'JJA_JetLat', 'beta_key': 'JJA_JetLat_vs_tas'},
+            'DJF': ['pr', 'tas'],
+            'JJA': ['pr', 'tas']
         }
 
         for gwl in self.config.GLOBAL_WARMING_LEVELS:
-            if mmm_changes.get(gwl) is None: continue
-            logging.info(f"\n  Processing Impacts for GWL {gwl}°C...")
+            if mmm_changes.get(gwl) is None:
+                logging.warning(f"No MMM data for GWL {gwl}°C. Skipping impact calculation.")
+                continue
+            
+            logging.info(f"\n  Processing Impacts for GWL +{gwl}°C...")
 
-            for impact_var, mapping in impact_map.items():
-                jet_index_name = mapping['jet_index']
-                beta_key = mapping['beta_key']
+            # Iterate through seasons (DJF, JJA)
+            for season, impact_vars in impact_map.items():
+                
+                # Get the projected changes for the Multi-Model Mean (MMM) for this season
+                delta_speed_mmm = mmm_changes[gwl].get(f'{season}_JetSpeed')
+                delta_lat_mmm = mmm_changes[gwl].get(f'{season}_JetLat')
 
-                delta_impact_mmm = mmm_changes[gwl].get(impact_var)
-                delta_jet_mmm = mmm_changes[gwl].get(jet_index_name)
-                beta_obs = beta_obs_slopes.get(beta_key)
+                # Iterate through impact variables (pr, tas)
+                for var in impact_vars:
+                    impact_key = f'{season}_{var}' # e.g., 'DJF_pr'
+                    final_storyline_impacts[gwl][impact_key] = {}
 
-                if any(v is None or np.isnan(v) for v in [delta_impact_mmm, delta_jet_mmm, beta_obs]):
-                    continue
+                    # Get the multivariate betas for this specific impact variable
+                    betas = beta_obs_slopes.get(impact_key)
+                    beta_speed = betas.get('speed') if betas else None
+                    beta_lat = betas.get('lat') if betas else None
+                    
+                    # Get the projected MMM change for the impact variable itself
+                    impact_mmm = mmm_changes[gwl].get(impact_key)
+                    
+                    # Check if all necessary components are available
+                    if any(v is None for v in [delta_speed_mmm, delta_lat_mmm, beta_speed, beta_lat, impact_mmm]):
+                        logging.warning(f"    SKIP {impact_key}: Missing a component (MMM change or beta).")
+                        continue
+                    
+                    logging.info(f"    Calculating impacts for {impact_key}...")
 
-                logging.info(f"    Calculating impacts for {impact_var} (driven by {jet_index_name})")
-                storyline_impacts[gwl][impact_var] = {}
-                for storyline_type, delta_jet_story in storyline_defs[jet_index_name][gwl].items():
-                    impact_adjustment = beta_obs * (delta_jet_story - delta_jet_mmm)
-                    impact_change = delta_impact_mmm + impact_adjustment
-                    storyline_impacts[gwl][impact_var][storyline_type] = impact_change
-                    logging.info(f"      {storyline_type:<12}: Total Change = {impact_change:+.2f}")
+                    # Get the relevant 2D storylines for this season and GWL
+                    storylines = storyline_defs_2d.get(season, {}).get(gwl, {})
+                    if not storylines:
+                        logging.warning(f"      No 2D storylines defined for {season} at GWL {gwl}°C.")
+                        continue
 
-        return {gwl: impacts for gwl, impacts in storyline_impacts.items() if impacts}
+                    # Apply the multivariate formula for each storyline
+                    for storyline_type, (delta_speed_storyline, delta_lat_storyline) in storylines.items():
+                        
+                        # The core of the calculation
+                        impact_adjustment = (beta_speed * (delta_speed_storyline - delta_speed_mmm)) + \
+                                            (beta_lat * (delta_lat_storyline - delta_lat_mmm))
+                        
+                        final_impact = impact_mmm + impact_adjustment
+                        
+                        final_storyline_impacts[gwl][impact_key][storyline_type] = final_impact
+                        logging.info(f"      -> {storyline_type:<28}: Final Change = {final_impact:+.2f}")
+
+        # Return the dictionary with calculated impacts, filtering out empty entries
+        return {gwl: impacts for gwl, impacts in final_storyline_impacts.items() if impacts}
     
     @staticmethod
     def classify_models_into_storylines(all_deltas, storyline_defs):

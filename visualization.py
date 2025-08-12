@@ -1847,8 +1847,6 @@ class Visualizer:
         filename = os.path.join(Config.PLOT_DIR, f'regression_maps_norm_{dataset_key_prefix}_single_models.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        
-    # In visualization.py
 
     @staticmethod
     def plot_storyline_impact_barchart(storyline_impacts, config):
@@ -1874,8 +1872,9 @@ class Visualizer:
         # --- 1. Plotting Setup & Aesthetics ---
         # Aesthetics inspired by high-impact scientific journals
         plt.style.use('seaborn-v0_8-ticks')
-        matplotlib.rcParams['font.family'] = 'sans-serif'
-        matplotlib.rcParams['font.sans-serif'] = ['Arial', 'Helvetica']
+        # ENTFERNT: Die folgenden zwei Zeilen wurden entfernt, um die Standard-Schriftart zu verwenden
+        # matplotlib.rcParams['font.family'] = 'sans-serif'
+        # matplotlib.rcParams['font.sans-serif'] = ['Arial', 'Helvetica']
         matplotlib.rcParams['axes.edgecolor'] = 'black'
         matplotlib.rcParams['axes.linewidth'] = 0.8
         matplotlib.rcParams['xtick.color'] = 'black'

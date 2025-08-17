@@ -697,3 +697,62 @@ class DataProcessor:
             'scale_months': scale
         }
         return spei_ts.reindex_like(pr_monthly)
+    
+    @staticmethod
+    def process_discharge_data(filepath_ssp245, filepath_ssp585, models_to_include):
+        """
+        Loads, processes, and combines discharge data from scenario-specific CSV files.
+        This function is tailored to the specific format of the Danube discharge data.
+
+        Args:
+            filepath_ssp245 (str): Path to the SSP2-4.5 discharge CSV file.
+            filepath_ssp585 (str): Path to the SSP5-8.5 discharge CSV file.
+            models_to_include (list): A list of model names to extract from the files.
+
+        Returns:
+            dict: A dictionary where keys are model_scenario (e.g., 'ACCESS-CM2_ssp585')
+                  and values are xarray DataArrays of the monthly discharge time series.
+        """
+        logging.info("Processing Danube discharge data for specified CMIP6 models...")
+        
+        all_discharge_data = {}
+        
+        for scenario, filepath in [('ssp245', filepath_ssp245), ('ssp585', filepath_ssp585)]:
+            if not os.path.exists(filepath):
+                logging.warning(f"Discharge file not found: {filepath}. Skipping scenario {scenario}.")
+                continue
+
+            try:
+                # Read the CSV with semicolon delimiter and comma as decimal separator
+                df = pd.read_csv(filepath, sep=';', decimal=',', na_values=['-0,01'])
+                
+                # The first column is the date, set it as the index
+                df = df.rename(columns={df.columns[0]: 'date'})
+                df['time'] = pd.to_datetime(df['date'])
+                df = df.set_index('time')
+                df = df.drop(columns=['date'])
+                
+                # Convert all data columns to numeric, coercing errors
+                for col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+
+                # Filter the columns to only include the models we need
+                for model_name in models_to_include:
+                    if model_name in df.columns:
+                        model_scenario_key = f"{model_name}_{scenario}"
+                        
+                        # Extract the series, drop NaNs, and convert to an xarray DataArray
+                        model_series = df[model_name].dropna()
+                        if not model_series.empty:
+                            da = model_series.to_xarray()
+                            da.name = 'discharge'
+                            da.attrs['units'] = 'm3/s'
+                            da.attrs['long_name'] = 'Danube River Discharge at Vienna'
+                            all_discharge_data[model_scenario_key] = da
+                            logging.info(f"Successfully processed discharge data for {model_scenario_key}")
+                            
+            except Exception as e:
+                logging.error(f"Error processing discharge file {filepath}: {e}")
+                logging.error(traceback.format_exc())
+
+        return all_discharge_data

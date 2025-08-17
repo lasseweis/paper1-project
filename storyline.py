@@ -196,8 +196,7 @@ class StorylineAnalyzer:
     def analyze_cmip6_changes_at_gwl(self, models_to_run=None):
         """The main workflow for analyzing CMIP6 data at specific GWLs."""
         logging.info("\n--- Starting CMIP6 Analysis at Global Warming Levels ---")
-        
-        # Use the explicit model-scenario dictionary from the config
+
         models_and_scenarios_to_load = self.config.REQUIRED_MODEL_SCENARIOS
         if not models_and_scenarios_to_load:
             logging.error("The REQUIRED_MODEL_SCENARIOS dictionary in config.py is empty. Aborting.")
@@ -206,19 +205,16 @@ class StorylineAnalyzer:
         logging.info(f"Explicitly processing {len(models_and_scenarios_to_load)} models based on the configuration file.")
         all_models_attempted = set(models_and_scenarios_to_load.keys())
 
-        # Step 1: Load data based on the provided dictionary
-        all_vars = self.config.CMIP6_VARIABLES_TO_LOAD + [self.config.CMIP6_GLOBAL_TAS_VAR]
+        # Step 1: Load data based on the provided dictionary (excluding discharge for now)
         model_data = {}
-        # Iterate through the models and their specific scenarios from the dictionary
         for model, scenarios_to_load in models_and_scenarios_to_load.items():
             for scenario in scenarios_to_load:
                 key = self.get_model_scenario_key(model, scenario)
                 model_data[key] = {}
                 
                 is_valid_model = True
-                for var in self.config.CMIP6_VARIABLES_TO_LOAD:
+                for var in ['ua', 'pr', 'tas']: # Discharge is loaded separately
                     force_regional = (var == 'tas')
-                    # Pass the specific scenarios for this model to the loading function
                     data = self._load_and_preprocess_model_data(model, [scenario], var, force_regional=force_regional)
                     if data is None:
                         logging.warning(f"Skipping model-scenario {key} due to missing regional variable: {var}")
@@ -231,7 +227,6 @@ class StorylineAnalyzer:
                     continue
 
                 global_tas_var = self.config.CMIP6_GLOBAL_TAS_VAR
-                # Pass the specific scenarios for this model to the loading function
                 data = self._load_and_preprocess_model_data(model, [scenario], global_tas_var, force_regional=False)
                 if data is None:
                     logging.warning(f"Skipping model-scenario {key} due to missing global variable: {global_tas_var}")
@@ -241,8 +236,24 @@ class StorylineAnalyzer:
                 model_data[key][f"{global_tas_var}_global"] = data
 
         if not model_data:
-            logging.error("No CMIP6 models were successfully loaded based on the provided list. Aborting analysis.")
+            logging.error("No CMIP6 models were successfully loaded. Aborting analysis.")
             return {}
+
+        # --- NEW: Step 1.5 - Load Danube Discharge Data ---
+        logging.info("\n--- Loading Danube Discharge Data ---")
+        models_with_data = {key.split('_')[0] for key in model_data.keys()}
+        discharge_data = self.data_processor.process_discharge_data(
+            self.config.DISCHARGE_SSP245_FILE,
+            self.config.DISCHARGE_SSP585_FILE,
+            list(models_with_data)
+        )
+        
+        # Add the loaded discharge data to the main model_data dictionary
+        for key, data in discharge_data.items():
+            if key in model_data:
+                model_data[key]['discharge'] = data
+            else:
+                logging.warning(f"Discharge data found for {key}, but no other variables were loaded. It will be ignored.")
             
         # Step 2: Calculate GWL threshold years
         gwl_thresholds = {}
@@ -269,6 +280,11 @@ class StorylineAnalyzer:
             pr_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['pr']))
             tas_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['tas']))
             
+            if 'discharge' in data and data['discharge'] is not None:
+                discharge_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['discharge']))
+            else:
+                discharge_seas = None
+
             pr_box = DataProcessor.calculate_spatial_mean(pr_seas, *box_coords)
             tas_box = DataProcessor.calculate_spatial_mean(tas_seas, *box_coords)
 
@@ -279,6 +295,8 @@ class StorylineAnalyzer:
                 metric_timeseries[key][f'{s_label}_JetLat'] = self.jet_analyzer.calculate_jet_lat_index(ua_season_data)
                 metric_timeseries[key][f'{s_label}_pr'] = DataProcessor.filter_by_season(pr_box, season)
                 metric_timeseries[key][f'{s_label}_tas'] = DataProcessor.filter_by_season(tas_box, season)
+                if discharge_seas is not None:
+                    metric_timeseries[key][f'{s_label}_discharge'] = DataProcessor.filter_by_season(discharge_seas, season)
 
         # Step 4: Calculate absolute metric values at historical reference and at each GWL
         metrics_list = list(metric_timeseries.get(next(iter(metric_timeseries)), {}).keys())
@@ -289,7 +307,7 @@ class StorylineAnalyzer:
 
         for key, ts_data in metric_timeseries.items():
             hist_means = {met: ts.sel(season_year=slice(hist_ref_start, hist_ref_end)).mean().item() for met, ts in ts_data.items() if ts is not None and ts.size > 0}
-            if len(hist_means) == len(metrics_list):
+            if len(hist_means) > 0: # Check if at least some metrics were calculated
                 model_abs_means_at_hist_ref[key] = hist_means
 
             if key in gwl_thresholds:
@@ -297,13 +315,13 @@ class StorylineAnalyzer:
                     'gwl': {
                         gwl: {
                             met: self._extract_gwl_means(ts_data.get(met), gwl_thresholds[key], gwl).item()
-                            for met in metrics_list
+                            for met in metrics_list if ts_data.get(met) is not None
                         }
                         for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT
                     }
                 }
         
-        # Step 5: Calculate deltas and MMM changes
+        # Step 5: Calculate deltas (changes) and MMM changes
         all_deltas = {met: {gwl: {} for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT} for met in metrics_list}
         for key in model_abs_means_at_gwl:
             if key in model_abs_means_at_hist_ref:
@@ -313,7 +331,8 @@ class StorylineAnalyzer:
                         gwl_val = model_abs_means_at_gwl[key]['gwl'][gwl].get(met)
                         if hist_val is not None and gwl_val is not None and not np.isnan(hist_val) and not np.isnan(gwl_val):
                             delta = gwl_val - hist_val
-                            if '_pr' in met and abs(hist_val) > 1e-9:
+                            # For precipitation and discharge, calculate percentage change
+                            if ('_pr' in met or '_discharge' in met) and abs(hist_val) > 1e-9:
                                 delta = (delta / hist_val) * 100.0
                             all_deltas[met][gwl][key] = delta
 
@@ -342,12 +361,7 @@ class StorylineAnalyzer:
             'failed_models': final_failed_models
         }
 
-        # --- Classify models into storylines (two methods) ---
-        # Method 1: Original 1D classification for GWL plot
-        storyline_classification_1d = self.classify_models_into_storylines(
-            all_deltas, self.config.STORYLINE_JET_CHANGES
-        )
-        # Method 2: New 2D classification for scatter plots
+        # Classify models into storylines
         storyline_classification_2d = self.classify_models_into_storylines_2d(
             all_deltas,
             self.config.STORYLINE_JET_CHANGES_2D,
@@ -363,7 +377,6 @@ class StorylineAnalyzer:
             'all_individual_model_deltas_for_plot': all_deltas,
             'mmm_changes': mmm_changes,
             'model_run_status': model_run_status,
-            'storyline_classification': storyline_classification_1d, 
             'storyline_classification_2d': storyline_classification_2d
         }
 

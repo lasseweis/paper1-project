@@ -34,6 +34,11 @@ class Config:
     # Index and discharge data paths
     AMO_INDEX_FILE = '/nas/home/vlw/Desktop/STREAM/CMIP6-datasets/amo_index.csv'
     DISCHARGE_FILE = os.path.join(DATA_BASE_PATH, 'danube_discharge_monthly_1893-2021.xlsx')
+    
+    # Danube CMIP6 Discharge Data Paths ---
+    DISCHARGE_SSP245_FILE = os.path.join(DATA_BASE_PATH, 'CP16_4.5-Tabelle_1.csv')
+    DISCHARGE_SSP585_FILE = os.path.join(DATA_BASE_PATH, 'CP16_8.5-Tabelle_1.csv')
+
 
     # Plot output directory
     PLOT_DIR = '/nas/home/vlw/Desktop/STREAM/paper1-plots'
@@ -62,7 +67,7 @@ class Config:
     CMIP6_SCENARIOS = ['ssp585', 'ssp245']
     CMIP6_HISTORICAL_EXPERIMENT_NAME = 'historical'
     CMIP6_MEMBER_ID = '*'
-    CMIP6_VARIABLES_TO_LOAD = ['ua', 'pr', 'tas']
+    CMIP6_VARIABLES_TO_LOAD = ['ua', 'pr', 'tas', 'discharge']
     CMIP6_GLOBAL_TAS_VAR = 'tas'
     CMIP6_LEVEL = 850  # For U850
 

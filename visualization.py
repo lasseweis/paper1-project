@@ -1974,121 +1974,117 @@ class Visualizer:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved vertical storyline impacts summary plot to {filename}")
-        
+            
     @staticmethod
-    def plot_storyline_impacts_summary(final_impacts, config):
+    def plot_storyline_impact_barchart_with_discharge(final_impacts, discharge_impacts, config):
         """
-        Generates a summary bar plot of storyline impacts for multiple variables.
-        
-        This function creates a multi-panel plot, with each panel representing an
-        impact variable (e.g., Precipitation, Temperature, Discharge). It shows
-        the calculated change for each 2D storyline, grouped by season and
-        Global Warming Level (GWL).
+        Creates a 3x2 vertical bar chart to visualize storyline impacts for Temp, Precip, and Discharge.
+        Uses multivariate results for Temp/Precip and direct calculation for Discharge.
+        """
+        logging.info("Plotting final storyline impacts (including discharge) as a 3x2 bar chart...")
+        Visualizer.ensure_plot_dir_exists()
 
-        Args:
-            final_impacts (dict): The dictionary of calculated storyline impacts,
-                                  as returned by StorylineAnalyzer.calculate_storyline_impacts.
-            config (Config): The project's configuration object.
-        """
-        logging.info("Creating the final storyline impacts summary plot...")
-        
         if not final_impacts:
-            logging.warning("Cannot create summary plot: 'final_impacts' data is empty.")
+            logging.warning("Cannot plot impacts: Input data is empty.")
             return
 
-        # --- 1. Data Preparation ---
-        # Convert the nested dictionary into a flat pandas DataFrame for easier plotting.
-        plot_data = []
-        for gwl_float, impacts_by_var in final_impacts.items():
-            gwl_str = f'+{gwl_float}°C GWL'
-            for impact_key, impacts_by_storyline in impacts_by_var.items():
-                season, var_name = impact_key.split('_', 1)
-                for storyline, values in impacts_by_storyline.items():
-                    # Abbreviate long storyline names for better plot readability
-                    short_storyline = storyline.replace('Shift', '').replace('Northward', 'N').replace('Southward', 'S')
-                    plot_data.append({
-                        'GWL': gwl_str,
-                        'Season': season,
-                        'Variable': var_name.capitalize(),
-                        'Storyline': short_storyline,
-                        'Impact': values['total'],
-                        'MMM Component': values['mmm_comp'],
-                        'Jet Adjustment': values['jet_adj']
-                    })
-        
-        if not plot_data:
-            logging.warning("Data processing for summary plot resulted in no data points.")
-            return
-            
-        df_plot = pd.DataFrame(plot_data)
-        
-        # Define the order of storylines for a logical x-axis layout
-        storyline_order = [
-            'Core Mean (MMM)',
-            'Slow Jet & N ',
-            'Fast Jet & N ',
-            'Slow Jet & S ',
-            'Fast Jet & S '
-        ]
-        df_plot['Storyline'] = pd.Categorical(df_plot['Storyline'], categories=storyline_order, ordered=True)
-        df_plot = df_plot.sort_values('Storyline')
+        # --- 1. Setup & Data Combination ---
+        plt.style.use('seaborn-v0_8-whitegrid')
+        fig, axs = plt.subplots(3, 2, figsize=(16, 18)) # Changed to 3x2 grid
 
-        # --- 2. Plotting Setup ---
-        variables = df_plot['Variable'].unique()
-        n_vars = len(variables)
+        gwls_to_plot = config.GLOBAL_WARMING_LEVELS
+        gwl_colors = {gwls_to_plot[0]: '#4575b4', gwls_to_plot[1]: '#d73027'}
+
+        # Combine the original impacts with the new direct discharge impacts
+        all_impacts = final_impacts.copy()
+        for gwl, discharge_data in discharge_impacts.items():
+            if gwl not in all_impacts:
+                all_impacts[gwl] = {}
+            all_impacts[gwl].update(discharge_data)
+
+        # Define the new 3x2 plot grid
+        plot_grid = {
+            (0, 0): {'key': 'DJF_tas', 'title': 'a) Winter (DJF) Temperature'},
+            (0, 1): {'key': 'JJA_tas', 'title': 'b) Summer (JJA) Temperature'},
+            (1, 0): {'key': 'DJF_pr', 'title': 'c) Winter (DJF) Precipitation'},
+            (1, 1): {'key': 'JJA_pr', 'title': 'd) Summer (JJA) Precipitation'},
+            (2, 0): {'key': 'DJF_discharge', 'title': 'e) Winter (DJF) Discharge'},
+            (2, 1): {'key': 'JJA_discharge', 'title': 'f) Summer (JJA) Discharge'}
+        }
+
+        # --- 2. Plotting Loop ---
+        for (row, col), plot_info in plot_grid.items():
+            ax = axs[row, col]
+            impact_key = plot_info['key']
+            season = impact_key.split('_')[0]
+            
+            storyline_names_ordered = list(config.STORYLINE_JET_CHANGES_2D.get(season, {}).get(gwls_to_plot[0], {}).keys())
+            
+            plot_data = {}
+            for gwl in gwls_to_plot:
+                impacts = []
+                for name in storyline_names_ordered:
+                    total_impact = all_impacts.get(gwl, {}).get(impact_key, {}).get(name, {}).get('total', np.nan)
+                    impacts.append(total_impact)
+                plot_data[gwl] = impacts
+            
+            df = pd.DataFrame(plot_data, index=storyline_names_ordered)
+
+            x_pos = np.arange(len(storyline_names_ordered))
+            bar_width = 0.35
+            
+            rects1 = ax.bar(x_pos - bar_width/2, df[gwls_to_plot[0]], bar_width, 
+                            label=f'+{gwls_to_plot[0]}°C GWL', color=gwl_colors[gwls_to_plot[0]], zorder=10)
+            rects2 = ax.bar(x_pos + bar_width/2, df[gwls_to_plot[1]], bar_width, 
+                            label=f'+{gwls_to_plot[1]}°C GWL', color=gwl_colors[gwls_to_plot[1]], zorder=10)
+
+            # --- 3. Subplot Formatting ---
+            ax.set_title(plot_info['title'], loc='left', fontsize=14, weight='bold')
+            ax.axhline(0, color='black', linestyle='-', linewidth=0.8, zorder=1)
+            
+            unit = '(°C)' if 'tas' in impact_key else '(%)'
+            if col == 0:
+                ax.set_ylabel(f'Projected Change {unit}', fontsize=12)
+
+            ax.set_xticks(x_pos)
+            ax.set_xticklabels([name.replace(' & ', ' &\n').replace(' (MMM)','') for name in storyline_names_ordered], 
+                            rotation=45, ha="right", fontsize=11)
+            
+            if row < 2: # Hide x-labels for top and middle rows
+                ax.set_xticklabels([])
+
+            for rects in [rects1, rects2]:
+                for rect in rects:
+                    height = rect.get_height()
+                    if np.isnan(height): continue
+                    offset = (ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.02
+                    text_pos = height + offset if height >= 0 else height - offset
+                    va = 'bottom' if height >= 0 else 'top'
+                    ax.annotate(f'{height:.2f}',
+                                xy=(rect.get_x() + rect.get_width() / 2, text_pos),
+                                ha='center', va=va, fontsize=9)
+            
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            
+            # Set shared y-axis limits for Precip and Discharge
+            if 'tas' not in impact_key:
+                ymin = min(df.min().min() for df in [df[gwls_to_plot[0]], df[gwls_to_plot[1]]])
+                ymax = max(df.max().max() for df in [df[gwls_to_plot[0]], df[gwls_to_plot[1]]])
+                ax.set_ylim(ymin * 1.15, ymax * 1.15)
+
+
+        # --- 4. Final Figure Formatting ---
+        handles, labels = axs[0, 0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=2, fontsize=12, frameon=False)
         
-        # Use a color palette that distinguishes seasons clearly
-        season_palette = {'DJF': '#1f77b4', 'JJA': '#d62728'} 
+        main_title = "Projected Climate & Discharge Impacts for Jet Stream Storylines"
+        fig.suptitle(main_title, fontsize=16, weight='bold', y=0.99)
         
-        fig, axes = plt.subplots(n_vars, 1, figsize=(14, 6 * n_vars), sharex=True, squeeze=False)
-        axes = axes.flatten()
-
-        # Define y-axis labels and units for each variable
-        units = {'Pr': '%', 'Tas': '°C', 'Discharge': '%'}
-
-        # --- 3. Generate Subplots for Each Variable ---
-        for i, var in enumerate(variables):
-            ax = axes[i]
-            data_subset = df_plot[df_plot['Variable'] == var]
-            
-            sns.barplot(
-                data=data_subset,
-                x='Storyline',
-                y='Impact',
-                hue='Season',
-                palette=season_palette,
-                ax=ax
-            )
-            
-            # Add horizontal line at y=0
-            ax.axhline(0, color='black', linewidth=0.8, linestyle='--')
-            
-            # Set titles and labels
-            unit = units.get(var, '')
-            ax.set_ylabel(f'Change in {var} ({unit})')
-            ax.set_title(f'Storyline Impacts on Mean {var}', fontsize=14, weight='bold')
-            ax.grid(axis='y', linestyle=':', alpha=0.7)
-            
-            # Clean up the legend (only show it on the top plot)
-            if i == 0:
-                ax.legend(title='Season', frameon=False)
-            else:
-                ax.get_legend().remove()
-            
-            ax.set_xlabel('') # Remove individual x-labels
-
-        # --- 4. Final Touches and Saving ---
-        plt.xlabel('Storyline Definition', fontsize=12)
-        plt.xticks(rotation=45, ha='right') # Rotate labels for readability
-        fig.suptitle('Storyline-Dependent Impacts on Climate and Discharge', fontsize=18, y=1.02)
+        fig.tight_layout(rect=[0, 0.05, 1, 0.96])
         
-        plt.tight_layout(rect=[0, 0, 1, 1]) # Adjust layout to prevent title overlap
-
-        # Save the figure
-        try:
-            filename = os.path.join(config.PLOT_DIR, 'storyline_impacts_summary_vertical.png')
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
-            plt.close(fig)
-            logging.info(f"Successfully saved storyline impacts summary plot to {filename}")
-        except Exception as e:
-            logging.error(f"Failed to save the summary plot: {e}")
+        # Save with a new, descriptive filename
+        filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_3x2.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved 3x2 storyline impacts summary plot to {filename}")

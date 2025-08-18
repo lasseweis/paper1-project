@@ -534,11 +534,10 @@ class ClimateAnalysis:
                 dataset_key=Config.DATASET_ERA5
             )
 
-            # Step 2: Calculate the final storyline impacts for Temp and Precip using these betas
-            if beta_obs_slopes:
+            # Step 2: Calculate the final storyline impacts for Temp and Precip by averaging classified models
+            if cmip6_results: # We only need the cmip6_results now
                 final_impacts_pr_tas = storyline_analyzer.calculate_storyline_impacts(
-                    cmip6_results=cmip6_results,
-                    beta_obs_slopes=beta_obs_slopes
+                    cmip6_results=cmip6_results
                 )
                 
                 # Step 2.5: Calculate direct storyline impacts for Discharge

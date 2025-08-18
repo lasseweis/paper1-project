@@ -194,297 +194,255 @@ class StorylineAnalyzer:
         return gwl_slice.mean(dim='season_year', skipna=True).compute()
 
     def analyze_cmip6_changes_at_gwl(self, models_to_run=None):
-        """The main workflow for analyzing CMIP6 data at specific GWLs."""
-        logging.info("\n--- Starting CMIP6 Analysis at Global Warming Levels ---")
+            """The main workflow for analyzing CMIP6 data at specific GWLs."""
+            logging.info("\n--- Starting CMIP6 Analysis at Global Warming Levels ---")
 
-        models_and_scenarios_to_load = self.config.REQUIRED_MODEL_SCENARIOS
-        if not models_and_scenarios_to_load:
-            logging.error("The REQUIRED_MODEL_SCENARIOS dictionary in config.py is empty. Aborting.")
-            return {}
+            models_and_scenarios_to_load = self.config.REQUIRED_MODEL_SCENARIOS
+            if not models_and_scenarios_to_load:
+                logging.error("The REQUIRED_MODEL_SCENARIOS dictionary in config.py is empty. Aborting.")
+                return {}
 
-        logging.info(f"Explicitly processing {len(models_and_scenarios_to_load)} models based on the configuration file.")
-        all_models_attempted = set(models_and_scenarios_to_load.keys())
+            logging.info(f"Explicitly processing {len(models_and_scenarios_to_load)} models based on the configuration file.")
+            all_models_attempted = set(models_and_scenarios_to_load.keys())
 
-        # Step 1: Load data based on the provided dictionary (excluding discharge for now)
-        model_data = {}
-        for model, scenarios_to_load in models_and_scenarios_to_load.items():
-            for scenario in scenarios_to_load:
-                key = self.get_model_scenario_key(model, scenario)
-                model_data[key] = {}
-                
-                is_valid_model = True
-                for var in ['ua', 'pr', 'tas']: # Discharge is loaded separately
-                    force_regional = (var == 'tas')
-                    data = self._load_and_preprocess_model_data(model, [scenario], var, force_regional=force_regional)
+            # Step 1: Load data based on the provided dictionary (excluding discharge for now)
+            model_data = {}
+            for model, scenarios_to_load in models_and_scenarios_to_load.items():
+                for scenario in scenarios_to_load:
+                    key = self.get_model_scenario_key(model, scenario)
+                    model_data[key] = {}
+                    
+                    is_valid_model = True
+                    for var in ['ua', 'pr', 'tas']: # Discharge is loaded separately
+                        force_regional = (var == 'tas')
+                        data = self._load_and_preprocess_model_data(model, [scenario], var, force_regional=force_regional)
+                        if data is None:
+                            logging.warning(f"Skipping model-scenario {key} due to missing regional variable: {var}")
+                            is_valid_model = False
+                            break
+                        model_data[key][var] = data
+                    
+                    if not is_valid_model:
+                        model_data.pop(key, None)
+                        continue
+
+                    global_tas_var = self.config.CMIP6_GLOBAL_TAS_VAR
+                    data = self._load_and_preprocess_model_data(model, [scenario], global_tas_var, force_regional=False)
                     if data is None:
-                        logging.warning(f"Skipping model-scenario {key} due to missing regional variable: {var}")
-                        is_valid_model = False
-                        break
-                    model_data[key][var] = data
-                
-                if not is_valid_model:
-                    model_data.pop(key, None)
-                    continue
+                        logging.warning(f"Skipping model-scenario {key} due to missing global variable: {global_tas_var}")
+                        model_data.pop(key, None)
+                        continue
+                    
+                    model_data[key][f"{global_tas_var}_global"] = data
 
-                global_tas_var = self.config.CMIP6_GLOBAL_TAS_VAR
-                data = self._load_and_preprocess_model_data(model, [scenario], global_tas_var, force_regional=False)
-                if data is None:
-                    logging.warning(f"Skipping model-scenario {key} due to missing global variable: {global_tas_var}")
-                    model_data.pop(key, None)
-                    continue
-                
-                model_data[key][f"{global_tas_var}_global"] = data
+            if not model_data:
+                logging.error("No CMIP6 models were successfully loaded. Aborting analysis.")
+                return {}
 
-        if not model_data:
-            logging.error("No CMIP6 models were successfully loaded. Aborting analysis.")
-            return {}
-
-        # --- NEW: Step 1.5 - Load Danube Discharge Data ---
-        logging.info("\n--- Loading Danube Discharge Data ---")
-        models_with_data = {key.split('_')[0] for key in model_data.keys()}
-        discharge_data = self.data_processor.process_discharge_data(
-            self.config.DISCHARGE_SSP245_FILE,
-            self.config.DISCHARGE_SSP585_FILE,
-            list(models_with_data)
-        )
-        
-        # Add the loaded discharge data to the main model_data dictionary
-        for key, data in discharge_data.items():
-            if key in model_data:
-                model_data[key]['discharge'] = data
-            else:
-                logging.warning(f"Discharge data found for {key}, but no other variables were loaded. It will be ignored.")
+            # --- NEW: Step 1.5 - Load Danube Discharge Data ---
+            logging.info("\n--- Loading Danube Discharge Data ---")
+            models_with_data = {key.split('_')[0] for key in model_data.keys()}
+            discharge_data = self.data_processor.process_discharge_data(
+                self.config.DISCHARGE_SSP245_FILE,
+                self.config.DISCHARGE_SSP585_FILE,
+                list(models_with_data)
+            )
             
-        # Step 2: Calculate GWL threshold years
-        gwl_thresholds = {}
-        for key, data in model_data.items():
-            global_tas_key = f"{self.config.CMIP6_GLOBAL_TAS_VAR}_global"
-            if global_tas_key in data and data[global_tas_key] is not None:
-                thresholds = self.calculate_gwl_thresholds(
-                    data[global_tas_key],
-                    (self.config.CMIP6_PRE_INDUSTRIAL_REF_START, self.config.CMIP6_PRE_INDUSTRIAL_REF_END),
-                    self.config.GWL_TEMP_SMOOTHING_WINDOW,
-                    self.config.GWL_FINE_STEPS_FOR_PLOT
-                )
-                if thresholds:
-                    gwl_thresholds[key] = thresholds
-            else:
-                logging.warning(f"Global TAS variable '{global_tas_key}' not found for {key}. Cannot calculate GWL thresholds.")
+            # Add the loaded discharge data to the main model_data dictionary
+            for key, data in discharge_data.items():
+                if key in model_data:
+                    model_data[key]['discharge'] = data
+                else:
+                    logging.warning(f"Discharge data found for {key}, but no other variables were loaded. It will be ignored.")
+                
+            # Step 2: Calculate GWL threshold years
+            gwl_thresholds = {}
+            for key, data in model_data.items():
+                global_tas_key = f"{self.config.CMIP6_GLOBAL_TAS_VAR}_global"
+                if global_tas_key in data and data[global_tas_key] is not None:
+                    thresholds = self.calculate_gwl_thresholds(
+                        data[global_tas_key],
+                        (self.config.CMIP6_PRE_INDUSTRIAL_REF_START, self.config.CMIP6_PRE_INDUSTRIAL_REF_END),
+                        self.config.GWL_TEMP_SMOOTHING_WINDOW,
+                        self.config.GWL_FINE_STEPS_FOR_PLOT
+                    )
+                    if thresholds:
+                        gwl_thresholds[key] = thresholds
+                else:
+                    logging.warning(f"Global TAS variable '{global_tas_key}' not found for {key}. Cannot calculate GWL thresholds.")
 
-        # Step 3: Calculate time series of all metrics
-        metric_timeseries = {}
-        box_coords = (self.config.BOX_LAT_MIN, self.config.BOX_LAT_MAX, self.config.BOX_LON_MIN, self.config.BOX_LON_MAX)
-        for key, data in model_data.items():
-            metric_timeseries[key] = {}
-            ua_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['ua']))
-            pr_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['pr']))
-            tas_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['tas']))
+            # Step 3: Calculate time series of all metrics
+            metric_timeseries = {}
+            box_coords = (self.config.BOX_LAT_MIN, self.config.BOX_LAT_MAX, self.config.BOX_LON_MIN, self.config.BOX_LON_MAX)
+            for key, data in model_data.items():
+                metric_timeseries[key] = {}
+                ua_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['ua']))
+                pr_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['pr']))
+                tas_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['tas']))
+                
+                if 'discharge' in data and data['discharge'] is not None:
+                    discharge_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['discharge']))
+                else:
+                    discharge_seas = None
+
+                pr_box = DataProcessor.calculate_spatial_mean(pr_seas, *box_coords)
+                tas_box = DataProcessor.calculate_spatial_mean(tas_seas, *box_coords)
+
+                for season in ['Winter', 'Summer']:
+                    ua_season_data = DataProcessor.filter_by_season(ua_seas, season)
+                    s_label = 'DJF' if season == 'Winter' else 'JJA'
+                    metric_timeseries[key][f'{s_label}_JetSpeed'] = self.jet_analyzer.calculate_jet_speed_index(ua_season_data)
+                    metric_timeseries[key][f'{s_label}_JetLat'] = self.jet_analyzer.calculate_jet_lat_index(ua_season_data)
+                    metric_timeseries[key][f'{s_label}_pr'] = DataProcessor.filter_by_season(pr_box, season)
+                    metric_timeseries[key][f'{s_label}_tas'] = DataProcessor.filter_by_season(tas_box, season)
+                    if discharge_seas is not None:
+                        metric_timeseries[key][f'{s_label}_discharge'] = DataProcessor.filter_by_season(discharge_seas, season)
+
+            # Step 4: Calculate absolute metric values at historical reference and at each GWL
+            metrics_list = list(metric_timeseries.get(next(iter(metric_timeseries)), {}).keys())
+            hist_ref_start, hist_ref_end = self.config.CMIP6_ANOMALY_REF_START, self.config.CMIP6_ANOMALY_REF_END
             
-            if 'discharge' in data and data['discharge'] is not None:
-                discharge_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['discharge']))
-            else:
-                discharge_seas = None
+            model_abs_means_at_gwl = {}
+            model_abs_means_at_hist_ref = {}
 
-            pr_box = DataProcessor.calculate_spatial_mean(pr_seas, *box_coords)
-            tas_box = DataProcessor.calculate_spatial_mean(tas_seas, *box_coords)
+            for key, ts_data in metric_timeseries.items():
+                hist_means = {met: ts.sel(season_year=slice(hist_ref_start, hist_ref_end)).mean().item() for met, ts in ts_data.items() if ts is not None and ts.size > 0}
+                if len(hist_means) > 0: # Check if at least some metrics were calculated
+                    model_abs_means_at_hist_ref[key] = hist_means
 
-            for season in ['Winter', 'Summer']:
-                ua_season_data = DataProcessor.filter_by_season(ua_seas, season)
-                s_label = 'DJF' if season == 'Winter' else 'JJA'
-                metric_timeseries[key][f'{s_label}_JetSpeed'] = self.jet_analyzer.calculate_jet_speed_index(ua_season_data)
-                metric_timeseries[key][f'{s_label}_JetLat'] = self.jet_analyzer.calculate_jet_lat_index(ua_season_data)
-                metric_timeseries[key][f'{s_label}_pr'] = DataProcessor.filter_by_season(pr_box, season)
-                metric_timeseries[key][f'{s_label}_tas'] = DataProcessor.filter_by_season(tas_box, season)
-                if discharge_seas is not None:
-                    metric_timeseries[key][f'{s_label}_discharge'] = DataProcessor.filter_by_season(discharge_seas, season)
-
-        # Step 4: Calculate absolute metric values at historical reference and at each GWL
-        metrics_list = list(metric_timeseries.get(next(iter(metric_timeseries)), {}).keys())
-        hist_ref_start, hist_ref_end = self.config.CMIP6_ANOMALY_REF_START, self.config.CMIP6_ANOMALY_REF_END
-        
-        model_abs_means_at_gwl = {}
-        model_abs_means_at_hist_ref = {}
-
-        for key, ts_data in metric_timeseries.items():
-            hist_means = {met: ts.sel(season_year=slice(hist_ref_start, hist_ref_end)).mean().item() for met, ts in ts_data.items() if ts is not None and ts.size > 0}
-            if len(hist_means) > 0: # Check if at least some metrics were calculated
-                model_abs_means_at_hist_ref[key] = hist_means
-
-            if key in gwl_thresholds:
-                model_abs_means_at_gwl[key] = {
-                    'gwl': {
-                        gwl: {
-                            met: self._extract_gwl_means(ts_data.get(met), gwl_thresholds[key], gwl).item()
-                            for met in metrics_list if ts_data.get(met) is not None
+                if key in gwl_thresholds:
+                    model_abs_means_at_gwl[key] = {
+                        'gwl': {
+                            gwl: {
+                                met: self._extract_gwl_means(ts_data.get(met), gwl_thresholds[key], gwl).item()
+                                for met in metrics_list if ts_data.get(met) is not None
+                            }
+                            for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT
                         }
-                        for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT
                     }
+            
+            # Step 5: Calculate deltas (changes) and MMM changes
+            all_deltas = {met: {gwl: {} for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT} for met in metrics_list}
+            for key in model_abs_means_at_gwl:
+                if key in model_abs_means_at_hist_ref:
+                    for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT:
+                        for met in metrics_list:
+                            hist_val = model_abs_means_at_hist_ref[key].get(met)
+                            gwl_val = model_abs_means_at_gwl[key]['gwl'][gwl].get(met)
+                            if hist_val is not None and gwl_val is not None and not np.isnan(hist_val) and not np.isnan(gwl_val):
+                                delta = gwl_val - hist_val
+                                # For precipitation and discharge, calculate percentage change
+                                if ('_pr' in met or '_discharge' in met) and abs(hist_val) > 1e-9:
+                                    delta = (delta / hist_val) * 100.0
+                                all_deltas[met][gwl][key] = delta
+
+            mmm_changes = {
+                gwl: {
+                    met: np.mean(list(all_deltas[met][gwl].values())) if all_deltas[met][gwl] else np.nan
+                    for met in metrics_list
                 }
-        
-        # Step 5: Calculate deltas (changes) and MMM changes
-        all_deltas = {met: {gwl: {} for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT} for met in metrics_list}
-        for key in model_abs_means_at_gwl:
-            if key in model_abs_means_at_hist_ref:
-                for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT:
-                    for met in metrics_list:
-                        hist_val = model_abs_means_at_hist_ref[key].get(met)
-                        gwl_val = model_abs_means_at_gwl[key]['gwl'][gwl].get(met)
-                        if hist_val is not None and gwl_val is not None and not np.isnan(hist_val) and not np.isnan(gwl_val):
-                            delta = gwl_val - hist_val
-                            # For precipitation and discharge, calculate percentage change
-                            if ('_pr' in met or '_discharge' in met) and abs(hist_val) > 1e-9:
-                                delta = (delta / hist_val) * 100.0
-                            all_deltas[met][gwl][key] = delta
-
-        mmm_changes = {
-            gwl: {
-                met: np.mean(list(all_deltas[met][gwl].values())) if all_deltas[met][gwl] else np.nan
-                for met in metrics_list
+                for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT
             }
-            for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT
-        }
-        
-        ### DEBUG ###
-        logging.info("--- DEBUG: CHECKING MMM_CHANGES ---")
-        for gwl in self.config.GLOBAL_WARMING_LEVELS:
-            if gwl in mmm_changes:
-                pr_djf = mmm_changes[gwl].get('DJF_pr', 'N/A')
-                pr_jja = mmm_changes[gwl].get('JJA_pr', 'N/A')
-                logging.info(f"  GWL {gwl}°C -> DJF_pr: {pr_djf}, JJA_pr: {pr_jja}")
-        logging.info("--- END DEBUG ---")
-        
-        # Create model run summary
-        models_per_gwl = {}
-        all_models_in_deltas = set()
-        if metrics_list:
-            primary_metric_data = all_deltas.get(metrics_list[0], {})
-            for gwl, model_deltas in primary_metric_data.items():
-                model_names = {key.split('_')[0] for key in model_deltas.keys()}
-                models_per_gwl[gwl] = sorted(list(model_names))
-                all_models_in_deltas.update(model_names)
+            
+            ### DEBUG ###
+            logging.info("--- DEBUG: CHECKING MMM_CHANGES ---")
+            for gwl in self.config.GLOBAL_WARMING_LEVELS:
+                if gwl in mmm_changes:
+                    pr_djf = mmm_changes[gwl].get('DJF_pr', 'N/A')
+                    pr_jja = mmm_changes[gwl].get('JJA_pr', 'N/A')
+                    logging.info(f"  GWL {gwl}°C -> DJF_pr: {pr_djf}, JJA_pr: {pr_jja}")
+            logging.info("--- END DEBUG ---")
+            
+            # Create model run summary
+            models_per_gwl = {}
+            all_models_in_deltas = set()
+            if metrics_list:
+                primary_metric_data = all_deltas.get(metrics_list[0], {})
+                for gwl, model_deltas in primary_metric_data.items():
+                    model_names = {key.split('_')[0] for key in model_deltas.keys()}
+                    models_per_gwl[gwl] = sorted(list(model_names))
+                    all_models_in_deltas.update(model_names)
 
-        final_failed_models = sorted(list(all_models_attempted - all_models_in_deltas))
-        
-        model_run_status = {
-            'successful_models_per_gwl': models_per_gwl,
-            'failed_models': final_failed_models
-        }
+            final_failed_models = sorted(list(all_models_attempted - all_models_in_deltas))
+            
+            model_run_status = {
+                'successful_models_per_gwl': models_per_gwl,
+                'failed_models': final_failed_models
+            }
 
-        # Classify models into storylines
-        storyline_classification_2d = self.classify_models_into_storylines_2d(
-            all_deltas,
-            self.config.STORYLINE_JET_CHANGES_2D,
-            self.config.STORYLINE_RADIUS
-        )
+            # Classify models into storylines using the quadrant method
+            storyline_classification_2d = self.classify_models_by_quadrant(
+                all_deltas,
+                self.config.STORYLINE_JET_CHANGES_2D,
+                self.config.STORYLINE_INNER_RADIUS # Use the new inner radius parameter
+            )
 
-        return {
-            'gwl_threshold_years': gwl_thresholds,
-            'cmip6_model_data_loaded': model_data,
-            'model_metric_timeseries': metric_timeseries,
-            'model_data_at_hist_reference': model_abs_means_at_hist_ref,
-            'model_data_at_gwl': model_abs_means_at_gwl,
-            'all_individual_model_deltas_for_plot': all_deltas,
-            'mmm_changes': mmm_changes,
-            'model_run_status': model_run_status,
-            'storyline_classification_2d': storyline_classification_2d
-        }
+            return {
+                'gwl_threshold_years': gwl_thresholds,
+                'cmip6_model_data_loaded': model_data,
+                'model_metric_timeseries': metric_timeseries,
+                'model_data_at_hist_reference': model_abs_means_at_hist_ref,
+                'model_data_at_gwl': model_abs_means_at_gwl,
+                'all_individual_model_deltas_for_plot': all_deltas,
+                'mmm_changes': mmm_changes,
+                'model_run_status': model_run_status,
+                'storyline_classification_2d': storyline_classification_2d
+            }
 
-    def calculate_storyline_impacts(self, cmip6_results, beta_obs_slopes):
+    @staticmethod
+    def calculate_storyline_impacts(cmip6_results):
         """
-        Calculates the final impact changes for each defined 2D storyline using
-        a multivariate approach.
-
-        This method applies the pre-calculated multivariate sensitivities (betas)
-        to the projected CMIP6 changes for each storyline.
-
-        The formula used is:
-        Impact_Storyline = Impact_MMM + 
-                           β_speed * (ΔSpeed_Storyline - ΔSpeed_MMM) + 
-                           β_lat * (ΔLat_Storyline - ΔLat_MMM)
-
-        Parameters:
-        -----------
-        cmip6_results : dict
-            The main CMIP6 analysis results, containing MMM changes and storyline definitions.
-        beta_obs_slopes : dict
-            A dictionary with the multivariate regression coefficients (betas) derived
-            from reanalysis data. Expected format: 
-            {'DJF_pr': {'speed': beta_val, 'lat': beta_val}, ...}
-
-        Returns:
-        --------
-        dict
-            A nested dictionary with the final storyline impacts and their components.
-            Format: {gwl: {impact_variable: {storyline_type: {'total': value, 'mmm_comp': value, 'jet_adj': value}}}}
+        Calculates the final impact changes for each defined 2D storyline by
+        averaging the impact changes of all models classified within that storyline.
+        This approach is consistent with the direct impact calculation for discharge.
         """
-        logging.info("\n--- Calculating Final Storyline Impacts (Multivariate Approach) ---")
+        logging.info("\n--- Calculating Final Storyline Impacts (by averaging classified models) ---")
         
-        if 'mmm_changes' not in cmip6_results or not beta_obs_slopes:
-            logging.error("Cannot calculate storyline impacts: Missing MMM changes or beta_obs slopes.")
+        classification = cmip6_results.get('storyline_classification_2d')
+        all_deltas = cmip6_results.get('all_individual_model_deltas_for_plot')
+        gwls = Config.GLOBAL_WARMING_LEVELS
+
+        if not classification or not all_deltas:
+            logging.error("Cannot calculate storyline impacts: Missing model classification or delta values.")
             return None
 
-        storyline_defs_2d = self.config.STORYLINE_JET_CHANGES_2D
-        mmm_changes = cmip6_results['mmm_changes']
-        final_storyline_impacts = {gwl: {} for gwl in self.config.GLOBAL_WARMING_LEVELS}
+        final_impacts = {gwl: {} for gwl in gwls}
+        impact_vars_to_process = ['tas', 'pr']
 
-        impact_map = {'DJF': ['pr', 'tas'], 'JJA': ['pr', 'tas']}
-
-        for gwl in self.config.GLOBAL_WARMING_LEVELS:
-            if mmm_changes.get(gwl) is None:
-                logging.warning(f"No MMM data for GWL {gwl}°C. Skipping impact calculation.")
-                continue
-            
+        for gwl in gwls:
             logging.info(f"\n  Processing Impacts for GWL +{gwl}°C...")
+            
+            # Initialisiere die Dictionaries für diese GWL-Stufe
+            for season in ['DJF', 'JJA']:
+                for var in impact_vars_to_process:
+                    final_impacts[gwl][f'{season}_{var}'] = {}
 
-            for season, impact_vars in impact_map.items():
-                delta_speed_mmm = mmm_changes[gwl].get(f'{season}_JetSpeed')
-                delta_lat_mmm = mmm_changes[gwl].get(f'{season}_JetLat')
-
-                for var in impact_vars:
+            # Gehe durch die klassifizierten Storylines für diese GWL-Stufe
+            for storyline_key, model_list in classification.get(gwl, {}).items():
+                if not model_list:
+                    continue # Überspringe leere Storylines
+                
+                season = 'DJF' if 'DJF' in storyline_key else 'JJA'
+                storyline_name = storyline_key.replace(f'{season}_', '')
+                
+                # Berechne die mittleren Auswirkungen für jede Variable
+                for var in impact_vars_to_process:
                     impact_key = f'{season}_{var}'
-                    final_storyline_impacts[gwl][impact_key] = {}
-
-                    betas = beta_obs_slopes.get(impact_key)
-                    beta_speed = betas.get('speed') if betas else None
-                    beta_lat = betas.get('lat') if betas else None
-                    impact_mmm = mmm_changes[gwl].get(impact_key)
                     
-                    ### DEBUG ###
-                    logging.info(f"--- DEBUG: COMPONENTS FOR {impact_key} @ {gwl}°C ---")
-                    logging.info(f"  delta_speed_mmm: {delta_speed_mmm}")
-                    logging.info(f"  delta_lat_mmm: {delta_lat_mmm}")
-                    logging.info(f"  beta_speed: {beta_speed}")
-                    logging.info(f"  beta_lat: {beta_lat}")
-                    logging.info(f"  impact_mmm: {impact_mmm}")
-                    logging.info("--- END DEBUG ---")
+                    # Sammle die Delta-Werte der Modelle in dieser Storyline
+                    model_deltas_for_impact = []
+                    for model_run_key in model_list:
+                        delta_val = all_deltas.get(impact_key, {}).get(gwl, {}).get(model_run_key)
+                        if delta_val is not None and np.isfinite(delta_val):
+                            model_deltas_for_impact.append(delta_val)
                     
-                    if any(v is None for v in [delta_speed_mmm, delta_lat_mmm, beta_speed, beta_lat, impact_mmm]):
-                        logging.warning(f"    SKIP {impact_key}: Missing a component (MMM change or beta).")
-                        continue
-                    
-                    logging.info(f"    Calculating impacts for {impact_key}...")
+                    if model_deltas_for_impact:
+                        # Berechne den Mittelwert und speichere ihn
+                        mean_impact = np.mean(model_deltas_for_impact)
+                        final_impacts[gwl][impact_key][storyline_name] = {'total': mean_impact}
+                        logging.info(f"      -> {storyline_name:<28} ({impact_key}): Mean Impact = {mean_impact:+.2f} (from {len(model_deltas_for_impact)} models)")
 
-                    storylines = storyline_defs_2d.get(season, {}).get(gwl, {})
-                    if not storylines:
-                        logging.warning(f"      No 2D storylines defined for {season} at GWL {gwl}°C.")
-                        continue
-
-                    for storyline_type, (delta_speed_storyline, delta_lat_storyline) in storylines.items():
-                        
-                        impact_adjustment = (beta_speed * (delta_speed_storyline - delta_speed_mmm)) + \
-                                            (beta_lat * (delta_lat_storyline - delta_lat_mmm))
-                        
-                        final_impact = impact_mmm + impact_adjustment
-                        
-                        # Store all components
-                        final_storyline_impacts[gwl][impact_key][storyline_type] = {
-                            'total': final_impact,
-                            'mmm_comp': impact_mmm,
-                            'jet_adj': impact_adjustment
-                        }
-                        logging.info(f"      -> {storyline_type:<28}: Total={final_impact:+.2f} (MMM={impact_mmm:+.2f}, JetAdj={impact_adjustment:+.2f})")
-
-        return {gwl: impacts for gwl, impacts in final_storyline_impacts.items() if impacts}
+        return {gwl: impacts for gwl, impacts in final_impacts.items() if impacts}
     
     @staticmethod
     def classify_models_into_storylines(all_deltas, storyline_defs):

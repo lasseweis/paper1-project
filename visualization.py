@@ -21,6 +21,7 @@ from matplotlib.cm import ScalarMappable
 import seaborn as sns
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+from scipy.stats import chi2
 
 # Import local modules
 from config import Config
@@ -1200,8 +1201,12 @@ class Visualizer:
 
     @staticmethod
     def _plot_single_jet_relationship_panel(ax, cmip6_results, gwl_to_plot, x_jet_key, y_jet_key, title,
-                                        storyline_defs=None, storyline_radius=None):
-        """Helper function to draw one panel of the jet inter-relationship scatter plot."""
+                                        inner_radius=None):
+        """
+        Helper-Funktion zum Zeichnen eines einzelnen Panels des Scatter-Plots, der die Beziehung zwischen Jet-Indizes darstellt.
+        NEU: Zeichnet eine innere und eine äußere (80% Konfidenz) Ellipse sowie Quadrantenlinien,
+        um die Storylines nach der Methode von Zappa and Shepherd (2017) zu visualisieren.
+        """
         all_deltas = cmip6_results.get('all_individual_model_deltas_for_plot', {})
         
         x_deltas = all_deltas.get(x_jet_key, {}).get(gwl_to_plot, {})
@@ -1216,10 +1221,10 @@ class Visualizer:
         x_vals = np.array([x_deltas[m] for m in common_models])
         y_vals = np.array([y_deltas[m] for m in common_models])
 
-        # Scatter plot for individual models
+        # Scatter-Plot für einzelne Modelle
         ax.scatter(x_vals, y_vals, color='teal', alpha=0.5, s=25, label=f'CMIP6 Models (N={len(common_models)})')
 
-        # Linear regression
+        # Lineare Regression
         slope, intercept, r_value, p_value, _ = StatsAnalyzer.calculate_regression(x_vals, y_vals)
         if not np.isnan(slope):
             x_fit = np.array(ax.get_xlim())
@@ -1230,41 +1235,56 @@ class Visualizer:
 
         # Multi-Model Mean (MMM)
         mmm_changes = cmip6_results.get('mmm_changes', {})
-        mmm_x = mmm_changes.get(gwl_to_plot, {}).get(x_jet_key)
-        mmm_y = mmm_changes.get(gwl_to_plot, {}).get(y_jet_key)
-        if mmm_x is not None and mmm_y is not None:
-            ax.scatter(mmm_x, mmm_y, color='red', marker='X', s=120, zorder=10,
-                    edgecolor='black', linewidth=1.5, label='Multi-Model Mean')
+        mmm_x = mmm_changes.get(gwl_to_plot, {}).get(x_jet_key, np.mean(x_vals))
+        mmm_y = mmm_changes.get(gwl_to_plot, {}).get(y_jet_key, np.mean(y_vals))
+        
+        ax.scatter(mmm_x, mmm_y, color='red', marker='X', s=120, zorder=10,
+                edgecolor='black', linewidth=1.5, label='Multi-Model Mean')
 
-        # === NEW PART: DRAW STORYLINE ELLIPSES AND PREPARE LEGEND HANDLES ===
-        storyline_legend_handles = []
-        if storyline_defs and storyline_radius:
+        # === NEUER TEIL: ZEICHNEN DER ELLIPSEN UND QUADRANTEN ===
+        legend_handles = []
+        if inner_radius is not None:
             std_dev_x = np.std(x_vals)
             std_dev_y = np.std(y_vals)
-            season = x_jet_key.split('_')[0]
             
-            relevant_storylines = storyline_defs.get(season, {}).get(gwl_to_plot, {})
-            storyline_colors = plt.cm.get_cmap('viridis', len(relevant_storylines))
+            # 1. Innere Ellipse zeichnen
+            inner_ellipse = mpatches.Ellipse(
+                xy=(mmm_x, mmm_y),
+                width=2 * inner_radius * std_dev_x,
+                height=2 * inner_radius * std_dev_y,
+                angle=0, edgecolor='black', facecolor='none',
+                linewidth=1.0, zorder=5
+            )
+            ax.add_patch(inner_ellipse)
             
-            for i, (name, (center_x, center_y)) in enumerate(relevant_storylines.items()):
-                color = storyline_colors(i)
-                ellipse = mpatches.Ellipse(
-                    xy=(center_x, center_y),
-                    width=2 * storyline_radius * std_dev_x,
-                    height=2 * storyline_radius * std_dev_y,
-                    angle=0,
-                    edgecolor=color,
-                    facecolor=color,
-                    alpha=0.25,
-                    zorder=2
-                )
-                ax.add_patch(ellipse)
-                # Create a legend handle for this storyline
-                storyline_legend_handles.append(mpatches.Patch(color=color, label=name, alpha=0.4))
+            # 2. Äußere 80% Konfidenz-Ellipse zeichnen
+            # t-Wert wie in Zappa & Shepherd (2017) berechnet
+            t_80_confidence = np.sqrt(chi2.ppf(0.8, 2) / 2) # Ergibt ca. 1.26
+            
+            outer_ellipse = mpatches.Ellipse(
+                xy=(mmm_x, mmm_y),
+                width=2 * t_80_confidence * std_dev_x,
+                height=2 * t_80_confidence * std_dev_y,
+                angle=0, edgecolor='black', facecolor='none',
+                linestyle='--', linewidth=1.5, zorder=5,
+                label='80% Confidence Region'
+            )
+            ax.add_patch(outer_ellipse)
 
-        # === END OF NEW PART ===
+            # 3. Quadrantenlinien zeichnen
+            xlims = ax.get_xlim()
+            ylims = ax.get_ylim()
+            
+            # Horizontale Linien
+            ax.plot([mmm_x + inner_radius * std_dev_x, xlims[1]], [mmm_y, mmm_y], color='black', lw=1, zorder=4)
+            ax.plot([xlims[0], mmm_x - inner_radius * std_dev_x], [mmm_y, mmm_y], color='black', lw=1, zorder=4)
+            # Vertikale Linien
+            ax.plot([mmm_x, mmm_x], [mmm_y + inner_radius * std_dev_y, ylims[1]], color='black', lw=1, zorder=4)
+            ax.plot([mmm_x, mmm_x], [ylims[0], mmm_y - inner_radius * std_dev_y], color='black', lw=1, zorder=4)
 
-        # Formatting
+        # === ENDE NEUER TEIL ===
+
+        # Formatierung
         def get_axis_label(key):
             label = f'Change in {key.replace("_", " ")}'
             if "Lat" in key: label += ' (°Lat)'
@@ -1276,44 +1296,37 @@ class Visualizer:
         ax.grid(True, linestyle=':', alpha=0.6)
         ax.axhline(0, color='grey', lw=0.7); ax.axvline(0, color='grey', lw=0.7)
         
-        # --- START DER ÄNDERUNG ---
-        # Kombiniert die existierenden Legenden-Handles mit den neuen für die Storylines
+        # Legende anpassen
         handles, labels = ax.get_legend_handles_labels()
-        handles.extend(storyline_legend_handles)
-        
-        # Platziert die Legende unterhalb des jeweiligen Subplots
         ax.legend(handles=handles, loc='upper center', bbox_to_anchor=(0.5, -0.2), ncol=3, fontsize=9)
-        # --- ENDE DER ÄNDERUNG ---
 
 
     @staticmethod
     def plot_jet_inter_relationship_scatter_combined_gwl(cmip6_results):
         """
-        Creates a combined scatter plot showing the relationship between jet indices
-        across CMIP6 models for all GWLs, separated by season.
-        NOW PLOTS STORYLINE ELLIPSES and includes them in the legend.
+        Erstellt einen kombinierten Scatter-Plot, der die Beziehung zwischen den Jet-Indizes
+        in den CMIP6-Modellen für alle GWLs, getrennt nach Jahreszeiten, darstellt.
+        NEU: Verwendet die Quadranten-Visualisierungsmethode.
         """
         if not cmip6_results or 'all_individual_model_deltas_for_plot' not in cmip6_results:
             logging.warning("Cannot plot combined jet inter-relationship scatter: Missing CMIP6 results.")
             return
 
         gwls_to_plot = Config.GLOBAL_WARMING_LEVELS
-        n_gwls = len(gwls_to_plot)
-        if n_gwls == 0:
+        if not gwls_to_plot:
             logging.warning("No global warming levels to plot. Skipping jet inter-relationship plot.")
             return
 
-        # Get storyline definitions from config
-        storyline_defs = Config.STORYLINE_JET_CHANGES_2D
-        storyline_radius = Config.STORYLINE_RADIUS
+        # Holen des neuen Radius-Parameters aus der Konfiguration
+        inner_radius = Config.STORYLINE_INNER_RADIUS
 
         logging.info(f"Plotting seasonal CMIP6 jet inter-relationship scatter for GWLs: {gwls_to_plot}...")
         Visualizer.ensure_plot_dir_exists()
 
-        fig, axs = plt.subplots(n_gwls, 2, figsize=(14, 6.5 * n_gwls), squeeze=False) # Höhe angepasst
+        fig, axs = plt.subplots(len(gwls_to_plot), 2, figsize=(14, 6.5 * len(gwls_to_plot)), squeeze=False)
 
         for i, gwl in enumerate(gwls_to_plot):
-            # Panel 1 (Left): Winter (DJF)
+            # Panel 1 (Links): Winter (DJF)
             Visualizer._plot_single_jet_relationship_panel(
                 ax=axs[i, 0],
                 cmip6_results=cmip6_results,
@@ -1321,11 +1334,10 @@ class Visualizer:
                 x_jet_key='DJF_JetSpeed',
                 y_jet_key='DJF_JetLat',
                 title=f'Winter: Speed vs. Latitude ({gwl}°C GWL)',
-                storyline_defs=storyline_defs,
-                storyline_radius=storyline_radius
+                inner_radius=inner_radius
             )
             
-            # Panel 2 (Right): Summer (JJA)
+            # Panel 2 (Rechts): Sommer (JJA)
             Visualizer._plot_single_jet_relationship_panel(
                 ax=axs[i, 1],
                 cmip6_results=cmip6_results,
@@ -1333,8 +1345,7 @@ class Visualizer:
                 x_jet_key='JJA_JetSpeed',
                 y_jet_key='JJA_JetLat',
                 title=f'Summer: Speed vs. Latitude ({gwl}°C GWL)',
-                storyline_defs=storyline_defs,
-                storyline_radius=storyline_radius
+                inner_radius=inner_radius
             )
 
         ref_period = f"{Config.CMIP6_ANOMALY_REF_START}-{Config.CMIP6_ANOMALY_REF_END}"
@@ -1342,15 +1353,13 @@ class Visualizer:
                     f"(Changes relative to {ref_period})",
                     fontsize=16, weight='bold')
 
-        # --- START DER ÄNDERUNG ---
-        # Passe das Layout an, um Platz für die Legenden unter den Plots zu schaffen
-        fig.tight_layout(rect=[0, 0, 1, 0.95], h_pad=5.0) # h_pad vergrößert für mehr Abstand
-        # --- ENDE DER ÄNDERUNG ---
+        fig.tight_layout(rect=[0, 0, 1, 0.95], h_pad=5.0)
         
-        filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_seasonal_with_legend.png") # Neuer Dateiname
+        # Dateinamen aktualisieren, um die neue Methode widerzuspiegeln
+        filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_quadrants.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved seasonal CMIP6 jet inter-relationship scatter plot to {filename}")
+        logging.info(f"Saved seasonal CMIP6 jet inter-relationship scatter plot (quadrant style) to {filename}")
 
     @staticmethod
     def plot_u850_change_map(ax, u850_change_data, historical_mean_contours,

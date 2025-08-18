@@ -152,46 +152,49 @@ class Config:
     N_PROCESSES = max(1, multiprocessing.cpu_count() - 4)
 
     # --- NEW: 2D Storyline Definitions (for Scatter Plots) ---
-    # These definitions are based on the (Speed, Lat) coordinate space.
-    # The radius is applied in a normalized space (units of standard deviation).
-    STORYLINE_RADIUS = 0.65  # Radius in units of std. dev.
+    # Radius for the old cluster method (can be kept for reference)
+    STORYLINE_CLUSTER_RADIUS = 0.65 
+    
+    # Radius for the new quadrant method (in units of standard deviation)
+    # A value of 0.5 means models inside the inner oval are not classified,
+    # matching the method from Zappa and Shepherd (2017).
+    STORYLINE_INNER_RADIUS = 0.5 
 
     # Format: {'Season': {GWL: {'StorylineName': (Center_Speed, Center_Lat)}}}
+    # NOTE: The coordinates here are no longer used by the new quadrant method for classification,
+    # but the structure is used to identify the storylines to be processed.
     STORYLINE_JET_CHANGES_2D = {
         'DJF': {
             2.0: {
-                # Winter @ +2.0°C (Plot oben links)
-                'Core Mean (MMM)':                (0.17, -0.08), # Zentrum
-                'Fast Jet & Northward Shift':     (0.7, 1.4),    # Oben Rechts
-                'Slow Jet & Northward Shift':     (-0.4, 1.2),   # Oben Links
-                'Slow Jet & Southward Shift':     (-0.5, -1.2),  # Unten Links
-                'Fast Jet & Southward Shift':     (0.6, -1.3),   # Unten Rechts
+                # Winter @ +2.0°C
+                'Fast Jet & Northward Shift':     (0.7, 1.4),
+                'Slow Jet & Northward Shift':     (-0.4, 1.2),
+                'Slow Jet & Southward Shift':     (-0.5, -1.2),
+                'Fast Jet & Southward Shift':     (0.6, -1.3),
             },
             3.0: {
-                # Winter @ +3.0°C (Plot unten links)
-                'Core Mean (MMM)':                (0.3, -0.1),  # Zentrum
-                'Fast Jet & Northward Shift':     (1.2, 0.8),    # Oben Rechts
-                'Slow Jet & Northward Shift':     (-0.3, 1.3),   # Oben Links
-                'Slow Jet & Southward Shift':     (-0.3, -1.0),   # Unten Links
-                'Fast Jet & Southward Shift':     (0.9, -1.8),   # Unten Rechts
+                # Winter @ +3.0°C
+                'Fast Jet & Northward Shift':     (1.2, 0.8),
+                'Slow Jet & Northward Shift':     (-0.3, 1.3),
+                'Slow Jet & Southward Shift':     (-0.3, -1.0),
+                'Fast Jet & Southward Shift':     (0.9, -1.8),
             }
         },
         'JJA': {
             2.0: {
-                # Sommer @ +2.0°C (Plot oben rechts)
-                'Core Mean (MMM)':                (-0.1, 0.6),   # Zentrum
-                'Fast Jet & Northward Shift':     (0.15, 1.2),    # Oben Rechts
-                'Slow Jet & Northward Shift':     (-0.3, 1.9),   # Oben Links
-                'Slow Jet & Southward Shift':     (-0.15, -1.0),   # Unten Links
-                'Fast Jet & Southward Shift':     (0.2, -0.4),   # Unten Rechts
+                # Summer @ +2.0°C
+                'Fast Jet & Northward Shift':     (0.15, 1.2),
+                'Slow Jet & Northward Shift':     (-0.3, 1.9),
+                'Slow Jet & Southward Shift':     (-0.15, -1.0),
+                'Fast Jet & Southward Shift':     (0.2, -0.4),
             },
             3.0: {
-                # Sommer @ +3.0°C (Plot unten rechts)
-                'Core Mean (MMM)':                (-0.15, 1.1),  # Zentrum
-                'Fast Jet & Northward Shift':     (0.1, 1.9),    # Oben Rechts
-                'Slow Jet & Northward Shift':     (-0.4, 2.2),   # Oben Links
-                'Slow Jet & Southward Shift':     (-0.25, -0.5),   # Unten Links
-                'Fast Jet & Southward Shift':     (0.15, 0.0),    # Unten Rechts
+                # Summer @ +3.0°C
+                'Core Mean (MMM)':                (-0.15, 1.1), # This can be removed if not used
+                'Fast Jet & Northward Shift':     (0.1, 1.9),
+                'Slow Jet & Northward Shift':     (-0.4, 2.2),
+                'Slow Jet & Southward Shift':     (-0.25, -0.5),
+                'Fast Jet & Southward Shift':     (0.15, 0.0),
             }
         }
     }

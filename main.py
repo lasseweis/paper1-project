@@ -155,9 +155,11 @@ class ClimateAnalysis:
                         # Store detrended timeseries for correlation analyses
                         result[f'{season_lower}_discharge_detrended'] = DataProcessor.detrend_data(season_ts)
                         
-                        # Store historical mean and low flow threshold for the new plot
+                        # Store historical mean and low flow thresholds for the new plot
                         result[f'{season_lower}_mean'] = season_ts.mean().item()
                         result[f'{season_lower}_lowflow_threshold'] = season_ts.quantile(0.10).item() # 10th percentile
+                        # ADDED THIS LINE:
+                        result[f'{season_lower}_lowflow_threshold_30'] = season_ts.quantile(0.30).item() # 30th percentile
             
             # Keep the old structure for extreme_flow for other plots if needed
             high_flow_threshold = df['discharge'].quantile(0.90)
@@ -170,7 +172,7 @@ class ClimateAnalysis:
             da_extreme_seasons = DataProcessor.assign_season_to_dataarray(da_extreme)
             seasonal_extreme_ts = DataProcessor.calculate_seasonal_means(da_extreme_seasons)
             if seasonal_extreme_ts is not None:
-                 for season in ['Winter', 'Summer']:
+                for season in ['Winter', 'Summer']:
                     season_data = DataProcessor.filter_by_season(seasonal_extreme_ts, season)
                     if season_data is not None:
                         result[f'{season.lower()}_extreme_flow'] = DataProcessor.detrend_data(season_data)

@@ -1846,10 +1846,10 @@ class StorylineAnalyzer:
     @staticmethod
     def calculate_direct_discharge_impacts(cmip6_results, config):
         """
-        Calculates the mean discharge change for each 2D storyline by averaging the
-        percentage changes of all models belonging to that storyline.
+        Calculates the mean discharge change IN ABSOLUTE UNITS (m³/s) for each 2D storyline
+        by averaging the changes of all models belonging to that storyline.
         """
-        logging.info("Calculating direct storyline impacts for discharge...")
+        logging.info("Calculating direct storyline impacts for discharge (in absolute units)...")
         storyline_classification = cmip6_results.get('storyline_classification_2d')
         hist_means = cmip6_results.get('model_data_at_hist_reference')
         gwl_means = cmip6_results.get('model_data_at_gwl')
@@ -1861,7 +1861,6 @@ class StorylineAnalyzer:
         direct_impacts = {gwl: {'DJF_discharge': {}, 'JJA_discharge': {}} for gwl in config.GLOBAL_WARMING_LEVELS}
 
         for gwl in config.GLOBAL_WARMING_LEVELS:
-            # Iterate through all storylines defined for this GWL
             for storyline_key, model_list in storyline_classification.get(gwl, {}).items():
                 if not model_list:
                     continue
@@ -1872,20 +1871,17 @@ class StorylineAnalyzer:
                 
                 model_deltas = []
                 for model_run_key in model_list:
-                    # Get pre-calculated historical and future mean values for the model
                     hist_val = hist_means.get(model_run_key, {}).get(impact_key)
                     gwl_val = gwl_means.get(model_run_key, {}).get('gwl', {}).get(gwl, {}).get(impact_key)
 
-                    # Calculate percentage change if data is valid
-                    if hist_val is not None and gwl_val is not None and abs(hist_val) > 1e-9:
-                        delta_percent = ((gwl_val - hist_val) / hist_val) * 100.0
-                        model_deltas.append(delta_percent)
+                    # --- MODIFICATION: Calculate absolute change instead of percentage ---
+                    if hist_val is not None and gwl_val is not None:
+                        delta_absolute = gwl_val - hist_val
+                        model_deltas.append(delta_absolute)
                 
-                # Average the changes from all models in the storyline
                 if model_deltas:
                     mean_impact = np.mean(model_deltas)
-                    # Store the result in a format the plotting function can use
                     direct_impacts[gwl][impact_key][storyline_name] = {'total': mean_impact}
 
-        logging.info("Direct discharge impact calculation finished.")
+        logging.info("Direct discharge impact calculation (absolute) finished.")
         return direct_impacts

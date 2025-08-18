@@ -1976,20 +1976,13 @@ class Visualizer:
         logging.info(f"Saved vertical storyline impacts summary plot to {filename}")
             
     @staticmethod
-    def plot_storyline_impact_barchart_with_discharge(final_impacts, discharge_impacts, config):
+    def plot_storyline_impact_barchart_with_discharge(final_impacts, discharge_impacts, discharge_data_historical, config):
         """
         Creates a 3x2 vertical bar chart to visualize storyline impacts for Temp, Precip, and Discharge.
         Uses multivariate results for Temp/Precip and direct calculation for Discharge.
+        MODIFIED to show discharge in absolute units (m³/s) and add a low-flow threshold line.
         """
-        
-        ### DEBUG ###
-        import json
-        logging.info("--- DEBUG: DATA RECEIVED IN PLOTTING FUNCTION (visualization.py) ---")
-        logging.info(f"  RECEIVED final_impacts @ 2.0°C: {json.dumps(final_impacts.get(2.0, {}), indent=2)}")
-        logging.info(f"  RECEIVED discharge_impacts @ 2.0°C: {json.dumps(discharge_impacts.get(2.0, {}), indent=2)}")
-        logging.info("--- END DEBUG ---")
-        
-        logging.info("Plotting final storyline impacts (including discharge) as a 3x2 bar chart...")
+        logging.info("Plotting final storyline impacts (including discharge in m³/s) as a 3x2 bar chart...")
         Visualizer.ensure_plot_dir_exists()
 
         if not final_impacts:
@@ -1998,19 +1991,17 @@ class Visualizer:
 
         # --- 1. Setup & Data Combination ---
         plt.style.use('seaborn-v0_8-whitegrid')
-        fig, axs = plt.subplots(3, 2, figsize=(16, 18)) # Changed to 3x2 grid
+        fig, axs = plt.subplots(3, 2, figsize=(16, 18))
 
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         gwl_colors = {gwls_to_plot[0]: '#4575b4', gwls_to_plot[1]: '#d73027'}
 
-        # Combine the original impacts with the new direct discharge impacts
         all_impacts = final_impacts.copy()
         for gwl, discharge_data in discharge_impacts.items():
             if gwl not in all_impacts:
                 all_impacts[gwl] = {}
             all_impacts[gwl].update(discharge_data)
 
-        # Define the new 3x2 plot grid
         plot_grid = {
             (0, 0): {'key': 'DJF_tas', 'title': 'a) Winter (DJF) Temperature'},
             (0, 1): {'key': 'JJA_tas', 'title': 'b) Summer (JJA) Temperature'},
@@ -2025,19 +2016,16 @@ class Visualizer:
             ax = axs[row, col]
             impact_key = plot_info['key']
             season = impact_key.split('_')[0]
+            season_lower = 'winter' if season == 'DJF' else 'summer'
             
             storyline_names_ordered = list(config.STORYLINE_JET_CHANGES_2D.get(season, {}).get(gwls_to_plot[0], {}).keys())
             
-            plot_data = {}
+            df = pd.DataFrame(index=storyline_names_ordered, columns=gwls_to_plot, dtype=float)
             for gwl in gwls_to_plot:
-                impacts = []
                 for name in storyline_names_ordered:
-                    total_impact = all_impacts.get(gwl, {}).get(impact_key, {}).get(name, {}).get('total', np.nan)
-                    impacts.append(total_impact)
-                plot_data[gwl] = impacts
+                    total_impact = all_impacts.get(gwl, {}).get(impact_key, {}).get(name, {}).get('total')
+                    df.loc[name, gwl] = total_impact
             
-            df = pd.DataFrame(plot_data, index=storyline_names_ordered)
-
             x_pos = np.arange(len(storyline_names_ordered))
             bar_width = 0.35
             
@@ -2050,7 +2038,8 @@ class Visualizer:
             ax.set_title(plot_info['title'], loc='left', fontsize=14, weight='bold')
             ax.axhline(0, color='black', linestyle='-', linewidth=0.8, zorder=1)
             
-            unit = '(°C)' if 'tas' in impact_key else '(%)'
+            # --- MODIFICATION: Y-label logic ---
+            unit = '(°C)' if 'tas' in impact_key else '(m³/s)' if 'discharge' in impact_key else '(%)'
             if col == 0:
                 ax.set_ylabel(f'Projected Change {unit}', fontsize=12)
 
@@ -2058,29 +2047,40 @@ class Visualizer:
             ax.set_xticklabels([name.replace(' & ', ' &\n').replace(' (MMM)','') for name in storyline_names_ordered], 
                             rotation=45, ha="right", fontsize=11)
             
-            if row < 2: # Hide x-labels for top and middle rows
+            if row < 2:
                 ax.set_xticklabels([])
+
+            # --- MODIFICATION: Add Low-Flow Threshold Line ---
+            if 'discharge' in impact_key:
+                hist_mean = discharge_data_historical.get(f'{season_lower}_mean')
+                low_flow_thresh = discharge_data_historical.get(f'{season_lower}_lowflow_threshold')
+                if hist_mean is not None and low_flow_thresh is not None:
+                    change_to_reach_lowflow = low_flow_thresh - hist_mean
+                    ax.axhline(change_to_reach_lowflow, color='black', linestyle='--', linewidth=2, zorder=5, 
+                               label=f'Low-Flow Threshold ({low_flow_thresh:.0f} m³/s)')
 
             for rects in [rects1, rects2]:
                 for rect in rects:
                     height = rect.get_height()
                     if np.isnan(height): continue
-                    offset = (ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.02
+                    
+                    offset_factor = 0.03 # Increase offset for better visibility
+                    offset = (ax.get_ylim()[1] - ax.get_ylim()[0]) * offset_factor
                     text_pos = height + offset if height >= 0 else height - offset
                     va = 'bottom' if height >= 0 else 'top'
-                    ax.annotate(f'{height:.2f}',
+                    
+                    # Format discharge as integer, others with two decimals
+                    label_format = '{:.0f}' if 'discharge' in impact_key else '{:.2f}'
+                    ax.annotate(label_format.format(height),
                                 xy=(rect.get_x() + rect.get_width() / 2, text_pos),
                                 ha='center', va=va, fontsize=9)
             
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
             
-            # Set shared y-axis limits for Precip and Discharge
-            if 'tas' not in impact_key:
-                ymin = min(df.min().min() for df in [df[gwls_to_plot[0]], df[gwls_to_plot[1]]])
-                ymax = max(df.max().max() for df in [df[gwls_to_plot[0]], df[gwls_to_plot[1]]])
-                ax.set_ylim(ymin * 1.15, ymax * 1.15)
-
+            # Add legend for the low-flow line inside the discharge plots
+            if 'discharge' in impact_key:
+                 ax.legend(loc='upper right', fontsize=9)
 
         # --- 4. Final Figure Formatting ---
         handles, labels = axs[0, 0].get_legend_handles_labels()
@@ -2091,7 +2091,6 @@ class Visualizer:
         
         fig.tight_layout(rect=[0, 0.05, 1, 0.96])
         
-        # Save with a new, descriptive filename
         filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_3x2.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)

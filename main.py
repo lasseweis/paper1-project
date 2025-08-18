@@ -126,48 +126,60 @@ class ClimateAnalysis:
         
     @staticmethod
     def process_discharge_data(file_path):
-        """Process discharge data from Excel file and compute metrics."""
+        """Process discharge data, compute seasonal metrics, means, and low flow thresholds."""
         logging.info(f"Processing discharge data from {file_path}...")
         try:
-            # Load data from Excel
             data = pd.read_excel(file_path, index_col=None, na_values=['NA'], usecols='A,B,C,H')
             df = pd.DataFrame({
                 'year': data['year'], 'month': data['month'], 'discharge': data['Wien']
             }).dropna()
 
-            # Calculate thresholds for extreme events
-            high_flow_threshold = np.percentile(df['discharge'], 90)
-            low_flow_threshold = np.percentile(df['discharge'], 10)
-            df['extreme_flow'] = np.select(
-                [df['discharge'] > high_flow_threshold, df['discharge'] < low_flow_threshold],
-                [1, -1], default=0
-            )
-
-            # A datetime index is required for assign_season_to_dataarray
             df['time'] = pd.to_datetime(df[['year', 'month']].assign(day=15))
             df = df.set_index('time')
+            
+            # --- START MODIFICATION ---
+            # Create a base DataArray for all calculations
+            da_full = df[['discharge']].to_xarray()['discharge']
+            da_with_seasons = DataProcessor.assign_season_to_dataarray(da_full)
+            seasonal_means_ts = DataProcessor.calculate_seasonal_means(da_with_seasons)
 
             result = {}
-            for metric in ['discharge', 'extreme_flow']:
-                # Create a DataArray for the current metric
-                da = df[[metric]].to_xarray()[metric]
+            if seasonal_means_ts is not None:
+                for season in ['Winter', 'Summer']:
+                    season_lower = season.lower()
+                    
+                    # Get the timeseries for the season
+                    season_ts = DataProcessor.filter_by_season(seasonal_means_ts, season)
+                    
+                    if season_ts is not None and season_ts.size > 0:
+                        # Store detrended timeseries for correlation analyses
+                        result[f'{season_lower}_discharge_detrended'] = DataProcessor.detrend_data(season_ts)
+                        
+                        # Store historical mean and low flow threshold for the new plot
+                        result[f'{season_lower}_mean'] = season_ts.mean().item()
+                        result[f'{season_lower}_lowflow_threshold'] = season_ts.quantile(0.10).item() # 10th percentile
+            
+            # Keep the old structure for extreme_flow for other plots if needed
+            high_flow_threshold = df['discharge'].quantile(0.90)
+            low_flow_threshold_overall = df['discharge'].quantile(0.10)
+            df['extreme_flow'] = np.select(
+                [df['discharge'] > high_flow_threshold, df['discharge'] < low_flow_threshold_overall],
+                [1, -1], default=0
+            )
+            da_extreme = df[['extreme_flow']].to_xarray()['extreme_flow']
+            da_extreme_seasons = DataProcessor.assign_season_to_dataarray(da_extreme)
+            seasonal_extreme_ts = DataProcessor.calculate_seasonal_means(da_extreme_seasons)
+            if seasonal_extreme_ts is not None:
+                 for season in ['Winter', 'Summer']:
+                    season_data = DataProcessor.filter_by_season(seasonal_extreme_ts, season)
+                    if season_data is not None:
+                        result[f'{season.lower()}_extreme_flow'] = DataProcessor.detrend_data(season_data)
+            # --- END MODIFICATION ---
 
-                # Assign seasons
-                da_with_seasons = DataProcessor.assign_season_to_dataarray(da)
-
-                # Calculate seasonal means
-                seasonal_means = DataProcessor.calculate_seasonal_means(da_with_seasons)
-
-                if seasonal_means is not None:
-                    for season in ['Winter', 'Summer']:
-                        season_lower = season.lower()
-                        key = f'{season_lower}_{metric}'
-
-                        # Filter by season and detrend
-                        season_data = DataProcessor.filter_by_season(seasonal_means, season)
-                        if season_data is not None:
-                            result[key] = DataProcessor.detrend_data(season_data)
+            logging.info(f"Discharge processing complete. Winter mean: {result.get('winter_mean', 'N/A'):.2f}, Winter low flow: {result.get('winter_lowflow_threshold', 'N/A'):.2f}")
+            logging.info(f"Summer mean: {result.get('summer_mean', 'N/A'):.2f}, Summer low flow: {result.get('summer_lowflow_threshold', 'N/A'):.2f}")
             return result
+
         except Exception as e:
             logging.error(f"Error processing discharge data: {e}")
             logging.error(traceback.format_exc())
@@ -446,7 +458,7 @@ class ClimateAnalysis:
             logging.info(f"Plot '{combined_spei_plot_filename}' not found. Calculating and creating plot...")
 
             spatial_spei_era5 = StorylineAnalyzer.calculate_spatial_spei(datasets_reanalysis, Config.DATASET_ERA5, scale=4)
-            summer_discharge_ts = discharge_data_loaded.get('summer_discharge')
+            summer_discharge_ts = discharge_data_loaded.get('summer_discharge_detrended') # Using the detrended version for consistency
 
             if spatial_spei_era5 is not None and summer_discharge_ts is not None:
                 corr_map, p_vals_corr = StorylineAnalyzer.calculate_spei_on_discharge_map(
@@ -542,10 +554,11 @@ class ClimateAnalysis:
                 
                 # Step 3: Create the new 3x2 summary bar chart with all impacts
                 if final_impacts_pr_tas and direct_impacts_discharge:
-                    # This is the call to your new, preferred plotting function
+                    # THIS IS THE CORRECTED FUNCTION CALL
                     Visualizer.plot_storyline_impact_barchart_with_discharge(
                         final_impacts=final_impacts_pr_tas,
                         discharge_impacts=direct_impacts_discharge,
+                        discharge_data_historical=discharge_data_loaded,
                         config=Config()
                     )
             else:

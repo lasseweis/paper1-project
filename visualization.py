@@ -1981,6 +1981,14 @@ class Visualizer:
         Creates a 3x2 vertical bar chart to visualize storyline impacts for Temp, Precip, and Discharge.
         Uses multivariate results for Temp/Precip and direct calculation for Discharge.
         """
+        
+        ### DEBUG ###
+        import json
+        logging.info("--- DEBUG: DATA RECEIVED IN PLOTTING FUNCTION (visualization.py) ---")
+        logging.info(f"  RECEIVED final_impacts @ 2.0°C: {json.dumps(final_impacts.get(2.0, {}), indent=2)}")
+        logging.info(f"  RECEIVED discharge_impacts @ 2.0°C: {json.dumps(discharge_impacts.get(2.0, {}), indent=2)}")
+        logging.info("--- END DEBUG ---")
+        
         logging.info("Plotting final storyline impacts (including discharge) as a 3x2 bar chart...")
         Visualizer.ensure_plot_dir_exists()
 

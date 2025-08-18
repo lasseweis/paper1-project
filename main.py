@@ -533,6 +533,13 @@ class ClimateAnalysis:
                     config=Config()
                 )
 
+                ### DEBUG ###
+                import json
+                logging.info("--- DEBUG: DATA BEFORE PLOTTING (main.py) ---")
+                logging.info(f"  final_impacts_pr_tas @ 2.0°C: {json.dumps(final_impacts_pr_tas.get(2.0, {}), indent=2)}")
+                logging.info(f"  direct_impacts_discharge @ 2.0°C: {json.dumps(direct_impacts_discharge.get(2.0, {}), indent=2)}")
+                logging.info("--- END DEBUG ---")
+                
                 # Step 3: Create the new 3x2 summary bar chart with all impacts
                 if final_impacts_pr_tas and direct_impacts_discharge:
                     # This is the call to your new, preferred plotting function

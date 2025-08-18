@@ -344,6 +344,15 @@ class StorylineAnalyzer:
             for gwl in self.config.GWL_FINE_STEPS_FOR_PLOT
         }
         
+        ### DEBUG ###
+        logging.info("--- DEBUG: CHECKING MMM_CHANGES ---")
+        for gwl in self.config.GLOBAL_WARMING_LEVELS:
+            if gwl in mmm_changes:
+                pr_djf = mmm_changes[gwl].get('DJF_pr', 'N/A')
+                pr_jja = mmm_changes[gwl].get('JJA_pr', 'N/A')
+                logging.info(f"  GWL {gwl}°C -> DJF_pr: {pr_djf}, JJA_pr: {pr_jja}")
+        logging.info("--- END DEBUG ---")
+        
         # Create model run summary
         models_per_gwl = {}
         all_models_in_deltas = set()
@@ -439,6 +448,15 @@ class StorylineAnalyzer:
                     beta_speed = betas.get('speed') if betas else None
                     beta_lat = betas.get('lat') if betas else None
                     impact_mmm = mmm_changes[gwl].get(impact_key)
+                    
+                    ### DEBUG ###
+                    logging.info(f"--- DEBUG: COMPONENTS FOR {impact_key} @ {gwl}°C ---")
+                    logging.info(f"  delta_speed_mmm: {delta_speed_mmm}")
+                    logging.info(f"  delta_lat_mmm: {delta_lat_mmm}")
+                    logging.info(f"  beta_speed: {beta_speed}")
+                    logging.info(f"  beta_lat: {beta_lat}")
+                    logging.info(f"  impact_mmm: {impact_mmm}")
+                    logging.info("--- END DEBUG ---")
                     
                     if any(v is None for v in [delta_speed_mmm, delta_lat_mmm, beta_speed, beta_lat, impact_mmm]):
                         logging.warning(f"    SKIP {impact_key}: Missing a component (MMM change or beta).")

@@ -371,7 +371,7 @@ class StorylineAnalyzer:
             }
 
             # Classify models into storylines using the quadrant method
-            storyline_classification_2d = self.classify_models_by_quadrant(
+            storyline_classification_2d = StorylineAnalyzer.classify_models_into_storylines_2d(
                 all_deltas,
                 self.config.STORYLINE_JET_CHANGES_2D,
                 self.config.STORYLINE_INNER_RADIUS # Use the new inner radius parameter

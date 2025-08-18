@@ -719,7 +719,7 @@ class ClimateAnalysis:
         storyline_classification_2d = cmip6_results.get('storyline_classification_2d')
         if storyline_classification_2d:
             logging.info("\n\n--- CMIP6 Model 2D Storyline Classification (for Scatter Plots) ---")
-            radius = Config.STORYLINE_RADIUS
+            radius = Config.STORYLINE_INNER_RADIUS
             logging.info(f"Models are classified based on a normalized Euclidean distance (Radius: {radius} std. dev.).")
             for gwl, storylines in sorted(storyline_classification_2d.items()):
                 if gwl not in Config.GLOBAL_WARMING_LEVELS:

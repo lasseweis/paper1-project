@@ -500,24 +500,11 @@ class StorylineAnalyzer:
     @staticmethod
     def classify_models_into_storylines_2d(all_deltas, storyline_defs_2d, radius):
         """
-        Classifies CMIP6 models into 2D storylines using a NORMALIZED Euclidean distance.
-        This method accounts for different scales on the x and y axes.
-
-        Parameters:
-        -----------
-        all_deltas : dict
-            Calculated changes for each model, metric, and GWL.
-        storyline_defs_2d : dict
-            The 2D storyline center definitions from the Config class.
-        radius : float
-            The RADIUS IN UNITS OF STANDARD DEVIATION.
-
-        Returns:
-        --------
-        dict
-            Nested dictionary with the classification results.
+        Classifies CMIP6 models into 2D storylines using a two-step quadrant method.
+        First, it identifies "Core Mean" models within a central ellipse, then classifies
+        the remaining models into one of the four extreme quadrants.
         """
-        logging.info(f"Classifying models into 2D storylines using NORMALIZED distance with a radius of {radius} std. dev...")
+        logging.info(f"Classifying models into 2D storylines using quadrant method with inner radius: {radius} std. dev...")
         classification_results = {}
 
         for season, gwl_storylines in storyline_defs_2d.items():
@@ -528,41 +515,73 @@ class StorylineAnalyzer:
                 if gwl not in classification_results:
                     classification_results[gwl] = {}
 
-                # Step 1: Collect all relevant data
+                # Step 1: Collect all relevant data and calculate stats
                 model_deltas_speed = all_deltas.get(jet_speed_key, {}).get(gwl, {})
                 model_deltas_lat = all_deltas.get(jet_lat_key, {}).get(gwl, {})
                 common_models = set(model_deltas_speed.keys()) & set(model_deltas_lat.keys())
 
                 if not common_models: continue
 
-                # Step 2: Calculate standard deviations for normalization
                 speed_values = np.array([model_deltas_speed[m] for m in common_models])
                 lat_values = np.array([model_deltas_lat[m] for m in common_models])
 
+                # Calculate Multi-Model Mean (MMM) and standard deviations
+                mmm_speed = np.mean(speed_values)
+                mmm_lat = np.mean(lat_values)
                 std_dev_speed = np.std(speed_values)
                 std_dev_lat = np.std(lat_values)
 
                 if std_dev_speed < 1e-9 or std_dev_lat < 1e-9: continue
-                
-                for storyline_type, (center_speed, center_lat) in storylines.items():
+
+                # Initialize all storyline categories for this GWL
+                for storyline_type in storylines:
                     storyline_key = f"{season}_{storyline_type}"
-                    if storyline_key not in classification_results[gwl]:
-                        classification_results[gwl][storyline_key] = []
-                    
-                    # Step 3: Normalize the storyline center
-                    norm_center_speed = center_speed / std_dev_speed
-                    norm_center_lat = center_lat / std_dev_lat
+                    classification_results[gwl][storyline_key] = []
+                
+                models_to_classify_extreme = set(common_models)
 
+                # Step 2: Identify and classify "Core Mean" models first
+                core_mean_key = None
+                for storyline_type in storylines:
+                     if 'Core Mean' in storyline_type:
+                         core_mean_key = f"{season}_{storyline_type}"
+                         break
+                
+                if core_mean_key:
+                    models_in_core = []
                     for model_key in common_models:
-                        norm_model_speed = model_deltas_speed[model_key] / std_dev_speed
-                        norm_model_lat = model_deltas_lat[model_key] / std_dev_lat
+                        # Calculate normalized distance from the MMM
+                        norm_dist_sq = ((model_deltas_speed[model_key] - mmm_speed) / std_dev_speed)**2 + \
+                                       ((model_deltas_lat[model_key] - mmm_lat) / std_dev_lat)**2
+                        
+                        if np.sqrt(norm_dist_sq) <= radius:
+                            models_in_core.append(model_key)
+                    
+                    classification_results[gwl][core_mean_key] = models_in_core
+                    # Remove core models from the set of models to be classified into extreme storylines
+                    models_to_classify_extreme -= set(models_in_core)
 
-                        # Step 4: Calculate distance in normalized space
-                        distance = np.sqrt((norm_model_speed - norm_center_speed)**2 + (norm_model_lat - norm_center_lat)**2)
 
-                        if distance <= radius:
-                            classification_results[gwl][storyline_key].append(model_key)
-                            
+                # Step 3: Classify the remaining (extreme) models into quadrants
+                for model_key in models_to_classify_extreme:
+                    is_north = model_deltas_lat[model_key] > mmm_lat
+                    is_fast = model_deltas_speed[model_key] > mmm_speed
+
+                    storyline_name = ""
+                    if is_fast and is_north:
+                        storyline_name = 'Fast Jet & Northward Shift'
+                    elif not is_fast and is_north:
+                        storyline_name = 'Slow Jet & Northward Shift'
+                    elif not is_fast and not is_north:
+                        storyline_name = 'Slow Jet & Southward Shift'
+                    elif is_fast and not is_north:
+                        storyline_name = 'Fast Jet & Southward Shift'
+                    
+                    if storyline_name:
+                        full_storyline_key = f"{season}_{storyline_name}"
+                        if full_storyline_key in classification_results[gwl]:
+                            classification_results[gwl][full_storyline_key].append(model_key)
+
         return classification_results
     
     def calculate_cmip6_u850_change_fields(self,

@@ -1206,9 +1206,11 @@ class Visualizer:
         Helper-Funktion zum Zeichnen eines einzelnen Panels des Scatter-Plots, der die Beziehung zwischen Jet-Indizes darstellt.
         NEU: Zeichnet eine innere und eine äußere (80% Konfidenz) Ellipse sowie Quadrantenlinien,
         um die Storylines nach der Methode von Zappa and Shepherd (2017) zu visualisieren.
+        Zusätzlich werden die Mittelwerte der Extrem-Storylines als farbige Kreuze gezeichnet.
         """
         all_deltas = cmip6_results.get('all_individual_model_deltas_for_plot', {})
-        
+        storyline_classification = cmip6_results.get('storyline_classification_2d', {})
+
         x_deltas = all_deltas.get(x_jet_key, {}).get(gwl_to_plot, {})
         y_deltas = all_deltas.get(y_jet_key, {}).get(gwl_to_plot, {})
 
@@ -1241,26 +1243,50 @@ class Visualizer:
         ax.scatter(mmm_x, mmm_y, color='red', marker='X', s=120, zorder=10,
                 edgecolor='black', linewidth=1.5, label='Multi-Model Mean')
 
-        # === NEUER TEIL: ZEICHNEN DER ELLIPSEN UND QUADRANTEN ===
-        legend_handles = []
+        # === ZEICHNEN DER STORYLINE-MITTELWERTE ===
+        season_prefix = x_jet_key.split('_')[0]
+        storyline_means_to_plot = {
+            'Fast Jet & Northward Shift': '#d62728', # rot
+            'Slow Jet & Northward Shift': '#ff7f0e', # orange
+            'Slow Jet & Southward Shift': '#1f77b4', # blau
+            'Fast Jet & Southward Shift': '#2ca02c'  # grün
+        }
+        
+        gwl_classification = storyline_classification.get(gwl_to_plot, {})
+        
+        for storyline_name, color in storyline_means_to_plot.items():
+            storyline_key = f"{season_prefix}_{storyline_name}"
+            models_in_storyline = gwl_classification.get(storyline_key, [])
+            
+            if models_in_storyline:
+                storyline_x_vals = np.array([x_deltas[m] for m in models_in_storyline])
+                storyline_y_vals = np.array([y_deltas[m] for m in models_in_storyline])
+                
+                mean_x = np.mean(storyline_x_vals)
+                mean_y = np.mean(storyline_y_vals)
+                
+                # Plot des Mittelwerts als farbiges Kreuz
+                ax.scatter(mean_x, mean_y, color=color, marker='X', s=100, zorder=9,
+                           edgecolor='black', linewidth=1.0, label=f'Mean: {storyline_name}')
+        # === ENDE STORYLINE-MITTELWERTE ===
+
+        # === ZEICHNEN DER ELLIPSEN UND QUADRANTEN ===
         if inner_radius is not None:
             std_dev_x = np.std(x_vals)
             std_dev_y = np.std(y_vals)
             
-            # 1. Innere Ellipse zeichnen
+            # Innere Ellipse zeichnen (Core Mean Zone)
             inner_ellipse = mpatches.Ellipse(
                 xy=(mmm_x, mmm_y),
                 width=2 * inner_radius * std_dev_x,
                 height=2 * inner_radius * std_dev_y,
-                angle=0, edgecolor='black', facecolor='none',
-                linewidth=1.0, zorder=5
+                angle=0, edgecolor='black', 
+                facecolor='grey', alpha=0.2, linewidth=1.0, zorder=5, label='Core Mean Zone'
             )
             ax.add_patch(inner_ellipse)
             
-            # 2. Äußere 80% Konfidenz-Ellipse zeichnen
-            # t-Wert wie in Zappa & Shepherd (2017) berechnet
-            t_80_confidence = np.sqrt(chi2.ppf(0.8, 2) / 2) # Ergibt ca. 1.26
-            
+            # Äußere 80% Konfidenz-Ellipse zeichnen
+            t_80_confidence = np.sqrt(chi2.ppf(0.8, 2) / 2)
             outer_ellipse = mpatches.Ellipse(
                 xy=(mmm_x, mmm_y),
                 width=2 * t_80_confidence * std_dev_x,
@@ -1271,18 +1297,7 @@ class Visualizer:
             )
             ax.add_patch(outer_ellipse)
 
-            # 3. Quadrantenlinien zeichnen
-            xlims = ax.get_xlim()
-            ylims = ax.get_ylim()
-            
-            # Horizontale Linien
-            ax.plot([mmm_x + inner_radius * std_dev_x, xlims[1]], [mmm_y, mmm_y], color='black', lw=1, zorder=4)
-            ax.plot([xlims[0], mmm_x - inner_radius * std_dev_x], [mmm_y, mmm_y], color='black', lw=1, zorder=4)
-            # Vertikale Linien
-            ax.plot([mmm_x, mmm_x], [mmm_y + inner_radius * std_dev_y, ylims[1]], color='black', lw=1, zorder=4)
-            ax.plot([mmm_x, mmm_x], [ylims[0], mmm_y - inner_radius * std_dev_y], color='black', lw=1, zorder=4)
-
-        # === ENDE NEUER TEIL ===
+        # === ENDE ELLIPSEN ===
 
         # Formatierung
         def get_axis_label(key):
@@ -1298,7 +1313,8 @@ class Visualizer:
         
         # Legende anpassen
         handles, labels = ax.get_legend_handles_labels()
-        ax.legend(handles=handles, loc='upper center', bbox_to_anchor=(0.5, -0.2), ncol=3, fontsize=9)
+        by_label = dict(zip(labels, handles)) # Um doppelte Einträge zu vermeiden
+        ax.legend(by_label.values(), by_label.keys(), loc='upper center', bbox_to_anchor=(0.5, -0.25), ncol=2, fontsize=8)
 
 
     @staticmethod
@@ -2027,8 +2043,15 @@ class Visualizer:
             season = impact_key.split('_')[0]
             season_lower = 'winter' if season == 'DJF' else 'summer'
             
-            storyline_names_ordered = list(config.STORYLINE_JET_CHANGES_2D.get(season, {}).get(gwls_to_plot[0], {}).keys())
+            # === KORRIGIERTE ZEILE ===
+            # Holt die Liste der Storyline-Namen direkt aus der Konfiguration, ohne .keys()
+            storyline_names_ordered = config.STORYLINE_JET_CHANGES_2D.get(season, {}).get(gwls_to_plot[0], [])
             
+            # Entferne 'Neutral' aus der Liste für diesen spezifischen Plot, falls vorhanden
+            if 'Neutral' in storyline_names_ordered:
+                storyline_names_ordered.remove('Neutral')
+            # === ENDE DER KORREKTUR ===
+
             df_change = pd.DataFrame(index=storyline_names_ordered, columns=gwls_to_plot, dtype=float)
             for gwl in gwls_to_plot:
                 for name in storyline_names_ordered:
@@ -2069,7 +2092,6 @@ class Visualizer:
                 if hist_mean is not None:
                     ax.axhline(hist_mean, color='gray', linestyle='--', linewidth=2, zorder=5, 
                             label=f'Hist. Mean ({hist_mean:.0f} m³/s)')
-                # ADDED 30th PERCENTILE LINE:
                 if low_flow_thresh_30 is not None:
                     ax.axhline(low_flow_thresh_30, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5,
                             label=f'30th Percentile Flow ({low_flow_thresh_30:.0f} m³/s)')

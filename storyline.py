@@ -19,6 +19,7 @@ import logging
 import os
 import json
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from scipy.stats import chi2
 
 # Import local modules
 from config import Config
@@ -500,12 +501,17 @@ class StorylineAnalyzer:
     @staticmethod
     def classify_models_into_storylines_2d(all_deltas, storyline_defs_2d, radius):
         """
-        Classifies CMIP6 models into 2D storylines using a two-step quadrant method.
-        First, it identifies "Core Mean" models within a central ellipse, then classifies
-        the remaining models into one of the four extreme quadrants.
+        Classifies CMIP6 models into 2D storylines using a three-zone method.
+        Zone 1: "Core Mean" models within a central ellipse (inner_radius).
+        Zone 2: "Neutral" models between the inner and outer ellipse.
+        Zone 3: "Extreme" models outside the outer ellipse (80% confidence region).
         """
-        logging.info(f"Classifying models into 2D storylines using quadrant method with inner radius: {radius} std. dev...")
+        logging.info(f"Classifying models into 2D storylines using THREE-ZONE method (Inner Radius: {radius} std. dev.)...")
         classification_results = {}
+        
+        # Der Radius für die 80% Konfidenz-Ellipse, wie in Zappa & Shepherd (2017)
+        # Dies wird unsere Grenze für "extreme" Storylines sein.
+        outer_radius_t_value = np.sqrt(chi2.ppf(0.8, 2) / 2) # Ergibt ca. 1.26
 
         for season, gwl_storylines in storyline_defs_2d.items():
             jet_speed_key = f'{season}_JetSpeed'
@@ -515,7 +521,6 @@ class StorylineAnalyzer:
                 if gwl not in classification_results:
                     classification_results[gwl] = {}
 
-                # Step 1: Collect all relevant data and calculate stats
                 model_deltas_speed = all_deltas.get(jet_speed_key, {}).get(gwl, {})
                 model_deltas_lat = all_deltas.get(jet_lat_key, {}).get(gwl, {})
                 common_models = set(model_deltas_speed.keys()) & set(model_deltas_lat.keys())
@@ -525,7 +530,6 @@ class StorylineAnalyzer:
                 speed_values = np.array([model_deltas_speed[m] for m in common_models])
                 lat_values = np.array([model_deltas_lat[m] for m in common_models])
 
-                # Calculate Multi-Model Mean (MMM) and standard deviations
                 mmm_speed = np.mean(speed_values)
                 mmm_lat = np.mean(lat_values)
                 std_dev_speed = np.std(speed_values)
@@ -533,54 +537,46 @@ class StorylineAnalyzer:
 
                 if std_dev_speed < 1e-9 or std_dev_lat < 1e-9: continue
 
-                # Initialize all storyline categories for this GWL
+                # Initialisiere alle Storyline-Kategorien, füge "Neutral" hinzu
                 for storyline_type in storylines:
                     storyline_key = f"{season}_{storyline_type}"
                     classification_results[gwl][storyline_key] = []
                 
-                models_to_classify_extreme = set(common_models)
+                neutral_key = f"{season}_Neutral"
+                if neutral_key not in classification_results[gwl]:
+                    classification_results[gwl][neutral_key] = []
 
-                # Step 2: Identify and classify "Core Mean" models first
-                core_mean_key = None
-                for storyline_type in storylines:
-                     if 'Core Mean' in storyline_type:
-                         core_mean_key = f"{season}_{storyline_type}"
-                         break
-                
-                if core_mean_key:
-                    models_in_core = []
-                    for model_key in common_models:
-                        # Calculate normalized distance from the MMM
-                        norm_dist_sq = ((model_deltas_speed[model_key] - mmm_speed) / std_dev_speed)**2 + \
-                                       ((model_deltas_lat[model_key] - mmm_lat) / std_dev_lat)**2
+                # Klassifiziere jedes Modell in eine der drei Zonen
+                for model_key in common_models:
+                    norm_dist_sq = ((model_deltas_speed[model_key] - mmm_speed) / std_dev_speed)**2 + \
+                                ((model_deltas_lat[model_key] - mmm_lat) / std_dev_lat)**2
+                    norm_dist = np.sqrt(norm_dist_sq)
+
+                    # Zone 1: Core Mean
+                    if norm_dist <= radius:
+                        core_mean_key = f"{season}_Core Mean"
+                        if core_mean_key in classification_results[gwl]:
+                            classification_results[gwl][core_mean_key].append(model_key)
+                    
+                    # Zone 3: Extrem-Storylines
+                    elif norm_dist > outer_radius_t_value:
+                        is_north = model_deltas_lat[model_key] > mmm_lat
+                        is_fast = model_deltas_speed[model_key] > mmm_speed
+
+                        storyline_name = ""
+                        if is_fast and is_north:      storyline_name = 'Fast Jet & Northward Shift'
+                        elif not is_fast and is_north:storyline_name = 'Slow Jet & Northward Shift'
+                        elif not is_fast and not is_north: storyline_name = 'Slow Jet & Southward Shift'
+                        elif is_fast and not is_north: storyline_name = 'Fast Jet & Southward Shift'
                         
-                        if np.sqrt(norm_dist_sq) <= radius:
-                            models_in_core.append(model_key)
+                        if storyline_name:
+                            full_storyline_key = f"{season}_{storyline_name}"
+                            if full_storyline_key in classification_results[gwl]:
+                                classification_results[gwl][full_storyline_key].append(model_key)
                     
-                    classification_results[gwl][core_mean_key] = models_in_core
-                    # Remove core models from the set of models to be classified into extreme storylines
-                    models_to_classify_extreme -= set(models_in_core)
-
-
-                # Step 3: Classify the remaining (extreme) models into quadrants
-                for model_key in models_to_classify_extreme:
-                    is_north = model_deltas_lat[model_key] > mmm_lat
-                    is_fast = model_deltas_speed[model_key] > mmm_speed
-
-                    storyline_name = ""
-                    if is_fast and is_north:
-                        storyline_name = 'Fast Jet & Northward Shift'
-                    elif not is_fast and is_north:
-                        storyline_name = 'Slow Jet & Northward Shift'
-                    elif not is_fast and not is_north:
-                        storyline_name = 'Slow Jet & Southward Shift'
-                    elif is_fast and not is_north:
-                        storyline_name = 'Fast Jet & Southward Shift'
-                    
-                    if storyline_name:
-                        full_storyline_key = f"{season}_{storyline_name}"
-                        if full_storyline_key in classification_results[gwl]:
-                            classification_results[gwl][full_storyline_key].append(model_key)
+                    # Zone 2: Neutral
+                    else:
+                        classification_results[gwl][neutral_key].append(model_key)
 
         return classification_results
     

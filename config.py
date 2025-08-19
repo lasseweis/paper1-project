@@ -160,10 +160,12 @@ class Config:
     # Format: {'Season': {GWL: [List of Storyline Names]}}
     # The names are used to initialize the categories. The classification logic
     # dynamically assigns models to them.
+
     STORYLINE_JET_CHANGES_2D = {
         'DJF': {
             2.0: [
                 'Core Mean',
+                'Neutral',  # <-- HINZUFÜGEN
                 'Fast Jet & Northward Shift',
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
@@ -171,6 +173,7 @@ class Config:
             ],
             3.0: [
                 'Core Mean',
+                'Neutral',  # <-- HINZUFÜGEN
                 'Fast Jet & Northward Shift',
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
@@ -180,6 +183,7 @@ class Config:
         'JJA': {
             2.0: [
                 'Core Mean',
+                'Neutral',  # <-- HINZUFÜGEN
                 'Fast Jet & Northward Shift',
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
@@ -187,6 +191,7 @@ class Config:
             ],
             3.0: [
                 'Core Mean',
+                'Neutral',  # <-- HINZUFÜGEN
                 'Fast Jet & Northward Shift',
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',

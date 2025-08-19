@@ -1275,6 +1275,12 @@ class Visualizer:
             std_dev_x = np.std(x_vals)
             std_dev_y = np.std(y_vals)
             
+            # --- START DER ÄNDERUNG ---
+            # Quadrantenlinien durchgezogen zeichnen, die vom MMM ausgehen
+            ax.axhline(mmm_y, color='dimgrey', linestyle='-', linewidth=1.0, zorder=6)
+            ax.axvline(mmm_x, color='dimgrey', linestyle='-', linewidth=1.0, zorder=6)
+            # --- ENDE DER ÄNDERUNG ---
+
             # Innere Ellipse zeichnen (Core Mean Zone)
             inner_ellipse = mpatches.Ellipse(
                 xy=(mmm_x, mmm_y),
@@ -1309,14 +1315,16 @@ class Visualizer:
         ax.set_ylabel(get_axis_label(y_jet_key), fontsize=9)
         ax.set_title(title, fontsize=11)
         ax.grid(True, linestyle=':', alpha=0.6)
-        ax.axhline(0, color='grey', lw=0.7); ax.axvline(0, color='grey', lw=0.7)
+        
+        # --- START DER ÄNDERUNG ---
+        # Die Nulllinien werden hier entfernt (auskommentiert)
+        # ax.axhline(0, color='grey', lw=0.7); ax.axvline(0, color='grey', lw=0.7)
+        # --- ENDE DER ÄNDERUNG ---
         
         # Legende anpassen
         handles, labels = ax.get_legend_handles_labels()
         by_label = dict(zip(labels, handles)) # Um doppelte Einträge zu vermeiden
         ax.legend(by_label.values(), by_label.keys(), loc='upper center', bbox_to_anchor=(0.5, -0.25), ncol=2, fontsize=8)
-
-
     @staticmethod
     def plot_jet_inter_relationship_scatter_combined_gwl(cmip6_results):
         """
@@ -2004,10 +2012,10 @@ class Visualizer:
     def plot_storyline_impact_barchart_with_discharge(final_impacts, discharge_impacts, discharge_data_historical, config):
         """
         Creates a 3x2 vertical bar chart to visualize storyline impacts for Temp, Precip, and Discharge.
-        Uses multivariate results for Temp/Precip and direct calculation for Discharge.
-        MODIFIED to show discharge in absolute units (m³/s) and add historical mean and two low-flow threshold lines.
+        MODIFIED to show only the CHANGE in discharge, consistent with temperature and precipitation plots,
+        and adds fixed low-flow thresholds. The annotation shows the change and the resulting absolute value.
         """
-        logging.info("Plotting final storyline impacts (including discharge in absolute m³/s) as a 3x2 bar chart...")
+        logging.info("Plotting final storyline impacts (including discharge change with absolute values) as a 3x2 bar chart...")
         Visualizer.ensure_plot_dir_exists()
 
         if not final_impacts:
@@ -2043,14 +2051,10 @@ class Visualizer:
             season = impact_key.split('_')[0]
             season_lower = 'winter' if season == 'DJF' else 'summer'
             
-            # === KORRIGIERTE ZEILE ===
-            # Holt die Liste der Storyline-Namen direkt aus der Konfiguration, ohne .keys()
             storyline_names_ordered = config.STORYLINE_JET_CHANGES_2D.get(season, {}).get(gwls_to_plot[0], [])
             
-            # Entferne 'Neutral' aus der Liste für diesen spezifischen Plot, falls vorhanden
             if 'Neutral' in storyline_names_ordered:
                 storyline_names_ordered.remove('Neutral')
-            # === ENDE DER KORREKTUR ===
 
             df_change = pd.DataFrame(index=storyline_names_ordered, columns=gwls_to_plot, dtype=float)
             for gwl in gwls_to_plot:
@@ -2061,13 +2065,8 @@ class Visualizer:
             x_pos = np.arange(len(storyline_names_ordered))
             bar_width = 0.35
             
-            is_discharge_plot = 'discharge' in impact_key
-            hist_mean = 0
-            if is_discharge_plot:
-                hist_mean = discharge_data_historical.get(f'{season_lower}_mean', 0)
-                df_plot = df_change + hist_mean
-            else:
-                df_plot = df_change
+            # We plot the change values directly for all variables
+            df_plot = df_change
 
             rects1 = ax.bar(x_pos - bar_width/2, df_plot[gwls_to_plot[0]], bar_width, 
                             label=f'+{gwls_to_plot[0]}°C GWL', color=gwl_colors[gwls_to_plot[0]], zorder=10)
@@ -2077,27 +2076,31 @@ class Visualizer:
             # --- 3. Subplot Formatting ---
             ax.set_title(plot_info['title'], loc='left', fontsize=14, weight='bold')
             
+            is_discharge_plot = 'discharge' in impact_key
             unit = '(°C)' if 'tas' in impact_key else '(m³/s)' if is_discharge_plot else '(%)'
-            y_label = f'Projected Change {unit}' if not is_discharge_plot else f'Projected Discharge {unit}'
+            y_label = f'Projected Change {unit}'
             if col == 0:
                 ax.set_ylabel(y_label, fontsize=12)
 
-            ref_line_val = hist_mean if is_discharge_plot else 0
-            ax.axhline(ref_line_val, color='black', linestyle='-', linewidth=0.8, zorder=1)
+            ax.axhline(0, color='black', linestyle='-', linewidth=0.8, zorder=1)
 
+            # --- MODIFICATION START ---
+            # Draw threshold lines for discharge plots, based on the change from the historical mean
             if is_discharge_plot:
-                low_flow_thresh_10 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold')
+                hist_mean = discharge_data_historical.get(f'{season_lower}_mean')
+                # These values are now the fixed ones from main.py
+                low_flow_thresh_10 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold') 
                 low_flow_thresh_30 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold_30')
                 
                 if hist_mean is not None:
-                    ax.axhline(hist_mean, color='gray', linestyle='--', linewidth=2, zorder=5, 
-                            label=f'Hist. Mean ({hist_mean:.0f} m³/s)')
-                if low_flow_thresh_30 is not None:
-                    ax.axhline(low_flow_thresh_30, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5,
-                            label=f'30th Percentile Flow ({low_flow_thresh_30:.0f} m³/s)')
-                if low_flow_thresh_10 is not None:
-                    ax.axhline(low_flow_thresh_10, color='black', linestyle=':', linewidth=2.5, zorder=5, 
-                            label=f'10th Percentile Low-Flow ({low_flow_thresh_10:.0f} m³/s)')
+                    if low_flow_thresh_30 is not None:
+                        ax.axhline(low_flow_thresh_30 - hist_mean, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5,
+                                label=f'Moderate Low-Flow ({low_flow_thresh_30} m³/s)')
+                    if low_flow_thresh_10 is not None:
+                        ax.axhline(low_flow_thresh_10 - hist_mean, color='black', linestyle=':', linewidth=2.5, zorder=5, 
+                                label=f'Extreme Low-Flow ({low_flow_thresh_10} m³/s)')
+                ax.legend(loc='best', fontsize=9)
+            # --- MODIFICATION END ---
 
             ax.set_xticks(x_pos)
             ax.set_xticklabels([name.replace(' & ', ' &\n').replace(' (MMM)','') for name in storyline_names_ordered], 
@@ -2105,25 +2108,32 @@ class Visualizer:
             if row < 2:
                 ax.set_xticklabels([])
 
+            # --- MODIFICATION START ---
+            # Modify the annotation loop
+            hist_mean = discharge_data_historical.get(f'{season_lower}_mean') if is_discharge_plot else 0
             for rects in [rects1, rects2]:
                 for rect in rects:
-                    height = rect.get_height()
-                    if np.isnan(height): continue
+                    change_val = rect.get_height()
+                    if np.isnan(change_val): continue
                     
                     offset = (ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.03
-                    text_pos = height + offset if height >= 0 else height - offset
-                    va = 'bottom' if height >= 0 else 'top'
+                    text_pos = change_val + offset if change_val >= 0 else change_val - offset
+                    va = 'bottom' if change_val >= 0 else 'top'
                     
-                    label_format = '{:.0f}' if is_discharge_plot else '{:.2f}'
-                    ax.annotate(label_format.format(height),
+                    # Prepare the label text: "change (absolute)"
+                    if is_discharge_plot and hist_mean is not None:
+                        absolute_val = hist_mean + change_val
+                        label_text = f'{change_val:+.0f}\n({absolute_val:.0f})'
+                    else:
+                        label_text = f'{change_val:+.2f}'
+
+                    ax.annotate(label_text,
                                 xy=(rect.get_x() + rect.get_width() / 2, text_pos),
-                                ha='center', va=va, fontsize=9)
+                                ha='center', va=va, fontsize=8)
+            # --- MODIFICATION END ---
             
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
-            
-            if is_discharge_plot:
-                ax.legend(loc='best', fontsize=9)
 
         # --- 4. Final Figure Formatting ---
         handles, labels = axs[0, 0].get_legend_handles_labels()

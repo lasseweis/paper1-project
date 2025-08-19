@@ -137,7 +137,6 @@ class ClimateAnalysis:
             df['time'] = pd.to_datetime(df[['year', 'month']].assign(day=15))
             df = df.set_index('time')
             
-            # --- START MODIFICATION ---
             # Create a base DataArray for all calculations
             da_full = df[['discharge']].to_xarray()['discharge']
             da_with_seasons = DataProcessor.assign_season_to_dataarray(da_full)
@@ -155,11 +154,14 @@ class ClimateAnalysis:
                         # Store detrended timeseries for correlation analyses
                         result[f'{season_lower}_discharge_detrended'] = DataProcessor.detrend_data(season_ts)
                         
-                        # Store historical mean and low flow thresholds for the new plot
+                        # Store historical mean for reference
                         result[f'{season_lower}_mean'] = season_ts.mean().item()
-                        result[f'{season_lower}_lowflow_threshold'] = season_ts.quantile(0.10).item() # 10th percentile
-                        # ADDED THIS LINE:
-                        result[f'{season_lower}_lowflow_threshold_30'] = season_ts.quantile(0.30).item() # 30th percentile
+                        
+                        # --- MODIFICATION START ---
+                        # Use fixed thresholds as requested by the user
+                        result[f'{season_lower}_lowflow_threshold'] = 1064  # Extreme Low Flow (10th percentile)
+                        result[f'{season_lower}_lowflow_threshold_30'] = 1417 # Moderate Low Flow (30th percentile)
+                        # --- MODIFICATION END ---
             
             # Keep the old structure for extreme_flow for other plots if needed
             high_flow_threshold = df['discharge'].quantile(0.90)
@@ -176,10 +178,8 @@ class ClimateAnalysis:
                     season_data = DataProcessor.filter_by_season(seasonal_extreme_ts, season)
                     if season_data is not None:
                         result[f'{season.lower()}_extreme_flow'] = DataProcessor.detrend_data(season_data)
-            # --- END MODIFICATION ---
 
-            logging.info(f"Discharge processing complete. Winter mean: {result.get('winter_mean', 'N/A'):.2f}, Winter low flow: {result.get('winter_lowflow_threshold', 'N/A'):.2f}")
-            logging.info(f"Summer mean: {result.get('summer_mean', 'N/A'):.2f}, Summer low flow: {result.get('summer_lowflow_threshold', 'N/A'):.2f}")
+            logging.info(f"Discharge processing complete. Using fixed low-flow thresholds: 1417 m³/s (30th) and 1064 m³/s (10th).")
             return result
 
         except Exception as e:

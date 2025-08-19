@@ -501,17 +501,13 @@ class StorylineAnalyzer:
     @staticmethod
     def classify_models_into_storylines_2d(all_deltas, storyline_defs_2d, radius):
         """
-        Classifies CMIP6 models into 2D storylines using a three-zone method.
-        Zone 1: "Core Mean" models within a central ellipse (inner_radius).
-        Zone 2: "Neutral" models between the inner and outer ellipse.
-        Zone 3: "Extreme" models outside the outer ellipse (80% confidence region).
+        Classifies CMIP6 models into 2D storylines using a multi-zone method,
+        now including on-axis storylines based on extreme storyline means.
         """
-        logging.info(f"Classifying models into 2D storylines using THREE-ZONE method (Inner Radius: {radius} std. dev.)...")
+        logging.info(f"Classifying models into 2D and Axial storylines (Inner Radius: {radius} std. dev.)...")
         classification_results = {}
         
-        # Der Radius für die 80% Konfidenz-Ellipse, wie in Zappa & Shepherd (2017)
-        # Dies wird unsere Grenze für "extreme" Storylines sein.
-        outer_radius_t_value = np.sqrt(chi2.ppf(0.8, 2) / 2) # Ergibt ca. 1.26
+        outer_radius_t_value = np.sqrt(chi2.ppf(0.8, 2) / 2)
 
         for season, gwl_storylines in storyline_defs_2d.items():
             jet_speed_key = f'{season}_JetSpeed'
@@ -537,49 +533,75 @@ class StorylineAnalyzer:
 
                 if std_dev_speed < 1e-9 or std_dev_lat < 1e-9: continue
 
-                # Initialisiere alle Storyline-Kategorien, füge "Neutral" hinzu
+                # Initialize all storyline categories from the extended config
                 for storyline_type in storylines:
                     storyline_key = f"{season}_{storyline_type}"
                     classification_results[gwl][storyline_key] = []
-                
-                neutral_key = f"{season}_Neutral"
-                if neutral_key not in classification_results[gwl]:
-                    classification_results[gwl][neutral_key] = []
 
-                # Klassifiziere jedes Modell in eine der drei Zonen
+                # --- PART 1: Classify into Core, Extreme, and Neutral zones ---
                 for model_key in common_models:
                     norm_dist_sq = ((model_deltas_speed[model_key] - mmm_speed) / std_dev_speed)**2 + \
-                                ((model_deltas_lat[model_key] - mmm_lat) / std_dev_lat)**2
+                                   ((model_deltas_lat[model_key] - mmm_lat) / std_dev_lat)**2
                     norm_dist = np.sqrt(norm_dist_sq)
 
-                    # Zone 1: Core Mean
                     if norm_dist <= radius:
-                        core_mean_key = f"{season}_Core Mean"
-                        if core_mean_key in classification_results[gwl]:
-                            classification_results[gwl][core_mean_key].append(model_key)
-                    
-                    # Zone 3: Extrem-Storylines
+                        classification_results[gwl][f"{season}_Core Mean"].append(model_key)
                     elif norm_dist > outer_radius_t_value:
                         is_north = model_deltas_lat[model_key] > mmm_lat
                         is_fast = model_deltas_speed[model_key] > mmm_speed
-
                         storyline_name = ""
                         if is_fast and is_north:      storyline_name = 'Fast Jet & Northward Shift'
                         elif not is_fast and is_north:storyline_name = 'Slow Jet & Northward Shift'
                         elif not is_fast and not is_north: storyline_name = 'Slow Jet & Southward Shift'
                         elif is_fast and not is_north: storyline_name = 'Fast Jet & Southward Shift'
-                        
                         if storyline_name:
-                            full_storyline_key = f"{season}_{storyline_name}"
-                            if full_storyline_key in classification_results[gwl]:
-                                classification_results[gwl][full_storyline_key].append(model_key)
-                    
-                    # Zone 2: Neutral
+                            classification_results[gwl][f"{season}_{storyline_name}"].append(model_key)
                     else:
-                        classification_results[gwl][neutral_key].append(model_key)
+                        classification_results[gwl][f"{season}_Neutral"].append(model_key)
+                
+                # --- PART 2: Define and classify axial storylines ---
+                extreme_storyline_means = {}
+                extreme_types_in_config = [s for s in storylines if 'Shift' in s and 'Core' not in s and 'Only' not in s]
+                
+                for storyline_name in extreme_types_in_config:
+                    full_key = f"{season}_{storyline_name}"
+                    models_in_storyline = classification_results[gwl].get(full_key, [])
+                    if models_in_storyline:
+                        mean_speed = np.mean([model_deltas_speed[m] for m in models_in_storyline])
+                        mean_lat = np.mean([model_deltas_lat[m] for m in models_in_storyline])
+                        extreme_storyline_means[storyline_name] = {'speed': mean_speed, 'lat': mean_lat}
+
+                axial_centers = {}
+                if extreme_storyline_means:
+                    max_lat_storyline = max(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['lat'])
+                    min_lat_storyline = min(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['lat'])
+                    max_speed_storyline = max(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['speed'])
+                    min_speed_storyline = min(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['speed'])
+
+                    axial_centers['Northward Shift Only'] = {'speed': 0, 'lat': extreme_storyline_means[max_lat_storyline]['lat']}
+                    axial_centers['Southward Shift Only'] = {'speed': 0, 'lat': extreme_storyline_means[min_lat_storyline]['lat']}
+                    axial_centers['Fast Jet Only'] = {'speed': extreme_storyline_means[max_speed_storyline]['speed'], 'lat': 0}
+                    axial_centers['Slow Jet Only'] = {'speed': extreme_storyline_means[min_speed_storyline]['speed'], 'lat': 0}
+
+                for storyline_name, center in axial_centers.items():
+                    storyline_key = f"{season}_{storyline_name}"
+                    classified_models_for_axial = []
+                    
+                    for model_key in common_models:
+                        norm_dist_sq = ((model_deltas_speed[model_key] - center['speed']) / std_dev_speed)**2 + \
+                                       ((model_deltas_lat[model_key] - center['lat']) / std_dev_lat)**2
+                        if np.sqrt(norm_dist_sq) <= radius:
+                            classified_models_for_axial.append(model_key)
+                    
+                    classification_results[gwl][storyline_key] = classified_models_for_axial
+                    
+                    if classified_models_for_axial:
+                        neutral_key = f"{season}_Neutral"
+                        current_neutral = set(classification_results[gwl].get(neutral_key, []))
+                        to_remove = set(classified_models_for_axial)
+                        classification_results[gwl][neutral_key] = sorted(list(current_neutral - to_remove))
 
         return classification_results
-    
     def calculate_cmip6_u850_change_fields(self,
                                             models_to_run=None,
                                             future_scenario='ssp585',
@@ -1970,4 +1992,104 @@ class StorylineAnalyzer:
             'thresholds': {'mean': hist_mean, 'std': hist_std}
         }
         
+        return results
+    
+    @staticmethod
+    def analyze_storyline_discharge_extremes(cmip6_results, historical_discharge_da, config):
+        """
+        Analyzes the frequency and return period of extreme low-flow discharge events
+        for each defined storyline at different global warming levels.
+
+        Returns a structured dictionary ready for plotting the change in return periods.
+        """
+        logging.info("Analyzing storyline-specific extreme discharge return periods...")
+        
+        # --- 1. Define thresholds from historical observations ---
+        if historical_discharge_da is None:
+            logging.error("Historical discharge data is missing, cannot define thresholds.")
+            return None
+        
+        # We need seasonal thresholds as discharge has strong seasonal cycle
+        results = {}
+        thresholds = {}
+        for season in ['Winter', 'Summer']:
+            season_lower = season.lower()
+            
+            # Filter historical data by season
+            hist_seasonal = DataProcessor.filter_by_season(
+                DataProcessor.assign_season_to_dataarray(historical_discharge_da), season
+            ).groupby('season_year').mean('time')
+            
+            mean = hist_seasonal.mean().item()
+            std = hist_seasonal.std().item()
+            
+            # Define multiple event severities
+            thresholds[season] = {
+                'Moderate (-1σ)': {'val': mean - 1 * std, 'hist_freq': 0.1587}, # Based on normal distribution
+                'Severe (-2σ)':   {'val': mean - 2 * std, 'hist_freq': 0.0228},
+                'Extreme (-3σ)':  {'val': mean - 3 * std, 'hist_freq': 0.0013},
+            }
+            # Calculate historical return period in years (1 / (freq_per_season))
+            for key, data in thresholds[season].items():
+                data['hist_return_period'] = 1 / data['hist_freq']
+
+        # --- 2. Get CMIP6 data ---
+        storyline_classification = cmip6_results.get('storyline_classification_2d')
+        metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
+        gwl_years = cmip6_results.get('gwl_threshold_years', {})
+        window = config.GWL_YEARS_WINDOW
+
+        if not all([storyline_classification, metric_timeseries, gwl_years]):
+            logging.error("Missing CMIP6 data for storyline discharge analysis.")
+            return None
+
+        # --- 3. Analyze frequencies per storyline ---
+        for gwl in config.GLOBAL_WARMING_LEVELS:
+            results[gwl] = {}
+            for season in ['Winter', 'Summer']:
+                results[gwl][season] = {}
+                season_label = 'DJF' if season == 'Winter' else 'JJA'
+                impact_key = f"{season_label}_discharge"
+                
+                storylines_in_gwl = storyline_classification.get(gwl, {})
+                for storyline_key, model_list in storylines_in_gwl.items():
+                    if not model_list or season_label not in storyline_key:
+                        continue
+                    
+                    storyline_name = storyline_key.replace(f'{season_label}_', '')
+                    results[gwl][season][storyline_name] = {}
+
+                    total_event_counts = {k: 0 for k in thresholds[season]}
+                    total_years_analyzed = 0
+
+                    for model_run_key in model_list:
+                        threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
+                        discharge_ts = metric_timeseries.get(model_run_key, {}).get(impact_key)
+                        
+                        if threshold_year is None or discharge_ts is None: continue
+
+                        start_year = threshold_year - window // 2
+                        end_year = threshold_year + (window - 1) // 2
+                        ts_slice = discharge_ts.sel(season_year=slice(start_year, end_year))
+
+                        if ts_slice.season_year.size > 0:
+                            total_years_analyzed += ts_slice.season_year.size
+                            for event_name, data in thresholds[season].items():
+                                count = (ts_slice < data['val']).sum().item()
+                                total_event_counts[event_name] += count
+                    
+                    # Calculate future return period for each event type
+                    for event_name, data in thresholds[season].items():
+                        if total_years_analyzed > 0 and total_event_counts[event_name] > 0:
+                            future_freq = total_event_counts[event_name] / total_years_analyzed
+                            future_return_period = 1 / future_freq
+                        else:
+                            future_return_period = np.inf # Event doesn't happen in the future slice
+                        
+                        results[gwl][season][storyline_name][event_name] = {
+                            'hist_return_period': data['hist_return_period'],
+                            'future_return_period': future_return_period
+                        }
+
+        results['thresholds'] = thresholds
         return results

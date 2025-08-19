@@ -753,36 +753,48 @@ class ClimateAnalysis:
                         logging.info(f"  - Storyline '{storyline_name}' ({season}): No models classified.")
             logging.info("-----------------------------------------------------------------")
             
-                # --- PART 6: EXTREME DISCHARGE FREQUENCY ANALYSIS ---
-            logging.info("\n\n--- Checking for Extreme Discharge Frequency Analysis Plot ---")
-            extreme_discharge_plot_filename = os.path.join(Config.PLOT_DIR, "extreme_discharge_frequency_comparison.png")
-            if not os.path.exists(extreme_discharge_plot_filename):
-                logging.info(f"Plot '{extreme_discharge_plot_filename}' not found. Calculating data and creating plot...")
+            # --- PART 6: STORYLINE-BASED EXTREME DISCHARGE ANALYSIS ---
+            logging.info("\n\n--- Checking for Storyline-based Discharge Return Period Plot ---")
+            return_period_plot_filename = os.path.join(Config.PLOT_DIR, "storyline_discharge_return_period_change.png")
+            if not os.path.exists(return_period_plot_filename):
+                logging.info(f"Plot '{return_period_plot_filename}' not found. Calculating data and creating plot...")
 
-                # We need the raw historical discharge timeseries for this
+                # We need the raw monthly historical discharge timeseries for this
+                historical_da = None
                 try:
-                    hist_data_raw = pd.read_excel(Config.DISCHARGE_FILE, usecols='A,B,H', index_col=None)['Wien'].dropna()
-                    historical_da = xr.DataArray(hist_data_raw.values, dims=['time'])
+                    # --- START OF CORRECTION ---
+                    # Load the data explicitly, assigning column names to prevent KeyErrors.
+                    # This is more robust than relying on pandas to infer headers.
+                    df_hist = pd.read_excel(Config.DISCHARGE_FILE, usecols='A,B,H', header=None,
+                                            names=['year', 'month', 'Wien'])
+                    
+                    # Drop potential header rows if they were read as data
+                    df_hist = df_hist[pd.to_numeric(df_hist['year'], errors='coerce').notna()]
+                    df_hist[['year', 'month']] = df_hist[['year', 'month']].astype(int)
+
+                    df_hist['time'] = pd.to_datetime(df_hist[['year', 'month']].assign(day=15))
+                    df_hist = df_hist.set_index('time')
+                    historical_da = df_hist['Wien'].to_xarray()
+                    # --- END OF CORRECTION ---
                 except Exception as e:
-                    logging.error(f"Could not load raw historical discharge for frequency analysis: {e}")
-                    historical_da = None
+                    logging.error(f"Could not load raw historical discharge for return period analysis: {e}")
 
-                if historical_da is not None and cmip6_discharge_loaded:
-                    frequency_results = StorylineAnalyzer.analyze_extreme_discharge_frequency(
+                if historical_da is not None and cmip6_results:
+                    # Call the new analysis function
+                    return_period_results = storyline_analyzer.analyze_storyline_discharge_extremes(
+                        cmip6_results=cmip6_results,
                         historical_discharge_da=historical_da,
-                        cmip6_discharge_data=cmip6_discharge_loaded
+                        config=Config()
                     )
-                    if frequency_results:
-                        Visualizer.plot_extreme_discharge_frequency_comparison(frequency_results, Config())
+                    if return_period_results:
+                        # Call the new plotting function
+                        Visualizer.plot_storyline_return_period_change(return_period_results, Config())
                     else:
-                        logging.warning("Extreme discharge frequency analysis did not return results. Skipping plot.")
+                        logging.warning("Storyline discharge return period analysis did not return results. Skipping plot.")
                 else:
-                    logging.warning("Skipping extreme discharge frequency plot due to missing historical or CMIP6 discharge data.")
+                    logging.warning("Skipping discharge return period plot due to missing historical or CMIP6 data.")
             else:
-                logging.info(f"Plot '{extreme_discharge_plot_filename}' already exists. Skipping calculation and creation.")
-
-
-            return regression_results # This line should already be at the end
+                logging.info(f"Plot '{return_period_plot_filename}' already exists. Skipping calculation and creation.")
 
         logging.info("\n\n=====================================================")
         logging.info("=== FULL ANALYSIS COMPLETED ===")

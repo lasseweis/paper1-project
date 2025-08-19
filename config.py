@@ -153,49 +153,64 @@ class Config:
 
     # --- NEW: 2D Storyline Definitions (for Scatter Plots) ---
     # Radius for the new quadrant method (in units of standard deviation)
-    # A value of 0.5 means models inside the inner oval are not classified,
-    # matching the method from Zappa and Shepherd (2017).
+    # A value of 0.5 means models inside the inner oval are classified into that storyline zone.
     STORYLINE_INNER_RADIUS = 0.5 
 
     # Format: {'Season': {GWL: [List of Storyline Names]}}
     # The names are used to initialize the categories. The classification logic
     # dynamically assigns models to them.
-
+    # ADDED THE FOUR "Only" aAial storylines to the definitions.
     STORYLINE_JET_CHANGES_2D = {
         'DJF': {
             2.0: [
-                'Core Mean',
-                'Neutral',  # <-- HINZUFÜGEN
+                'Core Mean', 'Neutral',
                 'Fast Jet & Northward Shift',
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
                 'Fast Jet & Southward Shift',
+                # --- AXIAL STORYLINES ---
+                'Northward Shift Only',
+                'Southward Shift Only',
+                'Fast Jet Only',
+                'Slow Jet Only',
             ],
             3.0: [
-                'Core Mean',
-                'Neutral',  # <-- HINZUFÜGEN
+                'Core Mean', 'Neutral',
                 'Fast Jet & Northward Shift',
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
                 'Fast Jet & Southward Shift',
+                # --- AXIAL STORYLINES ---
+                'Northward Shift Only',
+                'Southward Shift Only',
+                'Fast Jet Only',
+                'Slow Jet Only',
             ]
         },
         'JJA': {
             2.0: [
-                'Core Mean',
-                'Neutral',  # <-- HINZUFÜGEN
+                'Core Mean', 'Neutral',
                 'Fast Jet & Northward Shift',
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
                 'Fast Jet & Southward Shift',
+                # --- AXIAL STORYLINES ---
+                'Northward Shift Only',
+                'Southward Shift Only',
+                'Fast Jet Only',
+                'Slow Jet Only',
             ],
             3.0: [
-                'Core Mean',
-                'Neutral',  # <-- HINZUFÜGEN
+                'Core Mean', 'Neutral',
                 'Fast Jet & Northward Shift',
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
                 'Fast Jet & Southward Shift',
+                # --- AXIAL STORYLINES ---
+                'Northward Shift Only',
+                'Southward Shift Only',
+                'Fast Jet Only',
+                'Slow Jet Only',
             ]
         }
     }

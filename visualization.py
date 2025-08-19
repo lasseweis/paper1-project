@@ -1203,128 +1203,103 @@ class Visualizer:
     def _plot_single_jet_relationship_panel(ax, cmip6_results, gwl_to_plot, x_jet_key, y_jet_key, title,
                                         inner_radius=None):
         """
-        Helper-Funktion zum Zeichnen eines einzelnen Panels des Scatter-Plots, der die Beziehung zwischen Jet-Indizes darstellt.
-        NEU: Zeichnet eine innere und eine äußere (80% Konfidenz) Ellipse sowie Quadrantenlinien,
-        um die Storylines nach der Methode von Zappa and Shepherd (2017) zu visualisieren.
-        Zusätzlich werden die Mittelwerte der Extrem-Storylines als farbige Kreuze gezeichnet.
+        Helper-Funktion zum Zeichnen eines Panels, das die Beziehung zwischen Jet-Indizes darstellt.
+        Stellt jetzt sowohl die Mittelwerte der Extrem-Quadranten (Kreuze) als auch die
+        Klassifikations-Zonen der axialen Storylines (Ellipsen/Diamanten) dar.
         """
         all_deltas = cmip6_results.get('all_individual_model_deltas_for_plot', {})
         storyline_classification = cmip6_results.get('storyline_classification_2d', {})
+        gwl_classification = storyline_classification.get(gwl_to_plot, {})
+        season_prefix = x_jet_key.split('_')[0]
 
         x_deltas = all_deltas.get(x_jet_key, {}).get(gwl_to_plot, {})
         y_deltas = all_deltas.get(y_jet_key, {}).get(gwl_to_plot, {})
-
         if not x_deltas or not y_deltas:
             ax.text(0.5, 0.5, "Data Missing", ha='center', va='center', transform=ax.transAxes)
-            ax.set_title(title, fontsize=10)
-            return
+            ax.set_title(title, fontsize=10); return
 
         common_models = sorted(list(set(x_deltas.keys()) & set(y_deltas.keys())))
         x_vals = np.array([x_deltas[m] for m in common_models])
         y_vals = np.array([y_deltas[m] for m in common_models])
 
-        # Scatter-Plot für einzelne Modelle
         ax.scatter(x_vals, y_vals, color='teal', alpha=0.5, s=25, label=f'CMIP6 Models (N={len(common_models)})')
-
-        # Lineare Regression
+        
         slope, intercept, r_value, p_value, _ = StatsAnalyzer.calculate_regression(x_vals, y_vals)
         if not np.isnan(slope):
-            x_fit = np.array(ax.get_xlim())
-            y_fit = intercept + slope * x_fit
+            x_fit = np.array(ax.get_xlim()); y_fit = intercept + slope * x_fit
             p_str = " (p<0.05)" if p_value < 0.05 else ""
-            ax.plot(x_fit, y_fit, color='black', linestyle='--', linewidth=1.5,
-                    label=f'Fit (r={r_value:.2f}{p_str})')
+            ax.plot(x_fit, y_fit, color='black', linestyle='--', linewidth=1.5, label=f'Fit (r={r_value:.2f}{p_str})')
 
-        # Multi-Model Mean (MMM)
-        mmm_changes = cmip6_results.get('mmm_changes', {})
-        mmm_x = mmm_changes.get(gwl_to_plot, {}).get(x_jet_key, np.mean(x_vals))
-        mmm_y = mmm_changes.get(gwl_to_plot, {}).get(y_jet_key, np.mean(y_vals))
+        mmm_x = np.mean(x_vals); mmm_y = np.mean(y_vals)
+        std_dev_x = np.std(x_vals); std_dev_y = np.std(y_vals)
+        ax.scatter(mmm_x, mmm_y, color='red', marker='X', s=120, zorder=10, edgecolor='black', linewidth=1.5, label='Multi-Model Mean')
         
-        ax.scatter(mmm_x, mmm_y, color='red', marker='X', s=120, zorder=10,
-                edgecolor='black', linewidth=1.5, label='Multi-Model Mean')
+        ax.axhline(mmm_y, color='dimgrey', linestyle='-', linewidth=1.0, zorder=6)
+        ax.axvline(mmm_x, color='dimgrey', linestyle='-', linewidth=1.0, zorder=6)
 
-        # === ZEICHNEN DER STORYLINE-MITTELWERTE ===
-        season_prefix = x_jet_key.split('_')[0]
+        if inner_radius:
+            inner_ellipse = mpatches.Ellipse(xy=(mmm_x, mmm_y), width=2*inner_radius*std_dev_x, height=2*inner_radius*std_dev_y, angle=0, edgecolor='black', facecolor='grey', alpha=0.2, linewidth=1.0, zorder=5, label='Core Mean Zone')
+            ax.add_patch(inner_ellipse)
+            t_80 = np.sqrt(chi2.ppf(0.8, 2) / 2)
+            outer_ellipse = mpatches.Ellipse(xy=(mmm_x, mmm_y), width=2*t_80*std_dev_x, height=2*t_80*std_dev_y, angle=0, edgecolor='black', facecolor='none', linestyle='--', linewidth=1.5, zorder=5, label='80% Confidence Region')
+            ax.add_patch(outer_ellipse)
+
+        # === START DER WIEDERHERGESTELLTEN LOGIK: KREUZE FÜR EXTREM-STORYLINES ===
         storyline_means_to_plot = {
-            'Fast Jet & Northward Shift': '#d62728', # rot
-            'Slow Jet & Northward Shift': '#ff7f0e', # orange
-            'Slow Jet & Southward Shift': '#1f77b4', # blau
-            'Fast Jet & Southward Shift': '#2ca02c'  # grün
+            'Fast Jet & Northward Shift': '#d62728', 'Slow Jet & Northward Shift': '#ff7f0e',
+            'Slow Jet & Southward Shift': '#1f77b4', 'Fast Jet & Southward Shift': '#2ca02c'
         }
-        
-        gwl_classification = storyline_classification.get(gwl_to_plot, {})
-        
         for storyline_name, color in storyline_means_to_plot.items():
             storyline_key = f"{season_prefix}_{storyline_name}"
             models_in_storyline = gwl_classification.get(storyline_key, [])
-            
             if models_in_storyline:
-                storyline_x_vals = np.array([x_deltas[m] for m in models_in_storyline])
-                storyline_y_vals = np.array([y_deltas[m] for m in models_in_storyline])
-                
-                mean_x = np.mean(storyline_x_vals)
-                mean_y = np.mean(storyline_y_vals)
-                
-                # Plot des Mittelwerts als farbiges Kreuz
+                mean_x = np.mean([x_deltas[m] for m in models_in_storyline])
+                mean_y = np.mean([y_deltas[m] for m in models_in_storyline])
                 ax.scatter(mean_x, mean_y, color=color, marker='X', s=100, zorder=9,
                            edgecolor='black', linewidth=1.0, label=f'Mean: {storyline_name}')
-        # === ENDE STORYLINE-MITTELWERTE ===
+        # === ENDE DER WIEDERHERGESTELLTEN LOGIK ===
 
-        # === ZEICHNEN DER ELLIPSEN UND QUADRANTEN ===
-        if inner_radius is not None:
-            std_dev_x = np.std(x_vals)
-            std_dev_y = np.std(y_vals)
-            
-            # --- START DER ÄNDERUNG ---
-            # Quadrantenlinien durchgezogen zeichnen, die vom MMM ausgehen
-            ax.axhline(mmm_y, color='dimgrey', linestyle='-', linewidth=1.0, zorder=6)
-            ax.axvline(mmm_x, color='dimgrey', linestyle='-', linewidth=1.0, zorder=6)
-            # --- ENDE DER ÄNDERUNG ---
-
-            # Innere Ellipse zeichnen (Core Mean Zone)
-            inner_ellipse = mpatches.Ellipse(
-                xy=(mmm_x, mmm_y),
-                width=2 * inner_radius * std_dev_x,
-                height=2 * inner_radius * std_dev_y,
-                angle=0, edgecolor='black', 
-                facecolor='grey', alpha=0.2, linewidth=1.0, zorder=5, label='Core Mean Zone'
-            )
-            ax.add_patch(inner_ellipse)
-            
-            # Äußere 80% Konfidenz-Ellipse zeichnen
-            t_80_confidence = np.sqrt(chi2.ppf(0.8, 2) / 2)
-            outer_ellipse = mpatches.Ellipse(
-                xy=(mmm_x, mmm_y),
-                width=2 * t_80_confidence * std_dev_x,
-                height=2 * t_80_confidence * std_dev_y,
-                angle=0, edgecolor='black', facecolor='none',
-                linestyle='--', linewidth=1.5, zorder=5,
-                label='80% Confidence Region'
-            )
-            ax.add_patch(outer_ellipse)
-
-        # === ENDE ELLIPSEN ===
-
-        # Formatierung
+        # === LOGIK FÜR AXIALE STORYLINES BLEIBT ERHALTEN ===
+        axial_colors = {'Northward': '#1f77b4', 'Southward': '#ff7f0e', 'Fast': '#2ca02c', 'Slow': '#d62728'}
+        extreme_storyline_means = {}
+        extreme_types = [k.replace(f'{season_prefix}_', '') for k in gwl_classification if 'Shift' in k and 'Only' not in k]
+        for storyline_name in extreme_types:
+            models_in_storyline = gwl_classification.get(f"{season_prefix}_{storyline_name}", [])
+            if models_in_storyline:
+                mean_x = np.mean([x_deltas[m] for m in models_in_storyline])
+                mean_y = np.mean([y_deltas[m] for m in models_in_storyline])
+                extreme_storyline_means[storyline_name] = {'speed': mean_x, 'lat': mean_y}
+        
+        if extreme_storyline_means:
+            max_lat_storyline = max(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['lat'])
+            min_lat_storyline = min(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['lat'])
+            max_speed_storyline = max(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['speed'])
+            min_speed_storyline = min(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['speed'])
+            axial_centers = {
+                'Northward Shift Only': {'center': (0, extreme_storyline_means[max_lat_storyline]['lat']), 'color': axial_colors['Northward']},
+                'Southward Shift Only': {'center': (0, extreme_storyline_means[min_lat_storyline]['lat']), 'color': axial_colors['Southward']},
+                'Fast Jet Only': {'center': (extreme_storyline_means[max_speed_storyline]['speed'], 0), 'color': axial_colors['Fast']},
+                'Slow Jet Only': {'center': (extreme_storyline_means[min_speed_storyline]['speed'], 0), 'color': axial_colors['Slow']},
+            }
+            for name, data in axial_centers.items():
+                center_x, center_y = data['center']
+                ax.scatter(center_x, center_y, marker='D', s=80, color=data['color'], edgecolor='black', zorder=11, label=f'Center: {name}')
+                axial_ellipse = mpatches.Ellipse(xy=(center_x, center_y), width=2*inner_radius*std_dev_x, height=2*inner_radius*std_dev_y, angle=0, edgecolor=data['color'], facecolor='none', linestyle=':', linewidth=2.0, zorder=10)
+                ax.add_patch(axial_ellipse)
+        
         def get_axis_label(key):
-            label = f'Change in {key.replace("_", " ")}'
-            if "Lat" in key: label += ' (°Lat)'
-            elif "Speed" in key: label += ' (m/s)'
+            label = f'Change in {key.replace("_", " ")}';
+            if "Lat" in key: label += ' (°Lat)';
+            elif "Speed" in key: label += ' (m/s)';
             return label
         ax.set_xlabel(get_axis_label(x_jet_key), fontsize=9)
         ax.set_ylabel(get_axis_label(y_jet_key), fontsize=9)
         ax.set_title(title, fontsize=11)
         ax.grid(True, linestyle=':', alpha=0.6)
-        
-        # --- START DER ÄNDERUNG ---
-        # Die Nulllinien werden hier entfernt (auskommentiert)
-        # ax.axhline(0, color='grey', lw=0.7); ax.axvline(0, color='grey', lw=0.7)
-        # --- ENDE DER ÄNDERUNG ---
-        
-        # Legende anpassen
         handles, labels = ax.get_legend_handles_labels()
-        by_label = dict(zip(labels, handles)) # Um doppelte Einträge zu vermeiden
+        by_label = dict(zip(labels, handles))
         ax.legend(by_label.values(), by_label.keys(), loc='upper center', bbox_to_anchor=(0.5, -0.25), ncol=2, fontsize=8)
+        
     @staticmethod
     def plot_jet_inter_relationship_scatter_combined_gwl(cmip6_results):
         """
@@ -2012,16 +1987,15 @@ class Visualizer:
     def plot_storyline_impact_barchart_with_discharge(final_impacts, discharge_impacts, discharge_data_historical, config):
         """
         Creates a 3x2 vertical bar chart to visualize storyline impacts for Temp, Precip, and Discharge.
-        MODIFIED to include 1x and 2x standard deviation error bars for discharge plots to show variability.
+        MODIFIED to include axial storylines and specific ordering.
         """
-        logging.info("Plotting final storyline impacts (including discharge with std dev) as a 3x2 bar chart...")
+        logging.info("Plotting final storyline impacts (incl. axial and discharge) as a 3x2 bar chart...")
         Visualizer.ensure_plot_dir_exists()
 
         if not final_impacts:
             logging.warning("Cannot plot impacts: Input data is empty.")
             return
 
-        # --- 1. Setup & Data Combination ---
         plt.style.use('seaborn-v0_8-whitegrid')
         fig, axs = plt.subplots(3, 2, figsize=(16, 18))
 
@@ -2030,120 +2004,89 @@ class Visualizer:
 
         all_impacts = final_impacts.copy()
         for gwl, discharge_data in discharge_impacts.items():
-            if gwl not in all_impacts:
-                all_impacts[gwl] = {}
+            if gwl not in all_impacts: all_impacts[gwl] = {}
             all_impacts[gwl].update(discharge_data)
 
         plot_grid = {
-            (0, 0): {'key': 'DJF_tas', 'title': 'a) Winter (DJF) Temperature'},
-            (0, 1): {'key': 'JJA_tas', 'title': 'b) Summer (JJA) Temperature'},
-            (1, 0): {'key': 'DJF_pr', 'title': 'c) Winter (DJF) Precipitation'},
-            (1, 1): {'key': 'JJA_pr', 'title': 'd) Summer (JJA) Precipitation'},
-            (2, 0): {'key': 'DJF_discharge', 'title': 'e) Winter (DJF) Discharge'},
-            (2, 1): {'key': 'JJA_discharge', 'title': 'f) Summer (JJA) Discharge'}
+            (0, 0): {'key': 'DJF_tas', 'title': 'a) Winter (DJF) Temperature'}, (0, 1): {'key': 'JJA_tas', 'title': 'b) Summer (JJA) Temperature'},
+            (1, 0): {'key': 'DJF_pr', 'title': 'c) Winter (DJF) Precipitation'}, (1, 1): {'key': 'JJA_pr', 'title': 'd) Summer (JJA) Precipitation'},
+            (2, 0): {'key': 'DJF_discharge', 'title': 'e) Winter (DJF) Discharge'}, (2, 1): {'key': 'JJA_discharge', 'title': 'f) Summer (JJA) Discharge'}
         }
+        
+        # --- NEU: Definierte Reihenfolge für die x-Achse ---
+        storyline_display_order = [
+            'Core Mean',
+            'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
+            'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
+            'Slow Jet Only', 'Fast Jet Only'
+        ]
 
-        # --- 2. Plotting Loop ---
         for (row, col), plot_info in plot_grid.items():
             ax = axs[row, col]
-            impact_key = plot_info['key']
-            season = impact_key.split('_')[0]
+            impact_key = plot_info['key']; season = impact_key.split('_')[0]
             season_lower = 'winter' if season == 'DJF' else 'summer'
             
-            storyline_names_ordered = config.STORYLINE_JET_CHANGES_2D.get(season, {}).get(gwls_to_plot[0], [])
+            # Verwende die vordefinierte Reihenfolge und filtere nach existierenden Daten
+            gwl_data = all_impacts.get(gwls_to_plot[0], {}).get(impact_key, {})
+            available_storylines = [s for s in storyline_display_order if s in gwl_data]
             
-            if 'Neutral' in storyline_names_ordered:
-                storyline_names_ordered.remove('Neutral')
-
-            df_change = pd.DataFrame(index=storyline_names_ordered, columns=gwls_to_plot, dtype=float)
-            df_std_dev = pd.DataFrame(index=storyline_names_ordered, columns=gwls_to_plot, dtype=float)
+            df_change = pd.DataFrame(index=available_storylines, columns=gwls_to_plot, dtype=float)
+            df_std_dev = pd.DataFrame(index=available_storylines, columns=gwls_to_plot, dtype=float)
 
             for gwl in gwls_to_plot:
-                for name in storyline_names_ordered:
+                for name in available_storylines:
                     impact_data = all_impacts.get(gwl, {}).get(impact_key, {}).get(name, {})
                     df_change.loc[name, gwl] = impact_data.get('total')
                     if 'discharge' in impact_key:
                         df_std_dev.loc[name, gwl] = impact_data.get('mean_std_dev')
             
-            x_pos = np.arange(len(storyline_names_ordered))
+            x_pos = np.arange(len(available_storylines))
             bar_width = 0.35
-            
-            df_plot = df_change
+            rects1 = ax.bar(x_pos - bar_width/2, df_change[gwls_to_plot[0]], bar_width, label=f'+{gwls_to_plot[0]}°C GWL', color=gwl_colors[gwls_to_plot[0]], zorder=10)
+            rects2 = ax.bar(x_pos + bar_width/2, df_change[gwls_to_plot[1]], bar_width, label=f'+{gwls_to_plot[1]}°C GWL', color=gwl_colors[gwls_to_plot[1]], zorder=10)
 
-            rects1 = ax.bar(x_pos - bar_width/2, df_plot[gwls_to_plot[0]], bar_width, 
-                            label=f'+{gwls_to_plot[0]}°C GWL', color=gwl_colors[gwls_to_plot[0]], zorder=10)
-            rects2 = ax.bar(x_pos + bar_width/2, df_plot[gwls_to_plot[1]], bar_width, 
-                            label=f'+{gwls_to_plot[1]}°C GWL', color=gwl_colors[gwls_to_plot[1]], zorder=10)
-
-            # --- 3. Subplot Formatting ---
             ax.set_title(plot_info['title'], loc='left', fontsize=14, weight='bold')
             is_discharge_plot = 'discharge' in impact_key
             unit = '(°C)' if 'tas' in impact_key else '(m³/s)' if is_discharge_plot else '(%)'
-            if col == 0:
-                ax.set_ylabel(f'Projected Change {unit}', fontsize=12)
+            if col == 0: ax.set_ylabel(f'Projected Change {unit}', fontsize=12)
             ax.axhline(0, color='black', linestyle='-', linewidth=0.8, zorder=1)
 
             if is_discharge_plot:
-                # Plot error bars for discharge variability
                 for i_gwl, gwl in enumerate(gwls_to_plot):
-                    bar_positions = x_pos + (bar_width/2 * (1 if i_gwl==1 else -1))
-                    bar_heights = df_plot[gwl].values
-                    std_devs = df_std_dev[gwl].values
-                    
-                    for pos, height, std in zip(bar_positions, bar_heights, std_devs):
+                    bar_pos = x_pos + (bar_width/2 * (1 if i_gwl==1 else -1))
+                    for pos, height, std in zip(bar_pos, df_change[gwl].values, df_std_dev[gwl].values):
                         if not np.isnan(std) and not np.isnan(height):
-                            # 2x Std Dev (wider, more transparent)
-                            ax.errorbar(pos, height, yerr=2*std, fmt='none', ecolor=gwl_colors[gwl],
-                                        elinewidth=1.5, capsize=4, alpha=0.4, zorder=11)
-                            # 1x Std Dev (thinner, opaque)
-                            ax.errorbar(pos, height, yerr=std, fmt='none', ecolor=gwl_colors[gwl],
-                                        elinewidth=2.5, capsize=6, zorder=12)
-                
-                # Plot horizontal threshold lines
+                            ax.errorbar(pos, height, yerr=2*std, fmt='none', ecolor=gwl_colors[gwl], elinewidth=1.5, capsize=4, alpha=0.4, zorder=11)
+                            ax.errorbar(pos, height, yerr=std, fmt='none', ecolor=gwl_colors[gwl], elinewidth=2.5, capsize=6, zorder=12)
                 hist_mean = discharge_data_historical.get(f'{season_lower}_mean')
-                low_flow_thresh_10 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold') 
-                low_flow_thresh_30 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold_30')
-                if hist_mean is not None:
-                    if low_flow_thresh_30 is not None:
-                        ax.axhline(low_flow_thresh_30 - hist_mean, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5)
-                    if low_flow_thresh_10 is not None:
-                        ax.axhline(low_flow_thresh_10 - hist_mean, color='black', linestyle=':', linewidth=2.5, zorder=5)
+                if hist_mean:
+                    thresh30 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold_30')
+                    thresh10 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold')
+                    if thresh30: ax.axhline(thresh30-hist_mean, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5)
+                    if thresh10: ax.axhline(thresh10-hist_mean, color='black', linestyle=':', linewidth=2.5, zorder=5)
 
             ax.set_xticks(x_pos)
-            ax.set_xticklabels([name.replace(' & ', ' &\n').replace(' (MMM)','') for name in storyline_names_ordered], 
-                            rotation=45, ha="right", fontsize=11)
-            if row < 2:
-                ax.set_xticklabels([])
-
-            hist_mean = discharge_data_historical.get(f'{season_lower}_mean') if is_discharge_plot else 0
+            # Etiketten lesbarer machen
+            xtick_labels = [name.replace(' & ', ' &\n').replace(' (MMM)','').replace(' Only', '\n(Only)') for name in available_storylines]
+            ax.set_xticklabels(xtick_labels, rotation=45, ha="right", fontsize=10)
+            if row < 2: ax.set_xticklabels([])
+            
+            hist_mean = discharge_data_historical.get(f'{season_lower}_mean', 0) if is_discharge_plot else 0
             for rects in [rects1, rects2]:
                 for rect in rects:
                     change_val = rect.get_height()
                     if np.isnan(change_val): continue
-                    
                     offset = (ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.03
                     text_pos = change_val + offset if change_val >= 0 else change_val - offset
                     va = 'bottom' if change_val >= 0 else 'top'
-                    
-                    if is_discharge_plot and hist_mean is not None:
-                        absolute_val = hist_mean + change_val
-                        label_text = f'{change_val:+.0f}\n({absolute_val:.0f})'
-                    else:
-                        label_text = f'{change_val:+.2f}'
-
-                    ax.annotate(label_text,
-                                xy=(rect.get_x() + rect.get_width() / 2, text_pos),
-                                ha='center', va=va, fontsize=8)
+                    label_text = f'{change_val:+.0f}\n({hist_mean + change_val:.0f})' if is_discharge_plot and hist_mean else f'{change_val:+.2f}'
+                    ax.annotate(label_text, xy=(rect.get_x() + rect.get_width() / 2, text_pos), ha='center', va=va, fontsize=8)
             
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
+            ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
 
-        # --- 4. Final Figure Formatting & Shared Legend ---
         handles, labels = axs[0, 0].get_legend_handles_labels()
-        
         low_flow_10_val = discharge_data_historical.get('winter_lowflow_threshold', 'N/A')
         low_flow_30_val = discharge_data_historical.get('winter_lowflow_threshold_30', 'N/A')
-        
         handles.extend([
             plt.Line2D([0], [0], color='saddlebrown', linestyle='dotted', linewidth=2.5),
             plt.Line2D([0], [0], color='black', linestyle=':', linewidth=2.5),
@@ -2151,23 +2094,17 @@ class Visualizer:
             plt.Line2D([0], [0], color='gray', lw=1.5, marker='_', markersize=6, mew=1.5, alpha=0.5, linestyle='None')
         ])
         labels.extend([
-            f'Moderate Low-Flow ({low_flow_30_val} m³/s)',
-            f'Extreme Low-Flow ({low_flow_10_val} m³/s)',
-            '1x Std. Dev. of interannual variability',
-            '2x Std. Dev. of interannual variability'
+            f'Moderate Low-Flow ({low_flow_30_val} m³/s)', f'Extreme Low-Flow ({low_flow_10_val} m³/s)',
+            '1x Std. Dev. of interannual variability', '2x Std. Dev. of interannual variability'
         ])
 
         fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=2, fontsize=12, frameon=False)
-        
-        main_title = "Projected Climate & Discharge Impacts for Jet Stream Storylines"
-        fig.suptitle(main_title, fontsize=16, weight='bold', y=0.99)
-        
+        fig.suptitle("Projected Climate & Discharge Impacts for Jet Stream Storylines", fontsize=16, weight='bold', y=0.99)
         fig.tight_layout(rect=[0, 0.1, 1, 0.96])
-        
-        filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_3x2_with_stddev.png")
+        filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_3x2_with_axial.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved 3x2 storyline impacts summary plot with std dev to {filename}")
+        logging.info(f"Saved 3x2 storyline impacts summary plot with axial storylines to {filename}")
         
     @staticmethod
     def plot_extreme_discharge_frequency_comparison(frequency_data, config):
@@ -2229,3 +2166,82 @@ class Visualizer:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved extreme discharge frequency comparison plot to {filename}")
+        
+    @staticmethod
+    def plot_storyline_return_period_change(results, config):
+        """
+        Creates a dumbbell plot showing the change in return periods of extreme
+        discharge events for different storylines.
+        """
+        if not results or not config:
+            logging.warning("Cannot plot return period change: Missing analysis results or config.")
+            return
+
+        logging.info("Plotting storyline-specific return period changes...")
+        Visualizer.ensure_plot_dir_exists()
+        
+        event_to_plot = 'Severe (-2σ)' # We focus on one event type for clarity
+        
+        gwls = config.GLOBAL_WARMING_LEVELS
+        fig, axs = plt.subplots(len(gwls), 2, figsize=(18, 10), sharex=True, sharey=True)
+        plt.style.use('seaborn-v0_8-whitegrid')
+
+        # Define the order of storylines for a structured plot
+        storyline_order = [
+            'Core Mean',
+            'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
+            'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
+            'Slow Jet Only', 'Fast Jet Only'
+        ]
+
+        for i, gwl in enumerate(gwls):
+            for j, season in enumerate(['Winter', 'Summer']):
+                ax = axs[i, j]
+                data_gwl_season = results.get(gwl, {}).get(season, {})
+                
+                # Filter and sort data according to the defined order
+                plot_data = {s: data_gwl_season.get(s, {}).get(event_to_plot) for s in storyline_order if s in data_gwl_season}
+                
+                storylines = list(plot_data.keys())
+                y_pos = np.arange(len(storylines))
+                
+                hist_periods = [d['hist_return_period'] for d in plot_data.values()]
+                future_periods = [d['future_return_period'] for d in plot_data.values()]
+                
+                # Plot the lines connecting the dots (the "dumbbell bar")
+                ax.hlines(y=y_pos, xmin=hist_periods, xmax=future_periods, color='grey', alpha=0.6, lw=2.5)
+
+                # Plot the dots
+                ax.scatter(hist_periods, y_pos, color='skyblue', s=120, zorder=10, ec='black', label='Historical')
+                ax.scatter(future_periods, y_pos, color='crimson', s=120, zorder=10, ec='black', label=f'Future (+{gwl}°C)')
+                
+                # Formatting
+                ax.set_yticks(y_pos)
+                ax.set_yticklabels([s.replace(' & ', ' &\n') for s in storylines], fontsize=10)
+                ax.set_xscale('log') # Log scale is essential for return periods
+                ax.invert_yaxis()
+                ax.grid(axis='y', linestyle='none')
+                ax.grid(axis='x', linestyle=':', which='both')
+
+                # Use specific tickers for log scale
+                ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+                ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+                ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 200, 500])
+                
+                ax.set_title(f'{season} at +{gwl}°C GWL', fontsize=12, weight='bold')
+                if i == len(gwls) - 1:
+                    ax.set_xlabel('Return Period (Years)', fontsize=11)
+
+        handles, labels = axs[0, 0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.0), ncol=2, fontsize=12)
+        
+        hist_rp = results['thresholds']['Winter'][event_to_plot]['hist_return_period']
+        threshold_val = results['thresholds']['Winter'][event_to_plot]['val']
+
+        fig.suptitle(f"Change in Return Period of Severe Low-Flow Events (historically a 1-in-{hist_rp:.0f} year event)",
+                     fontsize=16, weight='bold')
+        fig.tight_layout(rect=[0, 0.05, 1, 0.94])
+        
+        filename = os.path.join(config.PLOT_DIR, "storyline_discharge_return_period_change.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)

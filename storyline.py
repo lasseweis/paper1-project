@@ -1819,16 +1819,22 @@ class StorylineAnalyzer:
     @staticmethod
     def calculate_direct_discharge_impacts(cmip6_results, config):
         """
-        Calculates the mean discharge change IN ABSOLUTE UNITS (m³/s) for each 2D storyline
-        by averaging the changes of all models belonging to that storyline.
+        Calculates the mean discharge change AND the mean standard deviation for each 2D storyline.
+        The standard deviation is calculated from the absolute discharge values within the 30-year
+        window for each model, and then averaged across the models in the storyline.
         """
-        logging.info("Calculating direct storyline impacts for discharge (in absolute units)...")
+        logging.info("Calculating direct storyline impacts for discharge (change and std dev)...")
         storyline_classification = cmip6_results.get('storyline_classification_2d')
         hist_means = cmip6_results.get('model_data_at_hist_reference')
         gwl_means = cmip6_results.get('model_data_at_gwl')
+        
+        # Get the timeseries data and GWL years needed for std dev calculation
+        metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
+        gwl_years = cmip6_results.get('gwl_threshold_years', {})
+        window = config.GWL_YEARS_WINDOW
 
-        if not all([storyline_classification, hist_means, gwl_means]):
-            logging.warning("Missing data for direct discharge impact calculation.")
+        if not all([storyline_classification, hist_means, gwl_means, metric_timeseries, gwl_years]):
+            logging.warning("Missing data for direct discharge impact calculation with std dev.")
             return {}
 
         direct_impacts = {gwl: {'DJF_discharge': {}, 'JJA_discharge': {}} for gwl in config.GLOBAL_WARMING_LEVELS}
@@ -1843,18 +1849,125 @@ class StorylineAnalyzer:
                 storyline_name = storyline_key.replace(f'{season}_', '')
                 
                 model_deltas = []
+                model_std_devs = [] # List to store std devs from each model
+
                 for model_run_key in model_list:
+                    # Calculate the change (same as before)
                     hist_val = hist_means.get(model_run_key, {}).get(impact_key)
                     gwl_val = gwl_means.get(model_run_key, {}).get('gwl', {}).get(gwl, {}).get(impact_key)
 
-                    # --- MODIFICATION: Calculate absolute change instead of percentage ---
                     if hist_val is not None and gwl_val is not None:
                         delta_absolute = gwl_val - hist_val
                         model_deltas.append(delta_absolute)
+
+                    # Calculate the standard deviation for this model from its 30yr timeseries
+                    threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
+                    discharge_ts = metric_timeseries.get(model_run_key, {}).get(impact_key)
+                    
+                    if threshold_year is not None and discharge_ts is not None:
+                        start_year = threshold_year - window // 2
+                        end_year = threshold_year + (window - 1) // 2
+                        
+                        ts_slice = discharge_ts.sel(season_year=slice(start_year, end_year))
+                        
+                        if ts_slice.season_year.size > 1:
+                            std_dev = ts_slice.std(dim='season_year', skipna=True).item()
+                            if not np.isnan(std_dev):
+                                model_std_devs.append(std_dev)
                 
                 if model_deltas:
-                    mean_impact = np.mean(model_deltas)
-                    direct_impacts[gwl][impact_key][storyline_name] = {'total': mean_impact}
+                    mean_change = np.mean(model_deltas)
+                    mean_std_dev = np.mean(model_std_devs) if model_std_devs else np.nan
+                    
+                    direct_impacts[gwl][impact_key][storyline_name] = {
+                        'total': mean_change,
+                        'mean_std_dev': mean_std_dev # Store the mean std dev
+                    }
 
-        logging.info("Direct discharge impact calculation (absolute) finished.")
+        logging.info("Direct discharge impact calculation (change and std dev) finished.")
         return direct_impacts
+    
+    @staticmethod
+    def analyze_extreme_discharge_frequency(historical_discharge_da, cmip6_discharge_data):
+        """
+        Analyzes and compares the frequency of extreme low-flow discharge events.
+
+        Compares observed historical data against CMIP6 historical and future projections.
+        Extreme events are defined based on the standard deviation of the historical observations.
+        """
+        logging.info("Analyzing frequency of extreme low-flow discharge events...")
+        if historical_discharge_da is None or not cmip6_discharge_data:
+            logging.warning("Skipping extreme discharge analysis: Missing historical or CMIP6 data.")
+            return None
+
+        # --- 1. Define thresholds from historical observations ---
+        hist_mean = historical_discharge_da.mean().item()
+        hist_std = historical_discharge_da.std().item()
+        
+        threshold_2std = hist_mean - 2 * hist_std
+        threshold_3std = hist_mean - 3 * hist_std
+        
+        logging.info(f"  Historical Mean: {hist_mean:.2f} m³/s, Std Dev: {hist_std:.2f} m³/s")
+        logging.info(f"  Threshold for < 2σ event: {threshold_2std:.2f} m³/s")
+        logging.info(f"  Threshold for < 3σ event: {threshold_3std:.2f} m³/s")
+
+        # --- 2. Calculate frequency in historical observations ---
+        total_hist_months = historical_discharge_da.time.size
+        count_hist_2std = (historical_discharge_da < threshold_2std).sum().item()
+        count_hist_3std = (historical_discharge_da < threshold_3std).sum().item()
+        
+        freq_hist = {
+            '2std': (count_hist_2std / total_hist_months) * 100,
+            '3std': (count_hist_3std / total_hist_months) * 100
+        }
+
+        # --- 3. Calculate frequencies in CMIP6 models ---
+        hist_period = (1995, 2014)
+        future_period = (2070, 2099)
+        
+        cmip6_counts = {
+            'historical': {'2std': [], '3std': [], 'total_months': []},
+            'ssp245': {'2std': [], '3std': [], 'total_months': []},
+            'ssp585': {'2std': [], '3std': [], 'total_months': []}
+        }
+
+        for model_scenario_key, ts in cmip6_discharge_data.items():
+            scenario = model_scenario_key.split('_')[-1]
+            
+            # Historical period
+            ts_hist = ts.sel(time=slice(str(hist_period[0]), str(hist_period[1])))
+            if ts_hist.time.size > 0:
+                cmip6_counts['historical']['2std'].append((ts_hist < threshold_2std).sum().item())
+                cmip6_counts['historical']['3std'].append((ts_hist < threshold_3std).sum().item())
+                cmip6_counts['historical']['total_months'].append(ts_hist.time.size)
+
+            # Future period
+            ts_future = ts.sel(time=slice(str(future_period[0]), str(future_period[1])))
+            if ts_future.time.size > 0 and scenario in ['ssp245', 'ssp585']:
+                cmip6_counts[scenario]['2std'].append((ts_future < threshold_2std).sum().item())
+                cmip6_counts[scenario]['3std'].append((ts_future < threshold_3std).sum().item())
+                cmip6_counts[scenario]['total_months'].append(ts_future.time.size)
+        
+        # --- 4. Aggregate CMIP6 results and calculate frequencies ---
+        freq_cmip6 = {}
+        for period, counts in cmip6_counts.items():
+            if counts['total_months']:
+                total_events_2std = sum(counts['2std'])
+                total_events_3std = sum(counts['3std'])
+                total_months = sum(counts['total_months'])
+                
+                freq_cmip6[period] = {
+                    '2std': (total_events_2std / total_months) * 100 if total_months > 0 else 0,
+                    '3std': (total_events_3std / total_months) * 100 if total_months > 0 else 0
+                }
+        
+        # --- 5. Structure final results ---
+        results = {
+            'Historical Obs.': freq_hist,
+            'CMIP6 Hist. (1995-2014)': freq_cmip6.get('historical', {'2std': 0, '3std': 0}),
+            'CMIP6 SSP2-4.5 Future (2070-2099)': freq_cmip6.get('ssp245', {'2std': 0, '3std': 0}),
+            'CMIP6 SSP5-8.5 Future (2070-2099)': freq_cmip6.get('ssp585', {'2std': 0, '3std': 0}),
+            'thresholds': {'mean': hist_mean, 'std': hist_std}
+        }
+        
+        return results

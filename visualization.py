@@ -2012,10 +2012,9 @@ class Visualizer:
     def plot_storyline_impact_barchart_with_discharge(final_impacts, discharge_impacts, discharge_data_historical, config):
         """
         Creates a 3x2 vertical bar chart to visualize storyline impacts for Temp, Precip, and Discharge.
-        MODIFIED to show only the CHANGE in discharge, consistent with temperature and precipitation plots,
-        and adds fixed low-flow thresholds. The annotation shows the change and the resulting absolute value.
+        MODIFIED to include 1x and 2x standard deviation error bars for discharge plots to show variability.
         """
-        logging.info("Plotting final storyline impacts (including discharge change with absolute values) as a 3x2 bar chart...")
+        logging.info("Plotting final storyline impacts (including discharge with std dev) as a 3x2 bar chart...")
         Visualizer.ensure_plot_dir_exists()
 
         if not final_impacts:
@@ -2057,15 +2056,18 @@ class Visualizer:
                 storyline_names_ordered.remove('Neutral')
 
             df_change = pd.DataFrame(index=storyline_names_ordered, columns=gwls_to_plot, dtype=float)
+            df_std_dev = pd.DataFrame(index=storyline_names_ordered, columns=gwls_to_plot, dtype=float)
+
             for gwl in gwls_to_plot:
                 for name in storyline_names_ordered:
-                    total_impact = all_impacts.get(gwl, {}).get(impact_key, {}).get(name, {}).get('total')
-                    df_change.loc[name, gwl] = total_impact
+                    impact_data = all_impacts.get(gwl, {}).get(impact_key, {}).get(name, {})
+                    df_change.loc[name, gwl] = impact_data.get('total')
+                    if 'discharge' in impact_key:
+                        df_std_dev.loc[name, gwl] = impact_data.get('mean_std_dev')
             
             x_pos = np.arange(len(storyline_names_ordered))
             bar_width = 0.35
             
-            # We plot the change values directly for all variables
             df_plot = df_change
 
             rects1 = ax.bar(x_pos - bar_width/2, df_plot[gwls_to_plot[0]], bar_width, 
@@ -2075,32 +2077,37 @@ class Visualizer:
 
             # --- 3. Subplot Formatting ---
             ax.set_title(plot_info['title'], loc='left', fontsize=14, weight='bold')
-            
             is_discharge_plot = 'discharge' in impact_key
             unit = '(°C)' if 'tas' in impact_key else '(m³/s)' if is_discharge_plot else '(%)'
-            y_label = f'Projected Change {unit}'
             if col == 0:
-                ax.set_ylabel(y_label, fontsize=12)
-
+                ax.set_ylabel(f'Projected Change {unit}', fontsize=12)
             ax.axhline(0, color='black', linestyle='-', linewidth=0.8, zorder=1)
 
-            # --- MODIFICATION START ---
-            # Draw threshold lines for discharge plots, based on the change from the historical mean
             if is_discharge_plot:
+                # Plot error bars for discharge variability
+                for i_gwl, gwl in enumerate(gwls_to_plot):
+                    bar_positions = x_pos + (bar_width/2 * (1 if i_gwl==1 else -1))
+                    bar_heights = df_plot[gwl].values
+                    std_devs = df_std_dev[gwl].values
+                    
+                    for pos, height, std in zip(bar_positions, bar_heights, std_devs):
+                        if not np.isnan(std) and not np.isnan(height):
+                            # 2x Std Dev (wider, more transparent)
+                            ax.errorbar(pos, height, yerr=2*std, fmt='none', ecolor=gwl_colors[gwl],
+                                        elinewidth=1.5, capsize=4, alpha=0.4, zorder=11)
+                            # 1x Std Dev (thinner, opaque)
+                            ax.errorbar(pos, height, yerr=std, fmt='none', ecolor=gwl_colors[gwl],
+                                        elinewidth=2.5, capsize=6, zorder=12)
+                
+                # Plot horizontal threshold lines
                 hist_mean = discharge_data_historical.get(f'{season_lower}_mean')
-                # These values are now the fixed ones from main.py
                 low_flow_thresh_10 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold') 
                 low_flow_thresh_30 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold_30')
-                
                 if hist_mean is not None:
                     if low_flow_thresh_30 is not None:
-                        ax.axhline(low_flow_thresh_30 - hist_mean, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5,
-                                label=f'Moderate Low-Flow ({low_flow_thresh_30} m³/s)')
+                        ax.axhline(low_flow_thresh_30 - hist_mean, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5)
                     if low_flow_thresh_10 is not None:
-                        ax.axhline(low_flow_thresh_10 - hist_mean, color='black', linestyle=':', linewidth=2.5, zorder=5, 
-                                label=f'Extreme Low-Flow ({low_flow_thresh_10} m³/s)')
-                ax.legend(loc='best', fontsize=9)
-            # --- MODIFICATION END ---
+                        ax.axhline(low_flow_thresh_10 - hist_mean, color='black', linestyle=':', linewidth=2.5, zorder=5)
 
             ax.set_xticks(x_pos)
             ax.set_xticklabels([name.replace(' & ', ' &\n').replace(' (MMM)','') for name in storyline_names_ordered], 
@@ -2108,8 +2115,6 @@ class Visualizer:
             if row < 2:
                 ax.set_xticklabels([])
 
-            # --- MODIFICATION START ---
-            # Modify the annotation loop
             hist_mean = discharge_data_historical.get(f'{season_lower}_mean') if is_discharge_plot else 0
             for rects in [rects1, rects2]:
                 for rect in rects:
@@ -2120,7 +2125,6 @@ class Visualizer:
                     text_pos = change_val + offset if change_val >= 0 else change_val - offset
                     va = 'bottom' if change_val >= 0 else 'top'
                     
-                    # Prepare the label text: "change (absolute)"
                     if is_discharge_plot and hist_mean is not None:
                         absolute_val = hist_mean + change_val
                         label_text = f'{change_val:+.0f}\n({absolute_val:.0f})'
@@ -2130,21 +2134,98 @@ class Visualizer:
                     ax.annotate(label_text,
                                 xy=(rect.get_x() + rect.get_width() / 2, text_pos),
                                 ha='center', va=va, fontsize=8)
-            # --- MODIFICATION END ---
             
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
 
-        # --- 4. Final Figure Formatting ---
+        # --- 4. Final Figure Formatting & Shared Legend ---
         handles, labels = axs[0, 0].get_legend_handles_labels()
+        
+        low_flow_10_val = discharge_data_historical.get('winter_lowflow_threshold', 'N/A')
+        low_flow_30_val = discharge_data_historical.get('winter_lowflow_threshold_30', 'N/A')
+        
+        handles.extend([
+            plt.Line2D([0], [0], color='saddlebrown', linestyle='dotted', linewidth=2.5),
+            plt.Line2D([0], [0], color='black', linestyle=':', linewidth=2.5),
+            plt.Line2D([0], [0], color='gray', lw=2.5, marker='_', markersize=8, mew=2.5, linestyle='None'),
+            plt.Line2D([0], [0], color='gray', lw=1.5, marker='_', markersize=6, mew=1.5, alpha=0.5, linestyle='None')
+        ])
+        labels.extend([
+            f'Moderate Low-Flow ({low_flow_30_val} m³/s)',
+            f'Extreme Low-Flow ({low_flow_10_val} m³/s)',
+            '1x Std. Dev. of interannual variability',
+            '2x Std. Dev. of interannual variability'
+        ])
+
         fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=2, fontsize=12, frameon=False)
         
         main_title = "Projected Climate & Discharge Impacts for Jet Stream Storylines"
         fig.suptitle(main_title, fontsize=16, weight='bold', y=0.99)
         
-        fig.tight_layout(rect=[0, 0.05, 1, 0.96])
+        fig.tight_layout(rect=[0, 0.1, 1, 0.96])
         
-        filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_3x2.png")
+        filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_3x2_with_stddev.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved 3x2 storyline impacts summary plot to {filename}")
+        logging.info(f"Saved 3x2 storyline impacts summary plot with std dev to {filename}")
+        
+    @staticmethod
+    def plot_extreme_discharge_frequency_comparison(frequency_data, config):
+        """
+        Creates a grouped bar chart to compare the frequency of extreme low-flow events.
+        """
+        if not frequency_data:
+            logging.warning("Cannot plot extreme discharge frequency: Input data is empty.")
+            return
+
+        logging.info("Plotting comparison of extreme discharge event frequency...")
+        Visualizer.ensure_plot_dir_exists()
+
+        labels = ['Events < Mean - 2σ', 'Events < Mean - 3σ']
+        categories = list(frequency_data.keys())
+        # Remove thresholds from categories to plot
+        categories.remove('thresholds')
+
+        data_2std = [frequency_data[cat]['2std'] for cat in categories]
+        data_3std = [frequency_data[cat]['3std'] for cat in categories]
+
+        df = pd.DataFrame({
+            'Below Mean - 2σ': data_2std,
+            'Below Mean - 3σ': data_3std,
+        }, index=categories)
+
+        # --- Plotting ---
+        plt.style.use('seaborn-v0_8-whitegrid')
+        fig, ax = plt.subplots(figsize=(12, 8))
+        
+        df.plot(kind='bar', ax=ax, width=0.8, 
+                color={'Below Mean - 2σ': 'skyblue', 'Below Mean - 3σ': 'darkblue'})
+
+        # --- Formatting ---
+        ax.set_ylabel('Frequency of Months (%)', fontsize=12)
+        ax.set_xticklabels(df.index, rotation=25, ha="right", fontsize=11)
+        ax.grid(axis='x', linestyle='none')
+        ax.grid(axis='y', linestyle=':', alpha=0.7)
+        
+        # Add value labels on top of bars
+        for container in ax.containers:
+            ax.bar_label(container, fmt='%.2f%%', fontsize=9, padding=3)
+
+        # Adjust ylim for padding
+        ax.set_ylim(top=ax.get_ylim()[1] * 1.15)
+        
+        ax.legend(title='Event Threshold', fontsize=11)
+        
+        hist_mean = frequency_data['thresholds']['mean']
+        hist_std = frequency_data['thresholds']['std']
+        
+        title = "Change in Frequency of Extreme Low-Flow Events for the Danube"
+        subtitle = (f"Events are defined by thresholds from historical observations (Mean: {hist_mean:.0f}, σ: {hist_std:.0f} m³/s)")
+        
+        ax.set_title(f"{title}\n{subtitle}", fontsize=14, weight='bold')
+
+        fig.tight_layout()
+        filename = os.path.join(config.PLOT_DIR, "extreme_discharge_frequency_comparison.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved extreme discharge frequency comparison plot to {filename}")

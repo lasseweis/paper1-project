@@ -16,7 +16,7 @@ import traceback
 import matplotlib
 import pandas as pd
 import numpy as np
-import array as xr 
+import xarray as xr 
 from functools import lru_cache
 
 # Set the backend for matplotlib to 'Agg' to prevent it from trying to open a GUI.
@@ -222,6 +222,20 @@ class ClimateAnalysis:
             logging.error(f"Error processing AMO index file: {e}")
             logging.error(traceback.format_exc())
             return {}
+        
+    @staticmethod
+    def process_cmip6_discharge_data(config):
+        """Helper to load all available CMIP6 discharge data."""
+        logging.info("Processing all CMIP6 discharge data...")
+        # Get all models that we want to analyze from the config
+        models_to_include = list(config.REQUIRED_MODEL_SCENARIOS.keys())
+
+        cmip6_discharge = DataProcessor.process_discharge_data(
+            config.DISCHARGE_SSP245_FILE,
+            config.DISCHARGE_SSP585_FILE,
+            models_to_include
+        )
+        return cmip6_discharge
 
     @staticmethod
     def run_full_analysis():
@@ -280,6 +294,7 @@ class ClimateAnalysis:
         # --- END: SPEI Calculation ---
 
         discharge_data_loaded = ClimateAnalysis.process_discharge_data(Config.DISCHARGE_FILE)
+        cmip6_discharge_loaded = ClimateAnalysis.process_cmip6_discharge_data(Config()) 
         amo_data_loaded = ClimateAnalysis.load_amo_index(Config.AMO_INDEX_FILE)
 
         logging.info("\n--- Calculating Base Reanalysis Jet Indices ---")
@@ -737,6 +752,37 @@ class ClimateAnalysis:
                     else:
                         logging.info(f"  - Storyline '{storyline_name}' ({season}): No models classified.")
             logging.info("-----------------------------------------------------------------")
+            
+                # --- PART 6: EXTREME DISCHARGE FREQUENCY ANALYSIS ---
+            logging.info("\n\n--- Checking for Extreme Discharge Frequency Analysis Plot ---")
+            extreme_discharge_plot_filename = os.path.join(Config.PLOT_DIR, "extreme_discharge_frequency_comparison.png")
+            if not os.path.exists(extreme_discharge_plot_filename):
+                logging.info(f"Plot '{extreme_discharge_plot_filename}' not found. Calculating data and creating plot...")
+
+                # We need the raw historical discharge timeseries for this
+                try:
+                    hist_data_raw = pd.read_excel(Config.DISCHARGE_FILE, usecols='A,B,H', index_col=None)['Wien'].dropna()
+                    historical_da = xr.DataArray(hist_data_raw.values, dims=['time'])
+                except Exception as e:
+                    logging.error(f"Could not load raw historical discharge for frequency analysis: {e}")
+                    historical_da = None
+
+                if historical_da is not None and cmip6_discharge_loaded:
+                    frequency_results = StorylineAnalyzer.analyze_extreme_discharge_frequency(
+                        historical_discharge_da=historical_da,
+                        cmip6_discharge_data=cmip6_discharge_loaded
+                    )
+                    if frequency_results:
+                        Visualizer.plot_extreme_discharge_frequency_comparison(frequency_results, Config())
+                    else:
+                        logging.warning("Extreme discharge frequency analysis did not return results. Skipping plot.")
+                else:
+                    logging.warning("Skipping extreme discharge frequency plot due to missing historical or CMIP6 discharge data.")
+            else:
+                logging.info(f"Plot '{extreme_discharge_plot_filename}' already exists. Skipping calculation and creation.")
+
+
+            return regression_results # This line should already be at the end
 
         logging.info("\n\n=====================================================")
         logging.info("=== FULL ANALYSIS COMPLETED ===")

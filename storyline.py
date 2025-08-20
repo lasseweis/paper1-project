@@ -1993,7 +1993,7 @@ class StorylineAnalyzer:
         }
         
         return results
-    
+
     @staticmethod
     def analyze_storyline_discharge_extremes(cmip6_results, historical_discharge_da, config):
         """
@@ -2015,11 +2015,18 @@ class StorylineAnalyzer:
         for season in ['Winter', 'Summer']:
             season_lower = season.lower()
             
-            # Filter historical data by season
-            hist_seasonal = DataProcessor.filter_by_season(
+            # --- START OF CORRECTION ---
+            # Filter historical data by season with a check for None
+            seasonal_data = DataProcessor.filter_by_season(
                 DataProcessor.assign_season_to_dataarray(historical_discharge_da), season
-            ).groupby('season_year').mean('time')
+            )
+            if seasonal_data is None:
+                logging.error(f"Could not filter historical discharge data for season: {season}")
+                continue # Skip to the next season if data is not available
             
+            hist_seasonal = seasonal_data.groupby('season_year').mean('time')
+            # --- END OF CORRECTION ---
+
             mean = hist_seasonal.mean().item()
             std = hist_seasonal.std().item()
             

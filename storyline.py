@@ -1993,14 +1993,15 @@ class StorylineAnalyzer:
         }
         
         return results
-    
+
     @staticmethod
     def analyze_storyline_discharge_extremes(cmip6_results, historical_discharge_da, config, discharge_thresholds):
         """
         Analyzes the frequency and return period of low-flow discharge events
-        for multiple statistical and fixed thresholds.
+        for multiple statistical and fixed thresholds, AND calculates the change
+        in interannual standard deviation.
         """
-        logging.info("Analyzing storyline discharge return periods for multiple thresholds...")
+        logging.info("Analyzing storyline discharge return periods and standard deviation...")
         
         if historical_discharge_da is None or not discharge_thresholds:
             logging.error("Historical discharge data or fixed thresholds are missing. Aborting.")
@@ -2023,6 +2024,9 @@ class StorylineAnalyzer:
             total_years = hist_seasonal.season_year.size
             if total_years == 0: continue
 
+            # --- NEW: Calculate and store historical standard deviation ---
+            hist_std_dev = hist_seasonal.std().item()
+            
             # 1. Statistical Thresholds
             mean = hist_seasonal.mean().item()
             std = hist_seasonal.std().item()
@@ -2031,7 +2035,6 @@ class StorylineAnalyzer:
             moderate_fixed_threshold = discharge_thresholds.get(f'{season_lower}_lowflow_threshold_30')
             extreme_fixed_threshold = discharge_thresholds.get(f'{season_lower}_lowflow_threshold')
 
-            # Define all event types in a dictionary
             event_definitions = {
                 f'Moderate (-1σ)': {'val': mean - 1 * std},
                 f'Severe (-2σ)': {'val': mean - 2 * std},
@@ -2043,7 +2046,6 @@ class StorylineAnalyzer:
             for name, data in event_definitions.items():
                 if data['val'] is None: continue
                 
-                # Calculate historical frequency and return period for each
                 hist_count = (hist_seasonal < data['val']).sum().item()
                 hist_freq = hist_count / total_years if total_years > 0 else 0
                 
@@ -2052,9 +2054,10 @@ class StorylineAnalyzer:
                     'hist_return_period': 1 / hist_freq if hist_freq > 0 else np.inf
                 }
             
+            # --- NEW: Add the historical std dev to the dictionary ---
+            season_thresholds['historical_std_dev'] = hist_std_dev
             thresholds[season] = season_thresholds
 
-        # The rest of the function remains the same as it iterates over the new `thresholds` dictionary
         storyline_classification = cmip6_results.get('storyline_classification_2d')
         metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
         gwl_years = cmip6_results.get('gwl_threshold_years', {})
@@ -2078,8 +2081,30 @@ class StorylineAnalyzer:
                     storyline_name = storyline_key.replace(f'{season_label}_', '')
                     results[gwl][season][storyline_name] = {}
                     
+                    # --- NEW: Calculate future std dev for this storyline ---
+                    model_std_devs = []
+                    for model_run_key in model_list:
+                        threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
+                        discharge_ts = metric_timeseries.get(model_run_key, {}).get(impact_key)
+                        if threshold_year is None or discharge_ts is None: continue
+                        
+                        start_year, end_year = threshold_year - window // 2, threshold_year + (window - 1) // 2
+                        ts_slice = discharge_ts.sel(season_year=slice(start_year, end_year))
+                        
+                        if ts_slice.season_year.size > 1:
+                            std_dev = ts_slice.std(dim='season_year', skipna=True).item()
+                            if not np.isnan(std_dev):
+                                model_std_devs.append(std_dev)
+                    
+                    # Store the mean future std dev
+                    if model_std_devs:
+                        results[gwl][season][storyline_name]['future_std_dev'] = np.mean(model_std_devs)
+
                     # This loop now calculates future frequencies for all 4 threshold types
                     for event_name, data in thresholds[season].items():
+                        # Skip the std dev key we just added
+                        if event_name == 'historical_std_dev': continue
+
                         total_event_counts = 0
                         total_years_analyzed = 0
                         for model_run_key in model_list:

@@ -2170,14 +2170,14 @@ class Visualizer:
     @staticmethod
     def plot_storyline_return_period_change(results, config):
         """
-        Creates a comprehensive 2x4 dumbbell plot showing the change in return periods
-        for four different low-flow event definitions, comparing seasons and GWLs.
+        Creates a comprehensive plot showing the change in return periods for
+        low-flow events and the change in interannual standard deviation.
         """
         if not results or not config or 'thresholds' not in results:
-            logging.warning("Cannot plot return period change: Missing analysis results or thresholds.")
+            logging.warning("Cannot plot return period/std dev change: Missing results or thresholds.")
             return
 
-        logging.info("Plotting comprehensive storyline return period changes (Winter/Summer, 2C/3C)...")
+        logging.info("Plotting storyline return period and std dev changes...")
         Visualizer.ensure_plot_dir_exists()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
@@ -2185,18 +2185,18 @@ class Visualizer:
             logging.error("This plot function is designed for exactly two GWLs.")
             return
 
-        # --- Define the layout and event types ---
         seasons_to_plot = ['Winter', 'Summer']
-        # Dynamically get event keys to ensure order is consistent with calculation
         event_keys = list(results.get('thresholds', {}).get(seasons_to_plot[0], {}).keys())
-        if not event_keys:
-            event_keys = list(results.get('thresholds', {}).get(seasons_to_plot[1], {}).keys())
-        if len(event_keys) < 1:
-            logging.error("No event types found in results to plot.")
-            return
+        event_keys.remove('historical_std_dev') # Don't treat this as an event column
 
-        fig, axs = plt.subplots(len(seasons_to_plot), len(event_keys), 
-                                figsize=(22, 12), sharex=True, sharey=True)
+        # --- NEW: Define grid with an extra column for std dev ---
+        num_event_cols = len(event_keys)
+        num_total_cols = num_event_cols + 1 # Add one for the std dev plot
+        fig = plt.figure(figsize=(5.5 * num_total_cols, 12))
+        gs = matplotlib.gridspec.GridSpec(len(seasons_to_plot), num_total_cols, 
+                                          width_ratios=[5] * num_event_cols + [3.5])
+        axs = [[fig.add_subplot(gs[r, c]) for c in range(num_total_cols)] for r in range(len(seasons_to_plot))]
+
         plt.style.use('seaborn-v0_8-whitegrid')
 
         storyline_order = [
@@ -2205,26 +2205,23 @@ class Visualizer:
             'Slow Jet Only', 'Fast Jet Only'
         ]
         
-        gwl_colors = {gwls_to_plot[0]: '#ff7f0e', gwls_to_plot[1]: '#d62728'} # Orange for +2C, Red for +3C
+        gwl_colors = {gwls_to_plot[0]: '#ff7f0e', gwls_to_plot[1]: '#d62728'}
 
-        # --- Main plotting loop ---
         for row, season in enumerate(seasons_to_plot):
+            # --- Part 1: Plot the return period dumbbell plots ---
             for col, event_key in enumerate(event_keys):
-                ax = axs[row, col]
+                ax = axs[row][col]
                 
-                # Set titles for columns (top row) and rows (left-most column)
                 if row == 0:
                     ax.set_title(event_key.replace(" Low-Flow", "\nLow-Flow"), fontsize=11, weight='bold')
                 if col == 0:
                     ax.set_ylabel(season, fontsize=14, weight='bold')
 
-                # Extract data for the specific season and event
                 data_season = results.get('thresholds', {}).get(season, {}).get(event_key)
                 if not data_season:
                     ax.text(0.5, 0.5, "Data Unavailable", ha='center', va='center', transform=ax.transAxes)
                     continue
 
-                # Filter storylines that have valid data for this event
                 plot_data_gwl1 = results.get(gwls_to_plot[0], {}).get(season, {})
                 storylines = [s for s in storyline_order if s in plot_data_gwl1 and plot_data_gwl1[s].get(event_key)]
                 if not storylines:
@@ -2233,12 +2230,10 @@ class Visualizer:
                 
                 y_pos = np.arange(len(storylines))
                 
-                # Get historical and future return periods for both GWLs
                 hist_periods = [data_season['hist_return_period']] * len(storylines)
                 future_periods_gwl1 = [results[gwls_to_plot[0]][season][s][event_key]['future_return_period'] for s in storylines]
                 future_periods_gwl2 = [results[gwls_to_plot[1]][season][s][event_key]['future_return_period'] for s in storylines]
 
-                # Plot lines and points
                 ax.hlines(y=y_pos, xmin=hist_periods, xmax=future_periods_gwl1, color='grey', alpha=0.4, lw=1.5, linestyle='--')
                 ax.hlines(y=y_pos, xmin=future_periods_gwl1, xmax=future_periods_gwl2, color='grey', alpha=0.8, lw=1.5)
 
@@ -2249,24 +2244,64 @@ class Visualizer:
                 ax.invert_yaxis()
                 ax.grid(axis='y', linestyle='none')
                 ax.grid(axis='x', linestyle=':', which='both')
-        
-        # --- Final Formatting ---
-        axs[0, 0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines], fontsize=9)
-        
-        for ax in axs.flatten():
-            ax.set_xscale('log')
-            ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
-            ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
-            ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 500, 1000])
+                if col > 0:
+                    ax.set_yticklabels([])
 
-        for ax in axs[-1, :]: 
-            ax.set_xlabel('Return Period (Years)', fontsize=11)
+            # --- Part 2: NEW subplot for Standard Deviation ---
+            ax_std = axs[row][num_event_cols]
+            if row == 0:
+                ax_std.set_title("Interannual\nVariability (σ)", fontsize=11, weight='bold')
+
+            hist_std_dev = results.get('thresholds', {}).get(season, {}).get('historical_std_dev')
+            plot_data_gwl1 = results.get(gwls_to_plot[0], {}).get(season, {})
+            storylines = [s for s in storyline_order if s in plot_data_gwl1 and 'future_std_dev' in plot_data_gwl1[s]]
+
+            if not storylines or hist_std_dev is None:
+                ax_std.text(0.5, 0.5, "Std Dev Data\nUnavailable", ha='center', va='center', transform=ax_std.transAxes)
+                continue
+                
+            y_pos = np.arange(len(storylines))
+            bar_height = 0.25
+
+            future_std_gwl1 = [results[gwls_to_plot[0]][season][s]['future_std_dev'] for s in storylines]
+            future_std_gwl2 = [results[gwls_to_plot[1]][season][s]['future_std_dev'] for s in storylines]
+
+            ax_std.barh(y_pos + bar_height, future_std_gwl2, height=bar_height, color=gwl_colors[gwls_to_plot[1]], edgecolor='black', zorder=10)
+            ax_std.barh(y_pos, future_std_gwl1, height=bar_height, color=gwl_colors[gwls_to_plot[0]], edgecolor='black', zorder=10)
+            
+            ax_std.axvline(x=hist_std_dev, color='skyblue', linestyle='--', linewidth=3, zorder=5, label=f'Historical σ ({hist_std_dev:.0f})')
+            
+            ax_std.invert_yaxis()
+            ax_std.set_yticks([])
+            ax_std.grid(axis='y', linestyle='none')
+            ax_std.grid(axis='x', linestyle=':', which='both')
+
+        # --- Final Formatting for the entire figure ---
+        axs[0][0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines], fontsize=9)
+        axs[1][0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines], fontsize=9)
         
-        handles, labels = axs[0, 0].get_legend_handles_labels()
-        fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.0), ncol=3, fontsize=12)
+        for row_axs in axs:
+            for i, ax in enumerate(row_axs):
+                if i < num_event_cols:
+                    ax.set_xscale('log')
+                    ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+                    ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+                    ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 500, 1000])
+
+        for col in range(num_event_cols):
+            axs[-1][col].set_xlabel('Return Period (Years)', fontsize=11)
+        axs[-1][-1].set_xlabel('Std. Dev. (m³/s)', fontsize=11)
         
-        fig.suptitle(f"Change in Return Period of Low-Flow Events for different Definitions, Seasons, and Warming Levels",
-                    fontsize=16, weight='bold')
+        handles, labels = axs[0][0].get_legend_handles_labels()
+        std_handle, std_label = axs[0][-1].get_legend_handles_labels()
+        handles.extend(std_handle)
+        labels.extend(std_label)
+        
+        by_label = dict(zip(labels, handles))
+        fig.legend(by_label.values(), by_label.keys(), loc='lower center', bbox_to_anchor=(0.5, 0.0), ncol=4, fontsize=12)
+        
+        fig.suptitle(f"Change in Return Period and Variability of Low-Flow Events",
+                     fontsize=16, weight='bold')
         fig.tight_layout(rect=[0.02, 0.05, 0.98, 0.94], h_pad=2, w_pad=1.5)
         
         filename = os.path.join(config.PLOT_DIR, "storyline_discharge_return_period_comparison_FULL.png")

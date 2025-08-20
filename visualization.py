@@ -2166,82 +2166,109 @@ class Visualizer:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved extreme discharge frequency comparison plot to {filename}")
-        
+
     @staticmethod
     def plot_storyline_return_period_change(results, config):
         """
-        Creates a dumbbell plot showing the change in return periods of extreme
-        discharge events for different storylines.
+        Creates a comprehensive 2x4 dumbbell plot showing the change in return periods
+        for four different low-flow event definitions, comparing seasons and GWLs.
         """
-        if not results or not config:
-            logging.warning("Cannot plot return period change: Missing analysis results or config.")
+        if not results or not config or 'thresholds' not in results:
+            logging.warning("Cannot plot return period change: Missing analysis results or thresholds.")
             return
 
-        logging.info("Plotting storyline-specific return period changes...")
+        logging.info("Plotting comprehensive storyline return period changes (Winter/Summer, 2C/3C)...")
         Visualizer.ensure_plot_dir_exists()
         
-        event_to_plot = 'Severe (-2σ)' # We focus on one event type for clarity
-        
-        gwls = config.GLOBAL_WARMING_LEVELS
-        fig, axs = plt.subplots(len(gwls), 2, figsize=(18, 10), sharex=True, sharey=True)
+        gwls_to_plot = config.GLOBAL_WARMING_LEVELS
+        if len(gwls_to_plot) != 2:
+            logging.error("This plot function is designed for exactly two GWLs.")
+            return
+
+        # --- Define the layout and event types ---
+        seasons_to_plot = ['Winter', 'Summer']
+        # Dynamically get event keys to ensure order is consistent with calculation
+        event_keys = list(results.get('thresholds', {}).get(seasons_to_plot[0], {}).keys())
+        if not event_keys:
+            event_keys = list(results.get('thresholds', {}).get(seasons_to_plot[1], {}).keys())
+        if len(event_keys) < 1:
+            logging.error("No event types found in results to plot.")
+            return
+
+        fig, axs = plt.subplots(len(seasons_to_plot), len(event_keys), 
+                                figsize=(22, 12), sharex=True, sharey=True)
         plt.style.use('seaborn-v0_8-whitegrid')
 
-        # Define the order of storylines for a structured plot
         storyline_order = [
-            'Core Mean',
-            'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
+            'Core Mean', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
             'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
             'Slow Jet Only', 'Fast Jet Only'
         ]
+        
+        gwl_colors = {gwls_to_plot[0]: '#ff7f0e', gwls_to_plot[1]: '#d62728'} # Orange for +2C, Red for +3C
 
-        for i, gwl in enumerate(gwls):
-            for j, season in enumerate(['Winter', 'Summer']):
-                ax = axs[i, j]
-                data_gwl_season = results.get(gwl, {}).get(season, {})
+        # --- Main plotting loop ---
+        for row, season in enumerate(seasons_to_plot):
+            for col, event_key in enumerate(event_keys):
+                ax = axs[row, col]
                 
-                # Filter and sort data according to the defined order
-                plot_data = {s: data_gwl_season.get(s, {}).get(event_to_plot) for s in storyline_order if s in data_gwl_season}
+                # Set titles for columns (top row) and rows (left-most column)
+                if row == 0:
+                    ax.set_title(event_key.replace(" Low-Flow", "\nLow-Flow"), fontsize=11, weight='bold')
+                if col == 0:
+                    ax.set_ylabel(season, fontsize=14, weight='bold')
+
+                # Extract data for the specific season and event
+                data_season = results.get('thresholds', {}).get(season, {}).get(event_key)
+                if not data_season:
+                    ax.text(0.5, 0.5, "Data Unavailable", ha='center', va='center', transform=ax.transAxes)
+                    continue
+
+                # Filter storylines that have valid data for this event
+                plot_data_gwl1 = results.get(gwls_to_plot[0], {}).get(season, {})
+                storylines = [s for s in storyline_order if s in plot_data_gwl1 and plot_data_gwl1[s].get(event_key)]
+                if not storylines:
+                    ax.text(0.5, 0.5, "No Storyline Data", ha='center', va='center', transform=ax.transAxes)
+                    continue
                 
-                storylines = list(plot_data.keys())
                 y_pos = np.arange(len(storylines))
                 
-                hist_periods = [d['hist_return_period'] for d in plot_data.values()]
-                future_periods = [d['future_return_period'] for d in plot_data.values()]
-                
-                # Plot the lines connecting the dots (the "dumbbell bar")
-                ax.hlines(y=y_pos, xmin=hist_periods, xmax=future_periods, color='grey', alpha=0.6, lw=2.5)
+                # Get historical and future return periods for both GWLs
+                hist_periods = [data_season['hist_return_period']] * len(storylines)
+                future_periods_gwl1 = [results[gwls_to_plot[0]][season][s][event_key]['future_return_period'] for s in storylines]
+                future_periods_gwl2 = [results[gwls_to_plot[1]][season][s][event_key]['future_return_period'] for s in storylines]
 
-                # Plot the dots
-                ax.scatter(hist_periods, y_pos, color='skyblue', s=120, zorder=10, ec='black', label='Historical')
-                ax.scatter(future_periods, y_pos, color='crimson', s=120, zorder=10, ec='black', label=f'Future (+{gwl}°C)')
+                # Plot lines and points
+                ax.hlines(y=y_pos, xmin=hist_periods, xmax=future_periods_gwl1, color='grey', alpha=0.4, lw=1.5, linestyle='--')
+                ax.hlines(y=y_pos, xmin=future_periods_gwl1, xmax=future_periods_gwl2, color='grey', alpha=0.8, lw=1.5)
+
+                ax.scatter(hist_periods, y_pos, color='skyblue', s=80, zorder=10, ec='black', label='Historical')
+                ax.scatter(future_periods_gwl1, y_pos, color=gwl_colors[gwls_to_plot[0]], s=100, zorder=10, ec='black', label=f'Future (+{gwls_to_plot[0]}°C)')
+                ax.scatter(future_periods_gwl2, y_pos, color=gwl_colors[gwls_to_plot[1]], s=100, zorder=10, ec='black', label=f'Future (+{gwls_to_plot[1]}°C)')
                 
-                # Formatting
-                ax.set_yticks(y_pos)
-                ax.set_yticklabels([s.replace(' & ', ' &\n') for s in storylines], fontsize=10)
-                ax.set_xscale('log') # Log scale is essential for return periods
                 ax.invert_yaxis()
                 ax.grid(axis='y', linestyle='none')
                 ax.grid(axis='x', linestyle=':', which='both')
+        
+        # --- Final Formatting ---
+        axs[0, 0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines], fontsize=9)
+        
+        for ax in axs.flatten():
+            ax.set_xscale('log')
+            ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+            ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+            ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 500, 1000])
 
-                # Use specific tickers for log scale
-                ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
-                ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
-                ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 200, 500])
-                
-                ax.set_title(f'{season} at +{gwl}°C GWL', fontsize=12, weight='bold')
-                if i == len(gwls) - 1:
-                    ax.set_xlabel('Return Period (Years)', fontsize=11)
-
+        for ax in axs[-1, :]: 
+            ax.set_xlabel('Return Period (Years)', fontsize=11)
+        
         handles, labels = axs[0, 0].get_legend_handles_labels()
-        fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.0), ncol=2, fontsize=12)
+        fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.0), ncol=3, fontsize=12)
         
-        hist_rp = results['thresholds']['Winter'][event_to_plot]['hist_return_period']
-        threshold_val = results['thresholds']['Winter'][event_to_plot]['val']
-
-        fig.suptitle(f"Change in Return Period of Severe Low-Flow Events (historically a 1-in-{hist_rp:.0f} year event)",
-                     fontsize=16, weight='bold')
-        fig.tight_layout(rect=[0, 0.05, 1, 0.94])
+        fig.suptitle(f"Change in Return Period of Low-Flow Events for different Definitions, Seasons, and Warming Levels",
+                    fontsize=16, weight='bold')
+        fig.tight_layout(rect=[0.02, 0.05, 0.98, 0.94], h_pad=2, w_pad=1.5)
         
-        filename = os.path.join(config.PLOT_DIR, "storyline_discharge_return_period_change.png")
+        filename = os.path.join(config.PLOT_DIR, "storyline_discharge_return_period_comparison_FULL.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)

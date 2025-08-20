@@ -122,8 +122,7 @@ class ClimateAnalysis:
             }
         except Exception as e:
             logging.error(f"Error in process_era5_data: {e}")
-            return {}
-        
+
     @staticmethod
     def process_discharge_data(file_path):
         """Process discharge data, compute seasonal metrics, means, and low flow thresholds."""
@@ -137,33 +136,26 @@ class ClimateAnalysis:
             df['time'] = pd.to_datetime(df[['year', 'month']].assign(day=15))
             df = df.set_index('time')
             
-            # Create a base DataArray for all calculations
             da_full = df[['discharge']].to_xarray()['discharge']
             da_with_seasons = DataProcessor.assign_season_to_dataarray(da_full)
             seasonal_means_ts = DataProcessor.calculate_seasonal_means(da_with_seasons)
 
             result = {}
+            # --- START DER ÄNDERUNG ---
+            # Füge die rohe monatliche Zeitreihe zum Ergebnis hinzu
+            result['monthly_historical_da'] = da_full
+            # --- ENDE DER ÄNDERUNG ---
+
             if seasonal_means_ts is not None:
                 for season in ['Winter', 'Summer']:
                     season_lower = season.lower()
-                    
-                    # Get the timeseries for the season
                     season_ts = DataProcessor.filter_by_season(seasonal_means_ts, season)
-                    
                     if season_ts is not None and season_ts.size > 0:
-                        # Store detrended timeseries for correlation analyses
                         result[f'{season_lower}_discharge_detrended'] = DataProcessor.detrend_data(season_ts)
-                        
-                        # Store historical mean for reference
                         result[f'{season_lower}_mean'] = season_ts.mean().item()
-                        
-                        # --- MODIFICATION START ---
-                        # Use fixed thresholds as requested by the user
-                        result[f'{season_lower}_lowflow_threshold'] = 1064  # Extreme Low Flow (10th percentile)
-                        result[f'{season_lower}_lowflow_threshold_30'] = 1417 # Moderate Low Flow (30th percentile)
-                        # --- MODIFICATION END ---
+                        result[f'{season_lower}_lowflow_threshold'] = 1064
+                        result[f'{season_lower}_lowflow_threshold_30'] = 1417
             
-            # Keep the old structure for extreme_flow for other plots if needed
             high_flow_threshold = df['discharge'].quantile(0.90)
             low_flow_threshold_overall = df['discharge'].quantile(0.10)
             df['extreme_flow'] = np.select(
@@ -759,32 +751,18 @@ class ClimateAnalysis:
             if not os.path.exists(return_period_plot_filename):
                 logging.info(f"Plot '{return_period_plot_filename}' not found. Calculating data and creating plot...")
 
-                # We need the raw monthly historical discharge timeseries for this
-                historical_da = None
-                try:
-                    # --- START OF CORRECTION ---
-                    # Load the data explicitly, assigning column names to prevent KeyErrors.
-                    # This is more robust than relying on pandas to infer headers.
-                    df_hist = pd.read_excel(Config.DISCHARGE_FILE, usecols='A,B,H', header=None,
-                                            names=['year', 'month', 'Wien'])
-                    
-                    # Drop potential header rows if they were read as data
-                    df_hist = df_hist[pd.to_numeric(df_hist['year'], errors='coerce').notna()]
-                    df_hist[['year', 'month']] = df_hist[['year', 'month']].astype(int)
-
-                    df_hist['time'] = pd.to_datetime(df_hist[['year', 'month']].assign(day=15))
-                    df_hist = df_hist.set_index('time')
-                    historical_da = df_hist['Wien'].to_xarray()
-                    # --- END OF CORRECTION ---
-                except Exception as e:
-                    logging.error(f"Could not load raw historical discharge for return period analysis: {e}")
+                # --- START DER ÄNDERUNG ---
+                # Verwende die bereits sauber geladenen historischen Daten
+                historical_da = discharge_data_loaded.get('monthly_historical_da')
+                # --- ENDE DER ÄNDERUNG ---
 
                 if historical_da is not None and cmip6_results:
                     # Call the new analysis function
                     return_period_results = storyline_analyzer.analyze_storyline_discharge_extremes(
                         cmip6_results=cmip6_results,
                         historical_discharge_da=historical_da,
-                        config=Config()
+                        config=Config(),
+                        discharge_thresholds=discharge_data_loaded # HIER WIRD DAS ARGUMENT HINZUGEFÜGT
                     )
                     if return_period_results:
                         # Call the new plotting function

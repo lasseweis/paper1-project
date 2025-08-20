@@ -1993,54 +1993,68 @@ class StorylineAnalyzer:
         }
         
         return results
-
+    
     @staticmethod
-    def analyze_storyline_discharge_extremes(cmip6_results, historical_discharge_da, config):
+    def analyze_storyline_discharge_extremes(cmip6_results, historical_discharge_da, config, discharge_thresholds):
         """
-        Analyzes the frequency and return period of extreme low-flow discharge events
-        for each defined storyline at different global warming levels.
-
-        Returns a structured dictionary ready for plotting the change in return periods.
+        Analyzes the frequency and return period of low-flow discharge events
+        for multiple statistical and fixed thresholds.
         """
-        logging.info("Analyzing storyline-specific extreme discharge return periods...")
+        logging.info("Analyzing storyline discharge return periods for multiple thresholds...")
         
-        # --- 1. Define thresholds from historical observations ---
-        if historical_discharge_da is None:
-            logging.error("Historical discharge data is missing, cannot define thresholds.")
+        if historical_discharge_da is None or not discharge_thresholds:
+            logging.error("Historical discharge data or fixed thresholds are missing. Aborting.")
             return None
         
-        # We need seasonal thresholds as discharge has strong seasonal cycle
         results = {}
         thresholds = {}
+
         for season in ['Winter', 'Summer']:
             season_lower = season.lower()
             
-            # --- START OF CORRECTION ---
-            # Filter historical data by season with a check for None
             seasonal_data = DataProcessor.filter_by_season(
                 DataProcessor.assign_season_to_dataarray(historical_discharge_da), season
             )
             if seasonal_data is None:
                 logging.error(f"Could not filter historical discharge data for season: {season}")
-                continue # Skip to the next season if data is not available
+                continue
             
             hist_seasonal = seasonal_data.groupby('season_year').mean('time')
-            # --- END OF CORRECTION ---
+            total_years = hist_seasonal.season_year.size
+            if total_years == 0: continue
 
+            # 1. Statistical Thresholds
             mean = hist_seasonal.mean().item()
             std = hist_seasonal.std().item()
             
-            # Define multiple event severities
-            thresholds[season] = {
-                'Moderate (-1σ)': {'val': mean - 1 * std, 'hist_freq': 0.1587}, # Based on normal distribution
-                'Severe (-2σ)':   {'val': mean - 2 * std, 'hist_freq': 0.0228},
-                'Extreme (-3σ)':  {'val': mean - 3 * std, 'hist_freq': 0.0013},
-            }
-            # Calculate historical return period in years (1 / (freq_per_season))
-            for key, data in thresholds[season].items():
-                data['hist_return_period'] = 1 / data['hist_freq']
+            # 2. Fixed Thresholds
+            moderate_fixed_threshold = discharge_thresholds.get(f'{season_lower}_lowflow_threshold_30')
+            extreme_fixed_threshold = discharge_thresholds.get(f'{season_lower}_lowflow_threshold')
 
-        # --- 2. Get CMIP6 data ---
+            # Define all event types in a dictionary
+            event_definitions = {
+                f'Moderate (-1σ)': {'val': mean - 1 * std},
+                f'Severe (-2σ)': {'val': mean - 2 * std},
+                f'Moderate Low-Flow (<{moderate_fixed_threshold} m³/s)': {'val': moderate_fixed_threshold},
+                f'Extreme Low-Flow (<{extreme_fixed_threshold} m³/s)': {'val': extreme_fixed_threshold}
+            }
+            
+            season_thresholds = {}
+            for name, data in event_definitions.items():
+                if data['val'] is None: continue
+                
+                # Calculate historical frequency and return period for each
+                hist_count = (hist_seasonal < data['val']).sum().item()
+                hist_freq = hist_count / total_years if total_years > 0 else 0
+                
+                season_thresholds[name] = {
+                    'val': data['val'],
+                    'hist_return_period': 1 / hist_freq if hist_freq > 0 else np.inf
+                }
+            
+            thresholds[season] = season_thresholds
+
+        # The rest of the function remains the same as it iterates over the new `thresholds` dictionary
         storyline_classification = cmip6_results.get('storyline_classification_2d')
         metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
         gwl_years = cmip6_results.get('gwl_threshold_years', {})
@@ -2050,48 +2064,38 @@ class StorylineAnalyzer:
             logging.error("Missing CMIP6 data for storyline discharge analysis.")
             return None
 
-        # --- 3. Analyze frequencies per storyline ---
         for gwl in config.GLOBAL_WARMING_LEVELS:
             results[gwl] = {}
             for season in ['Winter', 'Summer']:
+                if season not in thresholds: continue
                 results[gwl][season] = {}
                 season_label = 'DJF' if season == 'Winter' else 'JJA'
                 impact_key = f"{season_label}_discharge"
                 
                 storylines_in_gwl = storyline_classification.get(gwl, {})
                 for storyline_key, model_list in storylines_in_gwl.items():
-                    if not model_list or season_label not in storyline_key:
-                        continue
-                    
+                    if not model_list or season_label not in storyline_key: continue
                     storyline_name = storyline_key.replace(f'{season_label}_', '')
                     results[gwl][season][storyline_name] = {}
-
-                    total_event_counts = {k: 0 for k in thresholds[season]}
-                    total_years_analyzed = 0
-
-                    for model_run_key in model_list:
-                        threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
-                        discharge_ts = metric_timeseries.get(model_run_key, {}).get(impact_key)
-                        
-                        if threshold_year is None or discharge_ts is None: continue
-
-                        start_year = threshold_year - window // 2
-                        end_year = threshold_year + (window - 1) // 2
-                        ts_slice = discharge_ts.sel(season_year=slice(start_year, end_year))
-
-                        if ts_slice.season_year.size > 0:
-                            total_years_analyzed += ts_slice.season_year.size
-                            for event_name, data in thresholds[season].items():
-                                count = (ts_slice < data['val']).sum().item()
-                                total_event_counts[event_name] += count
                     
-                    # Calculate future return period for each event type
+                    # This loop now calculates future frequencies for all 4 threshold types
                     for event_name, data in thresholds[season].items():
-                        if total_years_analyzed > 0 and total_event_counts[event_name] > 0:
-                            future_freq = total_event_counts[event_name] / total_years_analyzed
-                            future_return_period = 1 / future_freq
-                        else:
-                            future_return_period = np.inf # Event doesn't happen in the future slice
+                        total_event_counts = 0
+                        total_years_analyzed = 0
+                        for model_run_key in model_list:
+                            threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
+                            discharge_ts = metric_timeseries.get(model_run_key, {}).get(impact_key)
+                            if threshold_year is None or discharge_ts is None: continue
+
+                            start_year, end_year = threshold_year - window // 2, threshold_year + (window - 1) // 2
+                            ts_slice = discharge_ts.sel(season_year=slice(start_year, end_year))
+
+                            if ts_slice.season_year.size > 0:
+                                total_years_analyzed += ts_slice.season_year.size
+                                total_event_counts += (ts_slice < data['val']).sum().item()
+                        
+                        future_freq = total_event_counts / total_years_analyzed if total_years_analyzed > 0 else 0
+                        future_return_period = 1 / future_freq if future_freq > 0 else np.inf
                         
                         results[gwl][season][storyline_name][event_name] = {
                             'hist_return_period': data['hist_return_period'],

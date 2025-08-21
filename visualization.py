@@ -2077,15 +2077,10 @@ class Visualizer:
                     if thresh30: ax.axhline(thresh30-hist_mean, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5)
                     if thresh10: ax.axhline(thresh10-hist_mean, color='black', linestyle=':', linewidth=2.5, zorder=5)
 
-            # --- START DER KORREKTUR ---
             if is_spei_plot:
-                # Setze manuelle Y-Achsen-Limits, um auf die Daten zu zoomen
                 ax.set_ylim(-1.5, 0.5)
-                
-                # Zeichne den schattierten Bereich nur im sichtbaren Teil des Plots
                 current_ylim = ax.get_ylim()
                 ax.axhspan(current_ylim[0], -1.0, color='red', alpha=0.1, zorder=1, label='Drought Threshold (< -1.0)')
-            # --- ENDE DER KORREKTUR ---
 
             ax.set_xticks(x_pos)
             xtick_labels = [name.replace(' & ', ' &\n').replace(' (MMM)','').replace(' Only', '\n(Only)') for name in available_storylines]
@@ -2122,6 +2117,12 @@ class Visualizer:
 
         fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=2, fontsize=12, frameon=False)
         fig.suptitle("Projected Climate, Discharge & Drought Impacts for Jet Stream Storylines", fontsize=16, weight='bold', y=0.99)
+        
+        # --- HINZUGEFÜGTER CODE ---
+        spei_note = "Note on SPEI: The Thornthwaite method for PET calculation is known to have limitations and may produce uncertainties under future climate scenarios."
+        plt.figtext(0.5, 0.0, spei_note, ha="center", fontsize=9, style='italic', color='dimgray')
+        # --- ENDE DES HINZUGEFÜGTEN CODES ---
+        
         fig.tight_layout(rect=[0, 0.05, 1, 0.97])
         filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_4x2_with_spei.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')

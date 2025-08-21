@@ -630,6 +630,33 @@ class ClimateAnalysis:
             
         # =================================================================================
         # === END OF THE NEW BLOCK ===
+        # =================================================================================  
+        # =================================================================================
+        # === NEW: STORYLINE U850 WIND CHANGE MAPS ===
+        # =================================================================================
+        logging.info("\n\n--- Checking for Storyline U850 Wind Change Maps ---")
+        map_plot_filename = os.path.join(Config.PLOT_DIR, "storyline_u850_change_maps.png")
+        if not os.path.exists(map_plot_filename):
+            logging.info(f"Plot '{map_plot_filename}' not found. Calculating data and creating plot...")
+            if cmip6_results:
+                # Calculate the 2D wind change maps for each storyline
+                storyline_change_maps = storyline_analyzer.calculate_storyline_wind_change_maps(
+                    cmip6_results=cmip6_results,
+                    config=Config()
+                )
+                
+                if storyline_change_maps:
+                    # Create the map plot
+                    Visualizer.plot_storyline_wind_change_maps(
+                        map_data=storyline_change_maps,
+                        config=Config()
+                    )
+                else:
+                    logging.warning("Calculation of storyline wind change maps failed. Skipping plot.")
+            else:
+                logging.warning("Skipping storyline wind change maps: Main CMIP6 results are missing.")
+        else:
+            logging.info(f"Plot '{map_plot_filename}' already exists. Skipping calculation and creation.")
         # =================================================================================
 
         # --- PART 5: JET INTER-RELATIONSHIP SCATTER PLOTS ---

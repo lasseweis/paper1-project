@@ -2224,3 +2224,95 @@ class StorylineAnalyzer:
 
         logging.info("SPEI impact calculation finished.")
         return spei_impacts
+    
+    @staticmethod
+    def calculate_storyline_wind_change_maps(cmip6_results, config):
+        """
+        Calculates the 2D U850 wind change maps for each defined storyline.
+
+        Instead of a zonal mean, this function preserves the spatial grid to create
+        a map of wind changes for each storyline group.
+
+        Returns:
+        --------
+        dict
+            A nested dictionary structured as:
+            {gwl: {season: {storyline: {
+                'mean_change_map': xr.DataArray (lat, lon),
+                'historical_mean_map': xr.DataArray (lat, lon)
+            }}}}
+        """
+        logging.info("Calculating 2D U850 wind change maps for each storyline...")
+        classification = cmip6_results.get('storyline_classification_2d')
+        model_data_loaded = cmip6_results.get('cmip6_model_data_loaded')
+        gwl_years = cmip6_results.get('gwl_threshold_years')
+
+        if not all([classification, model_data_loaded, gwl_years]):
+            logging.error("Cannot calculate wind change maps: Missing classification, model data, or GWL years.")
+            return {}
+
+        hist_period = (config.CMIP6_ANOMALY_REF_START, config.CMIP6_ANOMALY_REF_END)
+        window = config.GWL_YEARS_WINDOW
+        
+        results = {gwl: {'DJF': {}, 'JJA': {}} for gwl in config.GLOBAL_WARMING_LEVELS}
+
+        for gwl in config.GLOBAL_WARMING_LEVELS:
+            for storyline_key, model_list in classification.get(gwl, {}).items():
+                if not model_list:
+                    continue
+                
+                season = 'DJF' if 'DJF' in storyline_key else 'JJA'
+                storyline_name = storyline_key.replace(f'{season}_', '')
+                
+                model_change_maps = []
+                model_hist_maps = []
+
+                for model_run_key in model_list:
+                    ua_data = model_data_loaded.get(model_run_key, {}).get('ua')
+                    threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
+
+                    if ua_data is None or threshold_year is None:
+                        continue
+
+                    ua_seasonal = DataProcessor.calculate_seasonal_means(
+                        DataProcessor.assign_season_to_dataarray(ua_data)
+                    )
+                    
+                    hist_ua_season = DataProcessor.filter_by_season(
+                        ua_seasonal.sel(season_year=slice(hist_period[0], hist_period[1])),
+                        'Winter' if season == 'DJF' else 'Summer'
+                    )
+
+                    start_year, end_year = threshold_year - window // 2, threshold_year + (window - 1) // 2
+                    future_ua_season = DataProcessor.filter_by_season(
+                        ua_seasonal.sel(season_year=slice(start_year, end_year)),
+                        'Winter' if season == 'DJF' else 'Summer'
+                    )
+
+                    if hist_ua_season is None or future_ua_season is None or hist_ua_season.season_year.size == 0 or future_ua_season.season_year.size == 0:
+                        continue
+
+                    # Calculate the mean over time, but keep lat/lon dimensions
+                    hist_map = hist_ua_season.mean(dim='season_year', skipna=True)
+                    future_map = future_ua_season.mean(dim='season_year', skipna=True)
+                    
+                    change_map = future_map - hist_map
+                    
+                    model_change_maps.append(change_map)
+                    model_hist_maps.append(hist_map)
+                
+                if model_change_maps:
+                    # Align all maps to the grid of the first model before averaging
+                    aligned_changes = [da.reindex_like(model_change_maps[0], method='nearest') for da in model_change_maps]
+                    aligned_hists = [da.reindex_like(model_hist_maps[0], method='nearest') for da in model_hist_maps]
+                    
+                    mmm_change_map = xr.concat(aligned_changes, dim='model').mean(dim='model', skipna=True)
+                    mmm_hist_map = xr.concat(aligned_hists, dim='model').mean(dim='model', skipna=True)
+                    
+                    results[gwl][season][storyline_name] = {
+                        'mean_change_map': mmm_change_map.load(),
+                        'historical_mean_map': mmm_hist_map.load()
+                    }
+                    logging.info(f"  -> Calculated change map for GWL {gwl}°C, {season}, {storyline_name} ({len(model_change_maps)} models)")
+
+        return results

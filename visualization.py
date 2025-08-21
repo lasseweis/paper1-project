@@ -2362,6 +2362,7 @@ class Visualizer:
     def plot_storyline_wind_change_maps(map_data, config, filename="storyline_u850_change_maps.png"):
         """
         Creates a panel plot of 2D maps showing U850 wind changes for each storyline.
+        MODIFIED to include a comprehensive title on each subplot and a central legend.
         """
         logging.info("Plotting U850 wind change maps for each storyline...")
         Visualizer.ensure_plot_dir_exists()
@@ -2382,31 +2383,23 @@ class Visualizer:
         num_rows = len(gwls) * len(seasons)
         num_cols = len(storyline_order)
         
-        # Add an extra column for the colorbar
-        fig = plt.figure(figsize=(5 * num_cols, 4.5 * num_rows))
-        gs = matplotlib.gridspec.GridSpec(num_rows, num_cols + 1, width_ratios=[10]*num_cols + [0.5], wspace=0.1, hspace=0.25)
+        fig = plt.figure(figsize=(5 * num_cols, 5 * num_rows))
+        gs = matplotlib.gridspec.GridSpec(num_rows, num_cols + 1, width_ratios=[10]*num_cols + [0.5], wspace=0.15, hspace=0.4)
         
-        cf_ref = None # To hold the mappable for the colorbar
+        cf_ref = None
 
         row_idx = 0
         for gwl in gwls:
             for season in seasons:
-                # Filter storylines that have data for this season/gwl
-                available_storylines = [s for s in storyline_order if s in map_data.get(gwl, {}).get(season, {})]
-                
+                season_full = "Winter" if season == "DJF" else "Summer"
                 for col_idx, storyline_name in enumerate(storyline_order):
                     ax = fig.add_subplot(gs[row_idx, col_idx], projection=ccrs.PlateCarree())
                     
-                    # Set titles for the first row
-                    if row_idx == 0:
-                        ax.set_title(storyline_name.replace(' & ', ' &\n'), fontsize=10, weight='bold')
-                    
-                    # Set Y-axis labels for the first column
-                    if col_idx == 0:
-                        season_full = "Winter" if season == "DJF" else "Summer"
-                        ax.text(-0.2, 0.5, f'GWL +{gwl}°C\n{season_full}', 
-                                va='center', ha='right', rotation='vertical',
-                                transform=ax.transAxes, fontsize=12, weight='bold')
+                    # --- KORREKTUR: String-Operation vor dem f-string ausführen ---
+                    # Dies behebt den SyntaxError: "f-string expression part cannot include a backslash"
+                    storyline_title_formatted = storyline_name.replace(" & ", " &\n")
+                    full_title = f'GWL +{gwl}°C, {season_full} ({season})\n{storyline_title_formatted}'
+                    ax.set_title(full_title, fontsize=10, weight='bold')
 
                     data = map_data.get(gwl, {}).get(season, {}).get(storyline_name)
                     
@@ -2414,13 +2407,12 @@ class Visualizer:
                         change_map = data['mean_change_map']
                         hist_map = data['historical_mean_map']
                         
-                        # Use the existing helper function to draw the map
                         cf, _ = Visualizer.plot_u850_change_map(
                             ax, u850_change_data=change_map.data, 
                             historical_mean_contours=hist_map.data,
                             lons=change_map.lon.values, lats=change_map.lat.values,
-                            title="", season_label="", # Titles are handled outside
-                            vmin=-2.5, vmax=2.5 # Consistent color scale
+                            title="", season_label="",
+                            vmin=-2.5, vmax=2.5
                         )
                         if cf is not None:
                             cf_ref = cf
@@ -2430,14 +2422,26 @@ class Visualizer:
                         ax.set_yticks([])
                 row_idx += 1
 
-        # Add a shared colorbar for the entire plot
+        # Shared colorbar
         if cf_ref:
             cax = fig.add_subplot(gs[:, -1])
             cbar = fig.colorbar(cf_ref, cax=cax, extend='both')
             cbar.set_label('U850 Change (m/s)', fontsize=12)
 
+        # Central legend at the bottom
+        contour_handle = plt.Line2D([0], [0], color='black', lw=0.8, label='Historical Mean U850 (m/s)')
+        fig.legend(handles=[contour_handle],
+                loc='lower center',
+                bbox_to_anchor=(0.5, 0.01),
+                ncol=1,
+                fontsize=12,
+                frameon=True,
+                edgecolor='gray')
+
         fig.suptitle('Storyline-Based U850 Zonal Wind Change', fontsize=18, weight='bold')
-        fig.tight_layout(rect=[0.02, 0.01, 0.95, 0.96])
+        
+        # Adjust layout to make space for titles and legend
+        fig.tight_layout(rect=[0.01, 0.04, 0.95, 0.96])
         
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')

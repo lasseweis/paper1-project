@@ -502,9 +502,9 @@ class StorylineAnalyzer:
     def classify_models_into_storylines_2d(all_deltas, storyline_defs_2d, radius):
         """
         Classifies CMIP6 models into 2D storylines using a multi-zone method,
-        now including on-axis storylines based on extreme storyline means.
+        now including on-axis storylines and two dynamically identified corner extremes.
         """
-        logging.info(f"Classifying models into 2D and Axial storylines (Inner Radius: {radius} std. dev.)...")
+        logging.info(f"Classifying models into 2D, Axial, and Extreme storylines (Inner Radius: {radius} std. dev.)...")
         classification_results = {}
         
         outer_radius_t_value = np.sqrt(chi2.ppf(0.8, 2) / 2)
@@ -541,7 +541,7 @@ class StorylineAnalyzer:
                 # --- PART 1: Classify into Core, Extreme, and Neutral zones ---
                 for model_key in common_models:
                     norm_dist_sq = ((model_deltas_speed[model_key] - mmm_speed) / std_dev_speed)**2 + \
-                                   ((model_deltas_lat[model_key] - mmm_lat) / std_dev_lat)**2
+                                ((model_deltas_lat[model_key] - mmm_lat) / std_dev_lat)**2
                     norm_dist = np.sqrt(norm_dist_sq)
 
                     if norm_dist <= radius:
@@ -561,7 +561,7 @@ class StorylineAnalyzer:
                 
                 # --- PART 2: Define and classify axial storylines ---
                 extreme_storyline_means = {}
-                extreme_types_in_config = [s for s in storylines if 'Shift' in s and 'Core' not in s and 'Only' not in s]
+                extreme_types_in_config = [s for s in storylines if 'Shift' in s and 'Core' not in s and 'Only' not in s and 'Extreme' not in s]
                 
                 for storyline_name in extreme_types_in_config:
                     full_key = f"{season}_{storyline_name}"
@@ -589,7 +589,7 @@ class StorylineAnalyzer:
                     
                     for model_key in common_models:
                         norm_dist_sq = ((model_deltas_speed[model_key] - center['speed']) / std_dev_speed)**2 + \
-                                       ((model_deltas_lat[model_key] - center['lat']) / std_dev_lat)**2
+                                    ((model_deltas_lat[model_key] - center['lat']) / std_dev_lat)**2
                         if np.sqrt(norm_dist_sq) <= radius:
                             classified_models_for_axial.append(model_key)
                     
@@ -601,7 +601,29 @@ class StorylineAnalyzer:
                         to_remove = set(classified_models_for_axial)
                         classification_results[gwl][neutral_key] = sorted(list(current_neutral - to_remove))
 
+                # --- NEW BLOCK: PART 3 - Identify and add corner extreme storylines ---
+                if common_models:
+                    # Normalize values for fair comparison
+                    norm_speed = (speed_values - np.min(speed_values)) / (np.max(speed_values) - np.min(speed_values))
+                    norm_lat = (lat_values - np.min(lat_values)) / (np.max(lat_values) - np.min(lat_values))
+                    
+                    # Metric for Top-Left (NW): High Latitude, Low Speed -> max(norm_lat - norm_speed)
+                    metric_nw = norm_lat - norm_speed
+                    # Metric for Bottom-Right (SE): Low Latitude, High Speed -> max(norm_speed - norm_lat)
+                    metric_se = norm_speed - norm_lat
+                    
+                    model_list_common = list(common_models)
+                    model_nw = model_list_common[np.argmax(metric_nw)]
+                    model_se = model_list_common[np.argmax(metric_se)]
+
+                    classification_results[gwl][f"{season}_Extreme NW"] = [model_nw]
+                    classification_results[gwl][f"{season}_Extreme SE"] = [model_se]
+                    logging.info(f"    - Extreme NW model for {season} @ {gwl}C: {model_nw}")
+                    logging.info(f"    - Extreme SE model for {season} @ {gwl}C: {model_se}")
+                # --- END NEW BLOCK ---
+
         return classification_results
+
     def calculate_cmip6_u850_change_fields(self,
                                             models_to_run=None,
                                             future_scenario='ssp585',

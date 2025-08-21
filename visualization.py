@@ -1204,8 +1204,8 @@ class Visualizer:
                                         inner_radius=None):
         """
         Helper-Funktion zum Zeichnen eines Panels, das die Beziehung zwischen Jet-Indizes darstellt.
-        Stellt jetzt sowohl die Mittelwerte der Extrem-Quadranten (Kreuze) als auch die
-        Klassifikations-Zonen der axialen Storylines (Ellipsen/Diamanten) dar.
+        Stellt jetzt die Mittelwerte der Extrem-Quadranten (Kreuze), die Klassifikations-Zonen
+        der axialen Storylines (Ellipsen) und die beiden Eck-Extreme (Sterne) dar.
         """
         all_deltas = cmip6_results.get('all_individual_model_deltas_for_plot', {})
         storyline_classification = cmip6_results.get('storyline_classification_2d', {})
@@ -1244,7 +1244,6 @@ class Visualizer:
             outer_ellipse = mpatches.Ellipse(xy=(mmm_x, mmm_y), width=2*t_80*std_dev_x, height=2*t_80*std_dev_y, angle=0, edgecolor='black', facecolor='none', linestyle='--', linewidth=1.5, zorder=5, label='80% Confidence Region')
             ax.add_patch(outer_ellipse)
 
-        # === START DER WIEDERHERGESTELLTEN LOGIK: KREUZE FÜR EXTREM-STORYLINES ===
         storyline_means_to_plot = {
             'Fast Jet & Northward Shift': '#d62728', 'Slow Jet & Northward Shift': '#ff7f0e',
             'Slow Jet & Southward Shift': '#1f77b4', 'Fast Jet & Southward Shift': '#2ca02c'
@@ -1256,13 +1255,28 @@ class Visualizer:
                 mean_x = np.mean([x_deltas[m] for m in models_in_storyline])
                 mean_y = np.mean([y_deltas[m] for m in models_in_storyline])
                 ax.scatter(mean_x, mean_y, color=color, marker='X', s=100, zorder=9,
-                           edgecolor='black', linewidth=1.0, label=f'Mean: {storyline_name}')
-        # === ENDE DER WIEDERHERGESTELLTEN LOGIK ===
+                        edgecolor='black', linewidth=1.0, label=f'Mean: {storyline_name}')
+        
+        # --- NEW BLOCK: Plot single models for the new extreme storylines ---
+        extreme_storylines_to_plot = {
+            'Extreme NW': {'color': '#8c564b', 'marker': '*'}, # brown star
+            'Extreme SE': {'color': '#e377c2', 'marker': '*'}  # pink star
+        }
+        for storyline_name, style in extreme_storylines_to_plot.items():
+            storyline_key = f"{season_prefix}_{storyline_name}"
+            model_in_storyline = gwl_classification.get(storyline_key) # Should be a list with one model
+            if model_in_storyline:
+                model_key = model_in_storyline[0]
+                x_coord = x_deltas.get(model_key)
+                y_coord = y_deltas.get(model_key)
+                if x_coord is not None and y_coord is not None:
+                    ax.scatter(x_coord, y_coord, color=style['color'], marker=style['marker'], s=250, zorder=12,
+                            edgecolor='black', linewidth=1.2, label=f'Model: {storyline_name}')
+        # --- END NEW BLOCK ---
 
-        # === LOGIK FÜR AXIALE STORYLINES BLEIBT ERHALTEN ===
         axial_colors = {'Northward': '#1f77b4', 'Southward': '#ff7f0e', 'Fast': '#2ca02c', 'Slow': '#d62728'}
         extreme_storyline_means = {}
-        extreme_types = [k.replace(f'{season_prefix}_', '') for k in gwl_classification if 'Shift' in k and 'Only' not in k]
+        extreme_types = [k.replace(f'{season_prefix}_', '') for k in gwl_classification if 'Shift' in k and 'Only' not in k and 'Extreme' not in k]
         for storyline_name in extreme_types:
             models_in_storyline = gwl_classification.get(f"{season_prefix}_{storyline_name}", [])
             if models_in_storyline:
@@ -2020,11 +2034,14 @@ class Visualizer:
             (3, 1): {'key': 'JJA_spei', 'title': 'h) Summer (JJA) SPEI-4'}
         }
         
+        # --- MODIFIED BLOCK ---
         storyline_display_order = [
             'Core Mean', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
             'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
-            'Slow Jet Only', 'Fast Jet Only'
+            'Slow Jet Only', 'Fast Jet Only',
+            'Extreme NW', 'Extreme SE' # Added new storylines here
         ]
+        # --- END MODIFIED BLOCK ---
 
         for (row, col), plot_info in plot_grid.items():
             ax = axs[row, col]
@@ -2086,7 +2103,7 @@ class Visualizer:
             xtick_labels = [name.replace(' & ', ' &\n').replace(' (MMM)','').replace(' Only', '\n(Only)') for name in available_storylines]
             ax.set_xticklabels(xtick_labels, rotation=45, ha="right", fontsize=10)
             if row < 3:
-                 ax.set_xticklabels([])
+                ax.set_xticklabels([])
             
             hist_mean = discharge_data_historical.get(f'{season_lower}_mean', 0) if is_discharge_plot else 0
             for rects in [rects1, rects2]:
@@ -2118,10 +2135,8 @@ class Visualizer:
         fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=2, fontsize=12, frameon=False)
         fig.suptitle("Projected Climate, Discharge & Drought Impacts for Jet Stream Storylines", fontsize=16, weight='bold', y=0.99)
         
-        # --- HINZUGEFÜGTER CODE ---
         spei_note = "Note on SPEI: The Thornthwaite method for PET calculation is known to have limitations and may produce uncertainties under future climate scenarios."
         plt.figtext(0.5, 0.0, spei_note, ha="center", fontsize=9, style='italic', color='dimgray')
-        # --- ENDE DES HINZUGEFÜGTEN CODES ---
         
         fig.tight_layout(rect=[0, 0.05, 1, 0.97])
         filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_4x2_with_spei.png")
@@ -2195,7 +2210,6 @@ class Visualizer:
         """
         Creates a comprehensive plot showing the change in return periods for
         low-flow events and the change in interannual standard deviation.
-        (CORRECTED VERSION)
         """
         if not results or not config or 'thresholds' not in results:
             logging.warning("Cannot plot return period/std dev change: Missing results or thresholds.")
@@ -2218,16 +2232,19 @@ class Visualizer:
         num_total_cols = num_event_cols + 1
         fig = plt.figure(figsize=(5.5 * num_total_cols, 12))
         gs = matplotlib.gridspec.GridSpec(len(seasons_to_plot), num_total_cols, 
-                                          width_ratios=[5] * num_event_cols + [3.5])
+                                        width_ratios=[5] * num_event_cols + [3.5])
         axs = [[fig.add_subplot(gs[r, c]) for c in range(num_total_cols)] for r in range(len(seasons_to_plot))]
 
         plt.style.use('seaborn-v0_8-whitegrid')
 
+        # --- MODIFIED BLOCK ---
         storyline_order = [
             'Core Mean', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
             'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
-            'Slow Jet Only', 'Fast Jet Only'
+            'Slow Jet Only', 'Fast Jet Only',
+            'Extreme NW', 'Extreme SE' # Added new storylines here
         ]
+        # --- END MODIFIED BLOCK ---
         
         gwl_colors = {gwls_to_plot[0]: '#ff7f0e', gwls_to_plot[1]: '#d62728'}
 
@@ -2292,7 +2309,6 @@ class Visualizer:
                 ax_std.barh(y_pos_for_bars + bar_height, future_std_gwl2, height=bar_height, color=gwl_colors[gwls_to_plot[1]], edgecolor='black', zorder=10)
                 ax_std.barh(y_pos_for_bars, future_std_gwl1, height=bar_height, color=gwl_colors[gwls_to_plot[0]], edgecolor='black', zorder=10)
                 
-                # --- CHANGE 1: Use a generic label inside the loop ---
                 ax_std.axvline(x=hist_std_dev, color='skyblue', linestyle='--', linewidth=3, zorder=5, label='Historical σ')
             
             ax_std.invert_yaxis()
@@ -2301,8 +2317,8 @@ class Visualizer:
             ax_std.grid(axis='x', linestyle=':', which='both')
 
         if storylines_for_row:
-             axs[0][0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines_for_row], fontsize=9)
-             axs[1][0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines_for_row], fontsize=9)
+            axs[0][0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines_for_row], fontsize=9)
+            axs[1][0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines_for_row], fontsize=9)
         
         for row_axs in axs:
             for i, ax in enumerate(row_axs):
@@ -2316,32 +2332,26 @@ class Visualizer:
             axs[-1][col].set_xlabel('Return Period (Years)', fontsize=11)
         axs[-1][-1].set_xlabel('Std. Dev. (m³/s)', fontsize=11)
         
-        # --- CHANGE 2: Build the final legend outside the loop ---
         handles, labels = axs[0][0].get_legend_handles_labels()
         
-        # Get handles for the std dev plot, but ignore the generic label
         std_handles, _ = axs[0][-1].get_legend_handles_labels()
         if std_handles:
-            # Find the handle for the historical sigma line
             hist_sigma_handle = next((h for h in std_handles if isinstance(h, plt.Line2D) and h.get_color() == 'skyblue'), None)
             if hist_sigma_handle:
                 handles.append(hist_sigma_handle)
-                
-                # Fetch both seasonal values for the label
                 hist_std_winter = results.get('thresholds', {}).get('Winter', {}).get('historical_std_dev')
                 hist_std_summer = results.get('thresholds', {}).get('Summer', {}).get('historical_std_dev')
                 
                 if hist_std_winter is not None and hist_std_summer is not None:
-                    # Create the correct, detailed label
                     labels.append(f'Historical σ (Winter: {hist_std_winter:.0f}, Summer: {hist_std_summer:.0f})')
                 else:
-                    labels.append('Historical σ') # Fallback
+                    labels.append('Historical σ')
 
         by_label = dict(zip(labels, handles))
         fig.legend(by_label.values(), by_label.keys(), loc='lower center', bbox_to_anchor=(0.5, 0.0), ncol=4, fontsize=12)
         
         fig.suptitle(f"Change in Return Period and Variability of Low-Flow Events",
-                     fontsize=16, weight='bold')
+                    fontsize=16, weight='bold')
         fig.tight_layout(rect=[0.02, 0.05, 0.98, 0.94], h_pad=2, w_pad=1.5)
         
         filename = os.path.join(config.PLOT_DIR, "storyline_discharge_return_period_comparison_FULL.png")

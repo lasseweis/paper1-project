@@ -156,10 +156,9 @@ class Config:
     # A value of 0.5 means models inside the inner oval are classified into that storyline zone.
     STORYLINE_INNER_RADIUS = 0.5 
 
-    # Format: {'Season': {GWL: [List of Storyline Names]}}
+    # --- MODIFIED BLOCK ---
     # The names are used to initialize the categories. The classification logic
     # dynamically assigns models to them.
-    # ADDED THE FOUR "Only" aAial storylines to the definitions.
     STORYLINE_JET_CHANGES_2D = {
         'DJF': {
             2.0: [
@@ -168,11 +167,10 @@ class Config:
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
                 'Fast Jet & Southward Shift',
-                # --- AXIAL STORYLINES ---
-                'Northward Shift Only',
-                'Southward Shift Only',
-                'Fast Jet Only',
-                'Slow Jet Only',
+                'Northward Shift Only', 'Southward Shift Only',
+                'Fast Jet Only', 'Slow Jet Only',
+                # --- NEW EXTREME STORYLINES ---
+                'Extreme NW', 'Extreme SE',
             ],
             3.0: [
                 'Core Mean', 'Neutral',
@@ -180,11 +178,10 @@ class Config:
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
                 'Fast Jet & Southward Shift',
-                # --- AXIAL STORYLINES ---
-                'Northward Shift Only',
-                'Southward Shift Only',
-                'Fast Jet Only',
-                'Slow Jet Only',
+                'Northward Shift Only', 'Southward Shift Only',
+                'Fast Jet Only', 'Slow Jet Only',
+                # --- NEW EXTREME STORYLINES ---
+                'Extreme NW', 'Extreme SE',
             ]
         },
         'JJA': {
@@ -194,11 +191,10 @@ class Config:
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
                 'Fast Jet & Southward Shift',
-                # --- AXIAL STORYLINES ---
-                'Northward Shift Only',
-                'Southward Shift Only',
-                'Fast Jet Only',
-                'Slow Jet Only',
+                'Northward Shift Only', 'Southward Shift Only',
+                'Fast Jet Only', 'Slow Jet Only',
+                # --- NEW EXTREME STORYLINES ---
+                'Extreme NW', 'Extreme SE',
             ],
             3.0: [
                 'Core Mean', 'Neutral',
@@ -206,11 +202,11 @@ class Config:
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
                 'Fast Jet & Southward Shift',
-                # --- AXIAL STORYLINES ---
-                'Northward Shift Only',
-                'Southward Shift Only',
-                'Fast Jet Only',
-                'Slow Jet Only',
+                'Northward Shift Only', 'Southward Shift Only',
+                'Fast Jet Only', 'Slow Jet Only',
+                # --- NEW EXTREME STORYLINES ---
+                'Extreme NW', 'Extreme SE',
             ]
         }
     }
+    # --- END MODIFIED BLOCK ---

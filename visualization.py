@@ -2172,6 +2172,7 @@ class Visualizer:
         """
         Creates a comprehensive plot showing the change in return periods for
         low-flow events and the change in interannual standard deviation.
+        (CORRECTED VERSION)
         """
         if not results or not config or 'thresholds' not in results:
             logging.warning("Cannot plot return period/std dev change: Missing results or thresholds.")
@@ -2187,11 +2188,11 @@ class Visualizer:
 
         seasons_to_plot = ['Winter', 'Summer']
         event_keys = list(results.get('thresholds', {}).get(seasons_to_plot[0], {}).keys())
-        event_keys.remove('historical_std_dev') # Don't treat this as an event column
+        if 'historical_std_dev' in event_keys:
+            event_keys.remove('historical_std_dev')
 
-        # --- NEW: Define grid with an extra column for std dev ---
         num_event_cols = len(event_keys)
-        num_total_cols = num_event_cols + 1 # Add one for the std dev plot
+        num_total_cols = num_event_cols + 1
         fig = plt.figure(figsize=(5.5 * num_total_cols, 12))
         gs = matplotlib.gridspec.GridSpec(len(seasons_to_plot), num_total_cols, 
                                           width_ratios=[5] * num_event_cols + [3.5])
@@ -2207,7 +2208,15 @@ class Visualizer:
         
         gwl_colors = {gwls_to_plot[0]: '#ff7f0e', gwls_to_plot[1]: '#d62728'}
 
+        # --- START OF CORRECTION ---
         for row, season in enumerate(seasons_to_plot):
+            
+            # **FIX 1**: Determine the complete list of storylines for the entire row first.
+            # A storyline is now included if it has data for the given season at all.
+            plot_data_for_season = results.get(gwls_to_plot[0], {}).get(season, {})
+            storylines_for_row = [s for s in storyline_order if s in plot_data_for_season]
+            y_pos_map = {storyline: i for i, storyline in enumerate(storylines_for_row)}
+
             # --- Part 1: Plot the return period dumbbell plots ---
             for col, event_key in enumerate(event_keys):
                 ax = axs[row][col]
@@ -2217,68 +2226,75 @@ class Visualizer:
                 if col == 0:
                     ax.set_ylabel(season, fontsize=14, weight='bold')
 
-                data_season = results.get('thresholds', {}).get(season, {}).get(event_key)
-                if not data_season:
+                data_season_threshold = results.get('thresholds', {}).get(season, {}).get(event_key)
+                if not data_season_threshold:
                     ax.text(0.5, 0.5, "Data Unavailable", ha='center', va='center', transform=ax.transAxes)
                     continue
 
-                plot_data_gwl1 = results.get(gwls_to_plot[0], {}).get(season, {})
-                storylines = [s for s in storyline_order if s in plot_data_gwl1 and plot_data_gwl1[s].get(event_key)]
-                if not storylines:
-                    ax.text(0.5, 0.5, "No Storyline Data", ha='center', va='center', transform=ax.transAxes)
-                    continue
-                
-                y_pos = np.arange(len(storylines))
-                
-                hist_periods = [data_season['hist_return_period']] * len(storylines)
-                future_periods_gwl1 = [results[gwls_to_plot[0]][season][s][event_key]['future_return_period'] for s in storylines]
-                future_periods_gwl2 = [results[gwls_to_plot[1]][season][s][event_key]['future_return_period'] for s in storylines]
+                # Prepare lists to hold valid data points for plotting
+                y_coords_plot, hist_periods_plot = [], []
+                future_periods_gwl1_plot, future_periods_gwl2_plot = [], []
 
-                ax.hlines(y=y_pos, xmin=hist_periods, xmax=future_periods_gwl1, color='grey', alpha=0.4, lw=1.5, linestyle='--')
-                ax.hlines(y=y_pos, xmin=future_periods_gwl1, xmax=future_periods_gwl2, color='grey', alpha=0.8, lw=1.5)
+                # **FIX 2**: Iterate over the consistent list of storylines for the whole row
+                for storyline in storylines_for_row:
+                    y_coord = y_pos_map[storyline]
+                    
+                    # Check for data for this specific event and storyline
+                    event_data_gwl1 = results.get(gwls_to_plot[0], {}).get(season, {}).get(storyline, {}).get(event_key)
+                    event_data_gwl2 = results.get(gwls_to_plot[1], {}).get(season, {}).get(storyline, {}).get(event_key)
+                    
+                    # Only add data to plot if it exists for this specific event
+                    if event_data_gwl1 and event_data_gwl2:
+                        y_coords_plot.append(y_coord)
+                        hist_periods_plot.append(data_season_threshold['hist_return_period'])
+                        future_periods_gwl1_plot.append(event_data_gwl1['future_return_period'])
+                        future_periods_gwl2_plot.append(event_data_gwl2['future_return_period'])
 
-                ax.scatter(hist_periods, y_pos, color='skyblue', s=80, zorder=10, ec='black', label='Historical')
-                ax.scatter(future_periods_gwl1, y_pos, color=gwl_colors[gwls_to_plot[0]], s=100, zorder=10, ec='black', label=f'Future (+{gwls_to_plot[0]}°C)')
-                ax.scatter(future_periods_gwl2, y_pos, color=gwl_colors[gwls_to_plot[1]], s=100, zorder=10, ec='black', label=f'Future (+{gwls_to_plot[1]}°C)')
+                if y_coords_plot:
+                    ax.hlines(y=y_coords_plot, xmin=hist_periods_plot, xmax=future_periods_gwl1_plot, color='grey', alpha=0.4, lw=1.5, linestyle='--')
+                    ax.hlines(y=y_coords_plot, xmin=future_periods_gwl1_plot, xmax=future_periods_gwl2_plot, color='grey', alpha=0.8, lw=1.5)
+
+                    ax.scatter(hist_periods_plot, y_coords_plot, color='skyblue', s=80, zorder=10, ec='black', label='Historical')
+                    ax.scatter(future_periods_gwl1_plot, y_coords_plot, color=gwl_colors[gwls_to_plot[0]], s=100, zorder=10, ec='black', label=f'Future (+{gwls_to_plot[0]}°C)')
+                    ax.scatter(future_periods_gwl2_plot, y_coords_plot, color=gwl_colors[gwls_to_plot[1]], s=100, zorder=10, ec='black', label=f'Future (+{gwls_to_plot[1]}°C)')
                 
                 ax.invert_yaxis()
+                # **FIX 3**: Set ticks and grid for the full list of storylines to maintain consistent spacing
+                ax.set_yticks(np.arange(len(storylines_for_row)))
                 ax.grid(axis='y', linestyle='none')
                 ax.grid(axis='x', linestyle=':', which='both')
                 if col > 0:
                     ax.set_yticklabels([])
 
-            # --- Part 2: NEW subplot for Standard Deviation ---
+            # --- Part 2: Standard Deviation Plot (also corrected to use consistent storyline list) ---
             ax_std = axs[row][num_event_cols]
             if row == 0:
                 ax_std.set_title("Interannual\nVariability (σ)", fontsize=11, weight='bold')
 
             hist_std_dev = results.get('thresholds', {}).get(season, {}).get('historical_std_dev')
-            plot_data_gwl1 = results.get(gwls_to_plot[0], {}).get(season, {})
-            storylines = [s for s in storyline_order if s in plot_data_gwl1 and 'future_std_dev' in plot_data_gwl1[s]]
-
-            if not storylines or hist_std_dev is None:
-                ax_std.text(0.5, 0.5, "Std Dev Data\nUnavailable", ha='center', va='center', transform=ax_std.transAxes)
-                continue
+            if hist_std_dev is not None and storylines_for_row: # Check if there are storylines to plot
+                bar_height = 0.25
+                future_std_gwl1 = [results.get(gwls_to_plot[0], {}).get(season, {}).get(s, {}).get('future_std_dev', np.nan) for s in storylines_for_row]
+                future_std_gwl2 = [results.get(gwls_to_plot[1], {}).get(season, {}).get(s, {}).get('future_std_dev', np.nan) for s in storylines_for_row]
                 
-            y_pos = np.arange(len(storylines))
-            bar_height = 0.25
+                y_pos_for_bars = np.arange(len(storylines_for_row))
 
-            future_std_gwl1 = [results[gwls_to_plot[0]][season][s]['future_std_dev'] for s in storylines]
-            future_std_gwl2 = [results[gwls_to_plot[1]][season][s]['future_std_dev'] for s in storylines]
-
-            ax_std.barh(y_pos + bar_height, future_std_gwl2, height=bar_height, color=gwl_colors[gwls_to_plot[1]], edgecolor='black', zorder=10)
-            ax_std.barh(y_pos, future_std_gwl1, height=bar_height, color=gwl_colors[gwls_to_plot[0]], edgecolor='black', zorder=10)
-            
-            ax_std.axvline(x=hist_std_dev, color='skyblue', linestyle='--', linewidth=3, zorder=5, label=f'Historical σ ({hist_std_dev:.0f})')
+                ax_std.barh(y_pos_for_bars + bar_height, future_std_gwl2, height=bar_height, color=gwl_colors[gwls_to_plot[1]], edgecolor='black', zorder=10)
+                ax_std.barh(y_pos_for_bars, future_std_gwl1, height=bar_height, color=gwl_colors[gwls_to_plot[0]], edgecolor='black', zorder=10)
+                
+                ax_std.axvline(x=hist_std_dev, color='skyblue', linestyle='--', linewidth=3, zorder=5, label=f'Historical σ ({hist_std_dev:.0f})')
             
             ax_std.invert_yaxis()
             ax_std.set_yticks([])
             ax_std.grid(axis='y', linestyle='none')
             ax_std.grid(axis='x', linestyle=':', which='both')
+        # --- END OF CORRECTION ---
 
-        # --- Final Formatting for the entire figure ---
-        axs[0][0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines], fontsize=9)
-        axs[1][0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines], fontsize=9)
+        # Final Formatting
+        # **FIX 4**: Use the consistent storyline list for the labels
+        if storylines_for_row:
+             axs[0][0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines_for_row], fontsize=9)
+             axs[1][0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines_for_row], fontsize=9)
         
         for row_axs in axs:
             for i, ax in enumerate(row_axs):

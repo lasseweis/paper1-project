@@ -620,8 +620,6 @@ class DataProcessor:
         
         return pet_monthly
 
-    # Komplette, korrigierte Funktion für data_processing.py
-
     @staticmethod
     def calculate_spei(pr_monthly, tas_monthly, lat, scale=4):
         """
@@ -636,7 +634,6 @@ class DataProcessor:
         logging.info(f"Calculating SPEI with a {scale}-month scale (Spatial: {is_spatial})...")
 
         if is_spatial:
-            # For spatial data, we need to pass a latitude array to PET calculation
             lat_da = pr_monthly.lat
         else:
             lat_da = lat
@@ -651,40 +648,43 @@ class DataProcessor:
         valid_balance = aggregated_balance.dropna(dim='time', how='all')
 
         def fit_and_transform(x):
-            # This function will be applied along the time dimension
-            # Drop NaNs for fitting, but keep track of their locations
             series = pd.Series(x)
             not_nan = series.notna()
-            if not_nan.sum() < 10: # Need enough data to fit
+            if not_nan.sum() < 10:
                 return np.full_like(x, np.nan)
             
-            # Fit the distribution only to valid data
             params = fisk.fit(series[not_nan])
-            
-            # Calculate CDF for all points (NaNs will result in NaNs)
             cdf = fisk.cdf(series.values, *params)
-            
-            # Transform to standard normal
             spei_values = norm.ppf(cdf)
             return spei_values
 
         if is_spatial:
-            # Use apply_ufunc for efficient grid-cell-wise computation
             spei_values = xr.apply_ufunc(
                 fit_and_transform,
                 valid_balance,
                 input_core_dims=[['time']],
                 output_core_dims=[['time']],
-                vectorize=True,  # Ensures the function is applied over non-core dims
+                vectorize=True,
                 output_dtypes=[valid_balance.dtype]
             )
             spei_ts = spei_values.rename(f'spei_{scale}')
-            # The time coordinate is preserved by apply_ufunc with core_dims
         else:
-            # Original logic for 1D timeseries
-            params = fisk.fit(valid_balance.values)
-            cdf = fisk.cdf(valid_balance.values, *params)
-            spei_values = norm.ppf(cdf)
+            # --- START DER KORREKTUR ---
+            # Filtere explizit nach endlichen Werten für die Anpassung der Verteilung
+            values_to_fit = valid_balance.values[np.isfinite(valid_balance.values)]
+            
+            # Prüfe, ob genügend Datenpunkte für eine robuste Anpassung vorhanden sind
+            if len(values_to_fit) < 10:
+                logging.warning("Not enough finite data points for SPEI calculation, returning NaNs.")
+                spei_values = np.full_like(valid_balance.values, np.nan)
+            else:
+                # Führe die Anpassung nur mit den gültigen Werten durch
+                params = fisk.fit(values_to_fit)
+                # Wende die CDF auf die ursprünglichen Daten an, um die Form beizubehalten (NaNs bleiben NaNs)
+                cdf = fisk.cdf(valid_balance.values, *params)
+                spei_values = norm.ppf(cdf)
+            # --- ENDE DER KORREKTUR ---
+
             spei_ts = xr.DataArray(
                 spei_values,
                 coords={'time': valid_balance.time},

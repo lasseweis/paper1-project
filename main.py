@@ -528,6 +528,8 @@ class ClimateAnalysis:
         else:
             logging.info(f"Plot '{evolution_plot_filename}' already exists. Skipping creation.")
 
+# In main.py, ersetze den entsprechenden Block in der run_full_analysis Methode
+
         # =================================================================================
         # === NEW AND FINAL BLOCK FOR BETA CALCULATION, IMPACTS, AND COMPARISON PLOTS ===
         # =================================================================================
@@ -552,20 +554,32 @@ class ClimateAnalysis:
                     cmip6_results=cmip6_results,
                     config=Config()
                 )
-
-                ### DEBUG ###
-                import json
-                logging.info("--- DEBUG: DATA BEFORE PLOTTING (main.py) ---")
-                logging.info(f"  final_impacts_pr_tas @ 2.0°C: {json.dumps(final_impacts_pr_tas.get(2.0, {}), indent=2)}")
-                logging.info(f"  direct_impacts_discharge @ 2.0°C: {json.dumps(direct_impacts_discharge.get(2.0, {}), indent=2)}")
-                logging.info("--- END DEBUG ---")
                 
-                # Step 3: Create the new 3x2 summary bar chart with all impacts
+                # --- NEUER SCHRITT: Berechne SPEI-Impacts ---
+                logging.info("\n--- Calculating future SPEI impacts based on storylines ---")
+                # Bereite die historischen monatlichen Box-Daten vor
+                pr_box_monthly_hist = DataProcessor.calculate_spatial_mean(datasets_reanalysis['ERA5_pr_monthly'], Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
+                tas_box_monthly_hist = DataProcessor.calculate_spatial_mean(datasets_reanalysis['ERA5_tas_monthly'], Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
+                
+                storyline_spei_impacts = {}
+                if pr_box_monthly_hist is not None and tas_box_monthly_hist is not None and final_impacts_pr_tas:
+                    storyline_spei_impacts = storyline_analyzer.calculate_storyline_spei_impacts(
+                        storyline_impacts=final_impacts_pr_tas,
+                        historical_monthly_data={
+                            'pr_box_monthly': pr_box_monthly_hist,
+                            'tas_box_monthly': tas_box_monthly_hist
+                        },
+                        config=Config()
+                    )
+                else:
+                    logging.warning("Skipping SPEI impact calculation due to missing historical data or pr/tas impacts.")
+                
+                # Step 3: Create the new summary bar chart with all impacts (jetzt mit SPEI)
                 if final_impacts_pr_tas and direct_impacts_discharge:
-                    # THIS IS THE CORRECTED FUNCTION CALL
                     Visualizer.plot_storyline_impact_barchart_with_discharge(
                         final_impacts=final_impacts_pr_tas,
                         discharge_impacts=direct_impacts_discharge,
+                        spei_impacts=storyline_spei_impacts, # NEU
                         discharge_data_historical=discharge_data_loaded,
                         config=Config()
                     )
@@ -613,6 +627,7 @@ class ClimateAnalysis:
                         )
         else:
             logging.warning("Skipping all Fidelity/Scatter/Impact plots due to missing cmip6_results, reanalysis, or jet data.")
+            
         # =================================================================================
         # === END OF THE NEW BLOCK ===
         # =================================================================================

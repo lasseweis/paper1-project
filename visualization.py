@@ -1982,14 +1982,13 @@ class Visualizer:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved vertical storyline impacts summary plot to {filename}")
-    
+
     @staticmethod
-    def plot_storyline_impact_barchart_with_discharge(final_impacts, discharge_impacts, discharge_data_historical, config):
+    def plot_storyline_impact_barchart_with_discharge(final_impacts, discharge_impacts, spei_impacts, discharge_data_historical, config):
         """
-        Creates a 3x2 vertical bar chart to visualize storyline impacts for Temp, Precip, and Discharge.
-        MODIFIED to include axial storylines and specific ordering.
+        Creates a 4x2 vertical bar chart to visualize storyline impacts for Temp, Precip, Discharge, and SPEI.
         """
-        logging.info("Plotting final storyline impacts (incl. axial and discharge) as a 3x2 bar chart...")
+        logging.info("Plotting final storyline impacts (incl. discharge and SPEI) as a 4x2 bar chart...")
         Visualizer.ensure_plot_dir_exists()
 
         if not final_impacts:
@@ -1997,36 +1996,42 @@ class Visualizer:
             return
 
         plt.style.use('seaborn-v0_8-whitegrid')
-        fig, axs = plt.subplots(3, 2, figsize=(16, 18))
+        fig, axs = plt.subplots(4, 2, figsize=(16, 22))
 
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         gwl_colors = {gwls_to_plot[0]: '#4575b4', gwls_to_plot[1]: '#d73027'}
 
         all_impacts = final_impacts.copy()
-        for gwl, discharge_data in discharge_impacts.items():
+        for gwl, data in discharge_impacts.items():
             if gwl not in all_impacts: all_impacts[gwl] = {}
-            all_impacts[gwl].update(discharge_data)
+            all_impacts[gwl].update(data)
+        for gwl, data in spei_impacts.items():
+            if gwl not in all_impacts: all_impacts[gwl] = {}
+            all_impacts[gwl].update(data)
 
         plot_grid = {
-            (0, 0): {'key': 'DJF_tas', 'title': 'a) Winter (DJF) Temperature'}, (0, 1): {'key': 'JJA_tas', 'title': 'b) Summer (JJA) Temperature'},
-            (1, 0): {'key': 'DJF_pr', 'title': 'c) Winter (DJF) Precipitation'}, (1, 1): {'key': 'JJA_pr', 'title': 'd) Summer (JJA) Precipitation'},
-            (2, 0): {'key': 'DJF_discharge', 'title': 'e) Winter (DJF) Discharge'}, (2, 1): {'key': 'JJA_discharge', 'title': 'f) Summer (JJA) Discharge'}
+            (0, 0): {'key': 'DJF_tas', 'title': 'a) Winter (DJF) Temperature'},
+            (0, 1): {'key': 'JJA_tas', 'title': 'b) Summer (JJA) Temperature'},
+            (1, 0): {'key': 'DJF_pr', 'title': 'c) Winter (DJF) Precipitation'},
+            (1, 1): {'key': 'JJA_pr', 'title': 'd) Summer (JJA) Precipitation'},
+            (2, 0): {'key': 'DJF_discharge', 'title': 'e) Winter (DJF) Discharge'},
+            (2, 1): {'key': 'JJA_discharge', 'title': 'f) Summer (JJA) Discharge'},
+            (3, 0): {'key': 'DJF_spei', 'title': 'g) Winter (DJF) SPEI-4'},
+            (3, 1): {'key': 'JJA_spei', 'title': 'h) Summer (JJA) SPEI-4'}
         }
         
-        # --- NEU: Definierte Reihenfolge für die x-Achse ---
         storyline_display_order = [
-            'Core Mean',
-            'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
+            'Core Mean', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
             'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
             'Slow Jet Only', 'Fast Jet Only'
         ]
 
         for (row, col), plot_info in plot_grid.items():
             ax = axs[row, col]
-            impact_key = plot_info['key']; season = impact_key.split('_')[0]
+            impact_key = plot_info['key']
+            season = impact_key.split('_')[0]
             season_lower = 'winter' if season == 'DJF' else 'summer'
             
-            # Verwende die vordefinierte Reihenfolge und filtere nach existierenden Daten
             gwl_data = all_impacts.get(gwls_to_plot[0], {}).get(impact_key, {})
             available_storylines = [s for s in storyline_display_order if s in gwl_data]
             
@@ -2047,7 +2052,14 @@ class Visualizer:
 
             ax.set_title(plot_info['title'], loc='left', fontsize=14, weight='bold')
             is_discharge_plot = 'discharge' in impact_key
-            unit = '(°C)' if 'tas' in impact_key else '(m³/s)' if is_discharge_plot else '(%)'
+            is_spei_plot = 'spei' in impact_key
+            
+            unit = ''
+            if 'tas' in impact_key: unit = '(°C)'
+            elif is_discharge_plot: unit = '(m³/s)'
+            elif 'pr' in impact_key: unit = '(%)'
+            elif is_spei_plot: unit = '(Standard Deviations)'
+
             if col == 0: ax.set_ylabel(f'Projected Change {unit}', fontsize=12)
             ax.axhline(0, color='black', linestyle='-', linewidth=0.8, zorder=1)
 
@@ -2065,11 +2077,21 @@ class Visualizer:
                     if thresh30: ax.axhline(thresh30-hist_mean, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5)
                     if thresh10: ax.axhline(thresh10-hist_mean, color='black', linestyle=':', linewidth=2.5, zorder=5)
 
+            # --- START DER KORREKTUR ---
+            if is_spei_plot:
+                # Setze manuelle Y-Achsen-Limits, um auf die Daten zu zoomen
+                ax.set_ylim(-1.5, 0.5)
+                
+                # Zeichne den schattierten Bereich nur im sichtbaren Teil des Plots
+                current_ylim = ax.get_ylim()
+                ax.axhspan(current_ylim[0], -1.0, color='red', alpha=0.1, zorder=1, label='Drought Threshold (< -1.0)')
+            # --- ENDE DER KORREKTUR ---
+
             ax.set_xticks(x_pos)
-            # Etiketten lesbarer machen
             xtick_labels = [name.replace(' & ', ' &\n').replace(' (MMM)','').replace(' Only', '\n(Only)') for name in available_storylines]
             ax.set_xticklabels(xtick_labels, rotation=45, ha="right", fontsize=10)
-            if row < 2: ax.set_xticklabels([])
+            if row < 3:
+                 ax.set_xticklabels([])
             
             hist_mean = discharge_data_historical.get(f'{season_lower}_mean', 0) if is_discharge_plot else 0
             for rects in [rects1, rects2]:
@@ -2099,12 +2121,12 @@ class Visualizer:
         ])
 
         fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=2, fontsize=12, frameon=False)
-        fig.suptitle("Projected Climate & Discharge Impacts for Jet Stream Storylines", fontsize=16, weight='bold', y=0.99)
-        fig.tight_layout(rect=[0, 0.1, 1, 0.96])
-        filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_3x2_with_axial.png")
+        fig.suptitle("Projected Climate, Discharge & Drought Impacts for Jet Stream Storylines", fontsize=16, weight='bold', y=0.99)
+        fig.tight_layout(rect=[0, 0.05, 1, 0.97])
+        filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_4x2_with_spei.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved 3x2 storyline impacts summary plot with axial storylines to {filename}")
+        logging.info(f"Saved 4x2 storyline impacts summary plot with SPEI to {filename}")
         
     @staticmethod
     def plot_extreme_discharge_frequency_comparison(frequency_data, config):
@@ -2208,16 +2230,11 @@ class Visualizer:
         
         gwl_colors = {gwls_to_plot[0]: '#ff7f0e', gwls_to_plot[1]: '#d62728'}
 
-        # --- START OF CORRECTION ---
         for row, season in enumerate(seasons_to_plot):
-            
-            # **FIX 1**: Determine the complete list of storylines for the entire row first.
-            # A storyline is now included if it has data for the given season at all.
             plot_data_for_season = results.get(gwls_to_plot[0], {}).get(season, {})
             storylines_for_row = [s for s in storyline_order if s in plot_data_for_season]
             y_pos_map = {storyline: i for i, storyline in enumerate(storylines_for_row)}
 
-            # --- Part 1: Plot the return period dumbbell plots ---
             for col, event_key in enumerate(event_keys):
                 ax = axs[row][col]
                 
@@ -2231,19 +2248,14 @@ class Visualizer:
                     ax.text(0.5, 0.5, "Data Unavailable", ha='center', va='center', transform=ax.transAxes)
                     continue
 
-                # Prepare lists to hold valid data points for plotting
                 y_coords_plot, hist_periods_plot = [], []
                 future_periods_gwl1_plot, future_periods_gwl2_plot = [], []
 
-                # **FIX 2**: Iterate over the consistent list of storylines for the whole row
                 for storyline in storylines_for_row:
                     y_coord = y_pos_map[storyline]
-                    
-                    # Check for data for this specific event and storyline
                     event_data_gwl1 = results.get(gwls_to_plot[0], {}).get(season, {}).get(storyline, {}).get(event_key)
                     event_data_gwl2 = results.get(gwls_to_plot[1], {}).get(season, {}).get(storyline, {}).get(event_key)
                     
-                    # Only add data to plot if it exists for this specific event
                     if event_data_gwl1 and event_data_gwl2:
                         y_coords_plot.append(y_coord)
                         hist_periods_plot.append(data_season_threshold['hist_return_period'])
@@ -2259,39 +2271,34 @@ class Visualizer:
                     ax.scatter(future_periods_gwl2_plot, y_coords_plot, color=gwl_colors[gwls_to_plot[1]], s=100, zorder=10, ec='black', label=f'Future (+{gwls_to_plot[1]}°C)')
                 
                 ax.invert_yaxis()
-                # **FIX 3**: Set ticks and grid for the full list of storylines to maintain consistent spacing
                 ax.set_yticks(np.arange(len(storylines_for_row)))
                 ax.grid(axis='y', linestyle='none')
                 ax.grid(axis='x', linestyle=':', which='both')
                 if col > 0:
                     ax.set_yticklabels([])
 
-            # --- Part 2: Standard Deviation Plot (also corrected to use consistent storyline list) ---
             ax_std = axs[row][num_event_cols]
             if row == 0:
                 ax_std.set_title("Interannual\nVariability (σ)", fontsize=11, weight='bold')
 
             hist_std_dev = results.get('thresholds', {}).get(season, {}).get('historical_std_dev')
-            if hist_std_dev is not None and storylines_for_row: # Check if there are storylines to plot
+            if hist_std_dev is not None and storylines_for_row:
                 bar_height = 0.25
                 future_std_gwl1 = [results.get(gwls_to_plot[0], {}).get(season, {}).get(s, {}).get('future_std_dev', np.nan) for s in storylines_for_row]
                 future_std_gwl2 = [results.get(gwls_to_plot[1], {}).get(season, {}).get(s, {}).get('future_std_dev', np.nan) for s in storylines_for_row]
-                
                 y_pos_for_bars = np.arange(len(storylines_for_row))
 
                 ax_std.barh(y_pos_for_bars + bar_height, future_std_gwl2, height=bar_height, color=gwl_colors[gwls_to_plot[1]], edgecolor='black', zorder=10)
                 ax_std.barh(y_pos_for_bars, future_std_gwl1, height=bar_height, color=gwl_colors[gwls_to_plot[0]], edgecolor='black', zorder=10)
                 
-                ax_std.axvline(x=hist_std_dev, color='skyblue', linestyle='--', linewidth=3, zorder=5, label=f'Historical σ ({hist_std_dev:.0f})')
+                # --- CHANGE 1: Use a generic label inside the loop ---
+                ax_std.axvline(x=hist_std_dev, color='skyblue', linestyle='--', linewidth=3, zorder=5, label='Historical σ')
             
             ax_std.invert_yaxis()
             ax_std.set_yticks([])
             ax_std.grid(axis='y', linestyle='none')
             ax_std.grid(axis='x', linestyle=':', which='both')
-        # --- END OF CORRECTION ---
 
-        # Final Formatting
-        # **FIX 4**: Use the consistent storyline list for the labels
         if storylines_for_row:
              axs[0][0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines_for_row], fontsize=9)
              axs[1][0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines_for_row], fontsize=9)
@@ -2308,11 +2315,27 @@ class Visualizer:
             axs[-1][col].set_xlabel('Return Period (Years)', fontsize=11)
         axs[-1][-1].set_xlabel('Std. Dev. (m³/s)', fontsize=11)
         
+        # --- CHANGE 2: Build the final legend outside the loop ---
         handles, labels = axs[0][0].get_legend_handles_labels()
-        std_handle, std_label = axs[0][-1].get_legend_handles_labels()
-        handles.extend(std_handle)
-        labels.extend(std_label)
         
+        # Get handles for the std dev plot, but ignore the generic label
+        std_handles, _ = axs[0][-1].get_legend_handles_labels()
+        if std_handles:
+            # Find the handle for the historical sigma line
+            hist_sigma_handle = next((h for h in std_handles if isinstance(h, plt.Line2D) and h.get_color() == 'skyblue'), None)
+            if hist_sigma_handle:
+                handles.append(hist_sigma_handle)
+                
+                # Fetch both seasonal values for the label
+                hist_std_winter = results.get('thresholds', {}).get('Winter', {}).get('historical_std_dev')
+                hist_std_summer = results.get('thresholds', {}).get('Summer', {}).get('historical_std_dev')
+                
+                if hist_std_winter is not None and hist_std_summer is not None:
+                    # Create the correct, detailed label
+                    labels.append(f'Historical σ (Winter: {hist_std_winter:.0f}, Summer: {hist_std_summer:.0f})')
+                else:
+                    labels.append('Historical σ') # Fallback
+
         by_label = dict(zip(labels, handles))
         fig.legend(by_label.values(), by_label.keys(), loc='lower center', bbox_to_anchor=(0.5, 0.0), ncol=4, fontsize=12)
         

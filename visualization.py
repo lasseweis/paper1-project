@@ -2395,11 +2395,12 @@ class Visualizer:
                 for col_idx, storyline_name in enumerate(storyline_order):
                     ax = fig.add_subplot(gs[row_idx, col_idx], projection=ccrs.PlateCarree())
                     
-                    # --- KORREKTUR: String-Operation vor dem f-string ausführen ---
-                    # Dies behebt den SyntaxError: "f-string expression part cannot include a backslash"
+                    # --- START DER KORREKTUR ---
+                    # Der Aufruf von ax.set_title() wird hier entfernt.
+                    # Stattdessen werden die Titel-Komponenten an die Hilfsfunktion übergeben.
+                    
                     storyline_title_formatted = storyline_name.replace(" & ", " &\n")
-                    full_title = f'GWL +{gwl}°C, {season_full} ({season})\n{storyline_title_formatted}'
-                    ax.set_title(full_title, fontsize=10, weight='bold')
+                    main_title_part = f'GWL +{gwl}°C, {season_full} ({season})'
 
                     data = map_data.get(gwl, {}).get(season, {}).get(storyline_name)
                     
@@ -2407,19 +2408,25 @@ class Visualizer:
                         change_map = data['mean_change_map']
                         hist_map = data['historical_mean_map']
                         
+                        # Die Titel-Parameter werden nun korrekt an die Hilfsfunktion übergeben.
                         cf, _ = Visualizer.plot_u850_change_map(
                             ax, u850_change_data=change_map.data, 
                             historical_mean_contours=hist_map.data,
                             lons=change_map.lon.values, lats=change_map.lat.values,
-                            title="", season_label="",
+                            title=main_title_part, 
+                            season_label=storyline_title_formatted,
                             vmin=-2.5, vmax=2.5
                         )
                         if cf is not None:
                             cf_ref = cf
                     else:
+                        # Fallback-Titel für Subplots ohne Daten
+                        ax.set_title(f'GWL +{gwl}°C, {season}\n{storyline_name}', fontsize=10)
                         ax.text(0.5, 0.5, "N/A", ha='center', va='center', transform=ax.transAxes)
                         ax.set_xticks([])
                         ax.set_yticks([])
+                    # --- ENDE DER KORREKTUR ---
+                        
                 row_idx += 1
 
         # Shared colorbar

@@ -2095,7 +2095,7 @@ class Visualizer:
                     if thresh10: ax.axhline(thresh10-hist_mean, color='black', linestyle=':', linewidth=2.5, zorder=5)
 
             if is_spei_plot:
-                ax.set_ylim(-1.5, 0.5)
+                ax.set_ylim(-1.0, 1.0)
                 current_ylim = ax.get_ylim()
                 ax.axhspan(current_ylim[0], -1.0, color='red', alpha=0.1, zorder=1, label='Drought Threshold (< -1.0)')
 
@@ -2445,8 +2445,12 @@ class Visualizer:
                 frameon=True,
                 edgecolor='gray')
 
-        fig.suptitle('Storyline-Based U850 Zonal Wind Change', fontsize=18, weight='bold')
-        
+        # Erstellt den Text für die historische Periode
+        hist_period_text = f"Historical Reference: {config.CMIP6_ANOMALY_REF_START}-{config.CMIP6_ANOMALY_REF_END}"
+
+        # Setzt den neuen, zweizeiligen Titel
+        fig.suptitle(f'Storyline-Based U850 Zonal Wind Change\n({hist_period_text})', fontsize=18, weight='bold')
+                
         # Adjust layout to make space for titles and legend
         fig.tight_layout(rect=[0.01, 0.04, 0.95, 0.96])
         

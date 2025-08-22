@@ -2001,6 +2001,7 @@ class Visualizer:
     def plot_storyline_impact_barchart_with_discharge(final_impacts, discharge_impacts, spei_impacts, discharge_data_historical, config, storyline_correlations=None):
         """
         Creates a 4x2 vertical bar chart to visualize storyline impacts for Temp, Precip, Discharge, and SPEI.
+        NOW ADDS A CORRELATION TABLE AT THE BOTTOM.
         """
         logging.info("Plotting final storyline impacts (incl. discharge and SPEI) as a 4x2 bar chart...")
         Visualizer.ensure_plot_dir_exists()
@@ -2015,6 +2016,7 @@ class Visualizer:
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         gwl_colors = {gwls_to_plot[0]: '#4575b4', gwls_to_plot[1]: '#d73027'}
 
+        # (Der Rest der Datenaufbereitung bleibt unverändert)
         all_impacts = final_impacts.copy()
         for gwl, data in discharge_impacts.items():
             if gwl not in all_impacts: all_impacts[gwl] = {}
@@ -2041,12 +2043,14 @@ class Visualizer:
             'Extreme NW', 'Extreme SE'
         ]
 
+        # --- Plotting-Schleife (weitgehend unverändert) ---
         for (row, col), plot_info in plot_grid.items():
             ax = axs[row, col]
             impact_key = plot_info['key']
             season = impact_key.split('_')[0]
             season_lower = 'winter' if season == 'DJF' else 'summer'
             
+            # (Die Logik zum Erstellen der Balken bleibt dieselbe)
             gwl_data = all_impacts.get(gwls_to_plot[0], {}).get(impact_key, {})
             available_storylines = [s for s in storyline_display_order if s in gwl_data]
             
@@ -2091,24 +2095,10 @@ class Visualizer:
                     thresh10 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold')
                     if thresh30: ax.axhline(thresh30-hist_mean, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5)
                     if thresh10: ax.axhline(thresh10-hist_mean, color='black', linestyle=':', linewidth=2.5, zorder=5)
-
-                if storyline_correlations:
-                    corr_texts = []
-                    # KORRIGIERT: Tippfehler in der Variablen `gwls_to_plot`
-                    for gwl in gwls_to_plot:
-                        corrs_for_gwl = storyline_correlations.get(gwl, {}).get(season, {})
-                        if corrs_for_gwl:
-                            # Wir nehmen den Mittelwert der Korrelationen aller Storylines für diesen Plot
-                            r_vals = [c['r'] for c in corrs_for_gwl.values() if 'r' in c and not np.isnan(c['r'])]
-                            if r_vals:
-                                mean_r = np.mean(r_vals)
-                                corr_texts.append(f'$\\rho$ (+{gwl}°C) = {mean_r:.2f}')
-                    
-                    if corr_texts:
-                        ax.text(0.02, 0.98, '\n'.join(corr_texts), transform=ax.transAxes,
-                                fontsize=10, verticalalignment='top',
-                                bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.7))
-
+                
+                # --- START DER ÄNDERUNG: Der alte ax.text-Block wird hier entfernt ---
+                # Der Code zur Anzeige der Korrelation im Plot wurde entfernt.
+                # --- ENDE DER ÄNDERUNG ---
 
             if is_spei_plot:
                 ax.set_ylim(-0.5, 0.5)
@@ -2132,6 +2122,7 @@ class Visualizer:
             
             ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
 
+        # --- Legende (bleibt gleich) ---
         handles, labels = axs[0, 0].get_legend_handles_labels()
         low_flow_10_val = discharge_data_historical.get('winter_lowflow_threshold', 'N/A')
         low_flow_30_val = discharge_data_historical.get('winter_lowflow_threshold_30', 'N/A')
@@ -2146,20 +2137,54 @@ class Visualizer:
             '1x Std. Dev. of interannual variability', '2x Std. Dev. of interannual variability'
         ])
 
-        fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=2, fontsize=12, frameon=False)
+        fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.05), ncol=2, fontsize=12, frameon=False)
         
+        # --- START DER ÄNDERUNG: Korrelationstabelle hinzufügen ---
+        if storyline_correlations:
+            table_text = "Correlation (ρ) between SPEI-4 and Discharge Change per Storyline:\n"
+            
+            # Erstelle Header
+            header = f"{'Storyline':<30}"
+            for gwl in gwls_to_plot:
+                header += f" | DJF (+{gwl}°C) | JJA (+{gwl}°C)"
+            table_text += header + "\n"
+            table_text += "-" * len(header) + "\n"
+
+            # Fülle Zeilen
+            # Hole alle Storylines, die in den Korrelationen vorkommen
+            all_storylines_in_corr = set()
+            for gwl in gwls_to_plot:
+                for season in ['DJF', 'JJA']:
+                    all_storylines_in_corr.update(storyline_correlations.get(gwl, {}).get(season, {}).keys())
+            
+            # Sortiere sie in der gewünschten Reihenfolge
+            ordered_storylines_for_table = [s for s in storyline_display_order if s in all_storylines_in_corr]
+
+            for storyline in ordered_storylines_for_table:
+                row_text = f"{storyline:<30}"
+                for gwl in gwls_to_plot:
+                    for season in ['DJF', 'JJA']:
+                        r_val = storyline_correlations.get(gwl, {}).get(season, {}).get(storyline, {}).get('r', np.nan)
+                        row_text += f" | {r_val: >10.2f}"
+                table_text += row_text + "\n"
+            
+            # Füge die formatierte Tabelle als Text zur Abbildung hinzu
+            plt.figtext(0.5, 0.0, table_text, ha="center", fontsize=9, 
+                        family='monospace', bbox=dict(boxstyle='round,pad=0.5', fc='white', alpha=0.8))
+        # --- ENDE DER ÄNDERUNG ---
+
+        # Titel und Layout
         main_title = "Projected Changes in Climate, Discharge & Drought for Jet Stream Storylines"
         ref_period_text = f"Changes relative to the {config.CMIP6_ANOMALY_REF_START}-{config.CMIP6_ANOMALY_REF_END} reference period"
         fig.suptitle(f"{main_title}\n{ref_period_text}", fontsize=16, weight='bold', y=0.99)
         
-        spei_note = "Note on SPEI: The Thornthwaite method for PET calculation is known to have limitations and may produce uncertainties under future climate scenarios."
-        plt.figtext(0.5, 0.0, spei_note, ha="center", fontsize=9, style='italic', color='dimgray')
+        # Positioniere das Layout neu, um Platz für Legende und Tabelle zu schaffen
+        fig.tight_layout(rect=[0, 0.1, 1, 0.97])
         
-        fig.tight_layout(rect=[0, 0.05, 1, 0.97])
-        filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_4x2_with_spei.png")
+        filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_4x2_with_spei_and_corr_table.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved 4x2 storyline impacts summary plot with SPEI to {filename}")
+        logging.info(f"Saved 4x2 storyline impacts summary plot with correlation table to {filename}")
         
     @staticmethod
     def plot_extreme_discharge_frequency_comparison(frequency_data, config):

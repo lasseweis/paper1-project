@@ -2092,11 +2092,11 @@ class StorylineAnalyzer:
     @staticmethod
     def calculate_storyline_spei_impacts(storyline_impacts, historical_monthly_data, config):
         """
-        Calculates the future SPEI for each storyline based on tas and pr changes.
-        This version correctly applies seasonal deltas to a continuous monthly timeseries
-        before calculating SPEI.
+        Calculates the future SPEI CHANGE for each storyline based on tas and pr changes.
+        This version correctly applies seasonal deltas to a continuous monthly timeseries,
+        calculates the future SPEI, and then subtracts the historical mean SPEI.
         """
-        logging.info("Calculating future SPEI impacts for each storyline...")
+        logging.info("Calculating future SPEI change impacts for each storyline...")
         spei_impacts = {gwl: {} for gwl in config.GLOBAL_WARMING_LEVELS}
 
         hist_pr_monthly = historical_monthly_data.get('pr_box_monthly')
@@ -2106,11 +2106,26 @@ class StorylineAnalyzer:
             logging.error("Cannot calculate SPEI impacts: Missing historical monthly data for the box.")
             return {}
 
+        lat_center_of_box = (config.BOX_LAT_MIN + config.BOX_LAT_MAX) / 2
+
+        # NEU: Historischen SPEI und dessen saisonale Mittelwerte berechnen (Baseline)
+        hist_spei_ts_monthly = DataProcessor.calculate_spei(
+            hist_pr_monthly, hist_tas_monthly, lat=lat_center_of_box, scale=4
+        )
+        if hist_spei_ts_monthly is None:
+            logging.error("Failed to calculate historical SPEI baseline.")
+            return {}
+        
+        hist_spei_ts_seasonal = DataProcessor.assign_season_to_dataarray(hist_spei_ts_monthly)
+        hist_mean_spei = {
+            'DJF': DataProcessor.filter_by_season(hist_spei_ts_seasonal, 'Winter').mean().item(),
+            'JJA': DataProcessor.filter_by_season(hist_spei_ts_seasonal, 'Summer').mean().item()
+        }
+        logging.info(f"Historical mean SPEI calculated: DJF={hist_mean_spei['DJF']:.2f}, JJA={hist_mean_spei['JJA']:.2f}")
+
         # Stelle sicher, dass die monatlichen Daten eine 'season'-Koordinate haben
         hist_pr_monthly_seas = DataProcessor.assign_season_to_dataarray(hist_pr_monthly)
         hist_tas_monthly_seas = DataProcessor.assign_season_to_dataarray(hist_tas_monthly)
-
-        lat_center_of_box = (config.BOX_LAT_MIN + config.BOX_LAT_MAX) / 2
 
         for gwl, impacts in storyline_impacts.items():
             if gwl not in config.GLOBAL_WARMING_LEVELS:
@@ -2118,21 +2133,16 @@ class StorylineAnalyzer:
             
             spei_impacts[gwl] = {'DJF_spei': {}, 'JJA_spei': {}}
 
-            # Iteriere durch die Storylines für diese GWL-Stufe.
-            # Wir nehmen an, dass die Storylines für tas und pr dieselben sind.
             storylines_in_gwl = impacts.get('DJF_tas', {}) or impacts.get('JJA_tas', {})
             for storyline_name in storylines_in_gwl:
                 
-                # Erstelle Kopien der historischen Daten für diese Storyline
                 future_tas_monthly = hist_tas_monthly_seas.copy(deep=True)
                 future_pr_monthly = hist_pr_monthly_seas.copy(deep=True)
 
-                # Wende die saisonalen Änderungen auf die kontinuierliche monatliche Zeitreihe an
                 for season_key, season_name in [('DJF', 'Winter'), ('JJA', 'Summer')]:
                     delta_tas = impacts.get(f'{season_key}_tas', {}).get(storyline_name, {}).get('total', 0)
                     delta_pr_percent = impacts.get(f'{season_key}_pr', {}).get(storyline_name, {}).get('total', 0)
 
-                    # Wende die Deltas nur auf die Monate der jeweiligen Saison an
                     future_tas_monthly = xr.where(
                         future_tas_monthly.season == season_name,
                         future_tas_monthly + delta_tas,
@@ -2144,22 +2154,23 @@ class StorylineAnalyzer:
                         future_pr_monthly
                     )
 
-                # Berechne den zukünftigen SPEI auf der kompletten monatlichen Zeitreihe
                 future_spei_ts_monthly = DataProcessor.calculate_spei(
                     future_pr_monthly, future_tas_monthly, lat=lat_center_of_box, scale=4
                 )
                 
                 if future_spei_ts_monthly is not None:
-                    # JETZT erst nach Saisons filtern und den Mittelwert berechnen
                     future_spei_ts_seasonal = DataProcessor.assign_season_to_dataarray(future_spei_ts_monthly)
                     
                     for season_key, season_name in [('DJF', 'Winter'), ('JJA', 'Summer')]:
                         spei_season_filtered = DataProcessor.filter_by_season(future_spei_ts_seasonal, season_name)
                         if spei_season_filtered is not None:
                             mean_future_spei = spei_season_filtered.mean().item()
-                            spei_impacts[gwl][f'{season_key}_spei'][storyline_name] = {'total': mean_future_spei}
+                            
+                            # GEÄNDERT: Berechne die Differenz und speichere sie
+                            spei_change = mean_future_spei - hist_mean_spei[season_key]
+                            spei_impacts[gwl][f'{season_key}_spei'][storyline_name] = {'total': spei_change}
 
-        logging.info("SPEI impact calculation finished.")
+        logging.info("SPEI impact change calculation finished.")
         return spei_impacts
     
     @staticmethod

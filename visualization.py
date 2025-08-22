@@ -2034,14 +2034,12 @@ class Visualizer:
             (3, 1): {'key': 'JJA_spei', 'title': 'h) Summer (JJA) SPEI-4'}
         }
         
-        # --- MODIFIED BLOCK ---
         storyline_display_order = [
             'Core Mean', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
             'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
             'Slow Jet Only', 'Fast Jet Only',
-            'Extreme NW', 'Extreme SE' # Added new storylines here
+            'Extreme NW', 'Extreme SE'
         ]
-        # --- END MODIFIED BLOCK ---
 
         for (row, col), plot_info in plot_grid.items():
             ax = axs[row, col]
@@ -2133,7 +2131,11 @@ class Visualizer:
         ])
 
         fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=2, fontsize=12, frameon=False)
-        fig.suptitle("Projected Climate, Discharge & Drought Impacts for Jet Stream Storylines", fontsize=16, weight='bold', y=0.99)
+        
+        # GEÄNDERT: Titel wurde angepasst für mehr Klarheit
+        main_title = "Projected Changes in Climate, Discharge & Drought for Jet Stream Storylines"
+        ref_period_text = f"Changes relative to the {config.CMIP6_ANOMALY_REF_START}-{config.CMIP6_ANOMALY_REF_END} reference period"
+        fig.suptitle(f"{main_title}\n{ref_period_text}", fontsize=16, weight='bold', y=0.99)
         
         spei_note = "Note on SPEI: The Thornthwaite method for PET calculation is known to have limitations and may produce uncertainties under future climate scenarios."
         plt.figtext(0.5, 0.0, spei_note, ha="center", fontsize=9, style='italic', color='dimgray')

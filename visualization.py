@@ -1998,7 +1998,7 @@ class Visualizer:
         logging.info(f"Saved vertical storyline impacts summary plot to {filename}")
 
     @staticmethod
-    def plot_storyline_impact_barchart_with_discharge(final_impacts, discharge_impacts, spei_impacts, discharge_data_historical, config):
+    def plot_storyline_impact_barchart_with_discharge(final_impacts, discharge_impacts, spei_impacts, discharge_data_historical, config, storyline_correlations=None):
         """
         Creates a 4x2 vertical bar chart to visualize storyline impacts for Temp, Precip, Discharge, and SPEI.
         """
@@ -2028,10 +2028,10 @@ class Visualizer:
             (0, 1): {'key': 'JJA_tas', 'title': 'b) Summer (JJA) Temperature'},
             (1, 0): {'key': 'DJF_pr', 'title': 'c) Winter (DJF) Precipitation'},
             (1, 1): {'key': 'JJA_pr', 'title': 'd) Summer (JJA) Precipitation'},
-            (2, 0): {'key': 'DJF_discharge', 'title': 'e) Winter (DJF) Discharge'},
-            (2, 1): {'key': 'JJA_discharge', 'title': 'f) Summer (JJA) Discharge'},
-            (3, 0): {'key': 'DJF_spei', 'title': 'g) Winter (DJF) SPEI-4'},
-            (3, 1): {'key': 'JJA_spei', 'title': 'h) Summer (JJA) SPEI-4'}
+            (2, 0): {'key': 'DJF_spei', 'title': 'e) Winter (DJF) SPEI-4'},
+            (2, 1): {'key': 'JJA_spei', 'title': 'f) Summer (JJA) SPEI-4'},
+            (3, 0): {'key': 'DJF_discharge', 'title': 'g) Winter (DJF) Discharge'},
+            (3, 1): {'key': 'JJA_discharge', 'title': 'h) Summer (JJA) Discharge'}
         }
         
         storyline_display_order = [
@@ -2092,10 +2092,26 @@ class Visualizer:
                     if thresh30: ax.axhline(thresh30-hist_mean, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5)
                     if thresh10: ax.axhline(thresh10-hist_mean, color='black', linestyle=':', linewidth=2.5, zorder=5)
 
+                if storyline_correlations:
+                    corr_texts = []
+                    # KORRIGIERT: Tippfehler in der Variablen `gwls_to_plot`
+                    for gwl in gwls_to_plot:
+                        corrs_for_gwl = storyline_correlations.get(gwl, {}).get(season, {})
+                        if corrs_for_gwl:
+                            # Wir nehmen den Mittelwert der Korrelationen aller Storylines für diesen Plot
+                            r_vals = [c['r'] for c in corrs_for_gwl.values() if 'r' in c and not np.isnan(c['r'])]
+                            if r_vals:
+                                mean_r = np.mean(r_vals)
+                                corr_texts.append(f'$\\rho$ (+{gwl}°C) = {mean_r:.2f}')
+                    
+                    if corr_texts:
+                        ax.text(0.02, 0.98, '\n'.join(corr_texts), transform=ax.transAxes,
+                                fontsize=10, verticalalignment='top',
+                                bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.7))
+
+
             if is_spei_plot:
-                ax.set_ylim(-1.0, 1.0)
-                current_ylim = ax.get_ylim()
-                ax.axhspan(current_ylim[0], -1.0, color='red', alpha=0.1, zorder=1, label='Drought Threshold (< -1.0)')
+                ax.set_ylim(-0.5, 0.5)
 
             ax.set_xticks(x_pos)
             xtick_labels = [name.replace(' & ', ' &\n').replace(' (MMM)','').replace(' Only', '\n(Only)') for name in available_storylines]
@@ -2132,7 +2148,6 @@ class Visualizer:
 
         fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=2, fontsize=12, frameon=False)
         
-        # GEÄNDERT: Titel wurde angepasst für mehr Klarheit
         main_title = "Projected Changes in Climate, Discharge & Drought for Jet Stream Storylines"
         ref_period_text = f"Changes relative to the {config.CMIP6_ANOMALY_REF_START}-{config.CMIP6_ANOMALY_REF_END} reference period"
         fig.suptitle(f"{main_title}\n{ref_period_text}", fontsize=16, weight='bold', y=0.99)

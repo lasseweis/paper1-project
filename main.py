@@ -528,8 +528,6 @@ class ClimateAnalysis:
         else:
             logging.info(f"Plot '{evolution_plot_filename}' already exists. Skipping creation.")
 
-# In main.py, ersetze den entsprechenden Block in der run_full_analysis Methode
-
         # =================================================================================
         # === NEW AND FINAL BLOCK FOR BETA CALCULATION, IMPACTS, AND COMPARISON PLOTS ===
         # =================================================================================
@@ -576,12 +574,24 @@ class ClimateAnalysis:
                 
                 # Step 3: Create the new summary bar chart with all impacts (jetzt mit SPEI)
                 if final_impacts_pr_tas and direct_impacts_discharge:
+                    # NEU: Berechne die Korrelationen, bevor der Plot aufgerufen wird
+                    storyline_correlations = storyline_analyzer.calculate_storyline_timeseries_correlation(
+                        cmip6_results=cmip6_results,
+                        storyline_impacts=final_impacts_pr_tas,
+                        historical_monthly_data={
+                            'pr_box_monthly': pr_box_monthly_hist,
+                            'tas_box_monthly': tas_box_monthly_hist
+                        },
+                        config=Config()
+                    )
+
                     Visualizer.plot_storyline_impact_barchart_with_discharge(
                         final_impacts=final_impacts_pr_tas,
                         discharge_impacts=direct_impacts_discharge,
                         spei_impacts=storyline_spei_impacts, # NEU
                         discharge_data_historical=discharge_data_loaded,
-                        config=Config()
+                        config=Config(),
+                        storyline_correlations=storyline_correlations # NEU: Übergebe die Korrelationen
                     )
             else:
                 logging.warning("Skipping final storyline impact calculation and plot: Multivariate betas are missing.")
@@ -630,7 +640,7 @@ class ClimateAnalysis:
             
         # =================================================================================
         # === END OF THE NEW BLOCK ===
-        # =================================================================================  
+        # =================================================================================
         # =================================================================================
         # === NEW: STORYLINE U850 WIND CHANGE MAPS ===
         # =================================================================================

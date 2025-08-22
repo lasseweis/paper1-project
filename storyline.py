@@ -1797,69 +1797,6 @@ class StorylineAnalyzer:
             }
         return regression_results
     
-# In storyline.py
-
-    @staticmethod
-    def calculate_reanalysis_betas(datasets_reanalysis, jet_data_reanalysis, dataset_key='ERA5'):
-        """
-        Calculates the multivariate regression slopes (beta_obs) between jet indices
-        (speed and latitude) and climate impacts for a specific reanalysis dataset.
-        """
-        logging.info(f"Calculating multivariate beta_obs slopes from {dataset_key} reanalysis...")
-        beta_obs_slopes = {}
-
-        impact_configs = [
-            {'season': 'Winter', 'impact_var': 'tas'},
-            {'season': 'Winter', 'impact_var': 'pr'},
-            {'season': 'Summer', 'impact_var': 'tas'},
-            {'season': 'Summer', 'impact_var': 'pr'}
-        ]
-
-        for config in impact_configs:
-            season = config['season']
-            impact_var = config['impact_var']
-
-            y_ts_raw = datasets_reanalysis.get(f"{dataset_key}_{impact_var}_box_mean")
-            if y_ts_raw is None: continue
-
-            y_ts = DataProcessor.detrend_data(
-                DataProcessor.filter_by_season(y_ts_raw, season)
-            )
-
-            x_speed_ts = jet_data_reanalysis.get(f"{dataset_key}_{season.lower()}_speed_data", {}).get('jet')
-            x_lat_ts = jet_data_reanalysis.get(f"{dataset_key}_{season.lower()}_lat_data", {}).get('jet')
-
-            if y_ts is None or x_speed_ts is None or x_lat_ts is None:
-                logging.warning(f"Skipping beta calculation for {season} {impact_var} due to missing data.")
-                continue
-
-            # --- START OF CORRECTION ---
-            # Align all timeseries to a common time index before passing to the regression function.
-            # This is the crucial step to fix the "All arrays must be of the same length" error.
-            ds = xr.Dataset({'impact': y_ts, 'speed': x_speed_ts, 'lat': x_lat_ts})
-            
-            # dropna() will align the timeseries by the 'season_year' dimension and
-            # remove any timesteps where any of the variables have a NaN value.
-            ds_common = ds.dropna(dim='season_year', how='any')
-
-            if ds_common.season_year.size < 10:
-                logging.warning(f"Not enough common valid data points for multivariate regression for {season} {impact_var}.")
-                continue
-            
-            # Pass the now-aligned DataArrays to the regression function
-            betas = StatsAnalyzer.calculate_multiple_regression(
-                y=ds_common['impact'],
-                x_vars={'speed': ds_common['speed'], 'lat': ds_common['lat']}
-            )
-            # --- END OF CORRECTION ---
-
-            if betas:
-                beta_key = f"{'DJF' if season == 'Winter' else 'JJA'}_{impact_var}"
-                beta_obs_slopes[beta_key] = betas
-                logging.info(f"  - Calculated Betas for {beta_key}: Speed={betas.get('speed', 0):.3f}, Lat={betas.get('lat', 0):.3f}")
-
-        return beta_obs_slopes
-    
     @staticmethod
     def calculate_direct_discharge_impacts(cmip6_results, config):
         """

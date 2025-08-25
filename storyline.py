@@ -2270,22 +2270,23 @@ class StorylineAnalyzer:
         """
         Calculates the correlation between the ensemble-mean future timeseries of
         SPEI change and discharge change for each storyline.
+        
+        CORRECTED VERSION: This function now calculates future SPEI and discharge on a per-model
+        basis before creating the ensemble means to be correlated.
         """
-        logging.info("Calculating storyline-based SPEI vs. Discharge timeseries correlations...")
+        logging.info("Calculating storyline-based SPEI vs. Discharge timeseries correlations (Corrected Logic)...")
         correlations = {gwl: {'DJF': {}, 'JJA': {}} for gwl in config.GLOBAL_WARMING_LEVELS}
 
-        # Dependencies for SPEI calculation
-        hist_pr_monthly = historical_monthly_data.get('pr_box_monthly')
-        hist_tas_monthly = historical_monthly_data.get('tas_box_monthly')
-        
-        # Dependencies from cmip6_results
+        # Dependencies
         classification = cmip6_results.get('storyline_classification_2d')
+        all_deltas = cmip6_results.get('all_individual_model_deltas_for_plot')
         metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
         gwl_years = cmip6_results.get('gwl_threshold_years', {})
+        hist_pr_monthly = historical_monthly_data.get('pr_box_monthly')
+        hist_tas_monthly = historical_monthly_data.get('tas_box_monthly')
         window = config.GWL_YEARS_WINDOW
 
-        # GEÄNDERT: Korrekte Überprüfung, ob alle Objekte existieren (nicht None sind)
-        if not all(v is not None for v in [classification, metric_timeseries, gwl_years, hist_pr_monthly, hist_tas_monthly]):
+        if not all(v is not None for v in [classification, all_deltas, metric_timeseries, gwl_years, hist_pr_monthly, hist_tas_monthly]):
             logging.error("Missing data for timeseries correlation calculation.")
             return {}
 
@@ -2293,58 +2294,69 @@ class StorylineAnalyzer:
         hist_tas_monthly_seas = DataProcessor.assign_season_to_dataarray(hist_tas_monthly)
         lat_center_of_box = (config.BOX_LAT_MIN + config.BOX_LAT_MAX) / 2
 
-        for gwl, impacts in storyline_impacts.items():
-            if gwl not in config.GLOBAL_WARMING_LEVELS: continue
-            
-            storylines_in_gwl = impacts.get('DJF_tas', {})
-            for storyline_name in storylines_in_gwl:
-                for season_key, season_name in [('DJF', 'Winter'), ('JJA', 'Summer')]:
-                    storyline_models = classification.get(gwl, {}).get(f'{season_key}_{storyline_name}', [])
-                    if not storyline_models: continue
+        for gwl in config.GLOBAL_WARMING_LEVELS:
+            storylines_in_gwl = classification.get(gwl, {})
+            for storyline_key, model_list in storylines_in_gwl.items():
+                if not model_list:
+                    continue
 
-                    all_model_spei_ts = []
-                    all_model_discharge_ts = []
+                season_key = 'DJF' if 'DJF' in storyline_key else 'JJA'
+                season_name = 'Winter' if season_key == 'DJF' else 'Summer'
+                storyline_name = storyline_key.replace(f'{season_key}_', '')
 
-                    for model_run_key in storyline_models:
-                        # --- 1. Get/Create future SPEI timeseries for this model ---
-                        delta_tas = impacts.get(f'{season_key}_tas', {}).get(storyline_name, {}).get('total', 0)
-                        delta_pr_percent = impacts.get(f'{season_key}_pr', {}).get(storyline_name, {}).get('total', 0)
-                        
-                        future_tas = xr.where(hist_tas_monthly_seas.season == season_name, hist_tas_monthly_seas + delta_tas, hist_tas_monthly_seas)
-                        future_pr = xr.where(hist_pr_monthly_seas.season == season_name, hist_pr_monthly_seas * (1 + delta_pr_percent / 100.0), hist_pr_monthly_seas)
-                        
-                        future_spei_monthly = DataProcessor.calculate_spei(future_pr, future_tas, lat=lat_center_of_box, scale=4)
-                        if future_spei_monthly is None: continue
-                        
-                        future_spei_seasonal = DataProcessor.filter_by_season(DataProcessor.assign_season_to_dataarray(future_spei_monthly), season_name)
-                        future_spei_ts = future_spei_seasonal.groupby('season_year').mean('time')
-                        
-                        # --- 2. Get future Discharge timeseries for this model ---
-                        discharge_ts_abs = metric_timeseries.get(model_run_key, {}).get(f'{season_key}_discharge')
-                        if discharge_ts_abs is None: continue
+                all_model_spei_ts = []
+                all_model_discharge_ts = []
 
-                        # --- 3. Slice both to the 30-year window ---
-                        threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
-                        if threshold_year is None: continue
-                        start_year, end_year = threshold_year - window // 2, threshold_year + (window - 1) // 2
-                        
-                        future_spei_window = future_spei_ts.sel(season_year=slice(start_year, end_year))
-                        future_discharge_window = discharge_ts_abs.sel(season_year=slice(start_year, end_year))
-                        
-                        # Use a common time coordinate for alignment
-                        common_years = np.intersect1d(future_spei_window.season_year.values, future_discharge_window.season_year.values)
-                        if len(common_years) < window * 0.8: continue # Ensure enough overlap
+                for model_run_key in model_list:
+                    # 1. Get INDIVIDUAL model delta_tas and delta_pr
+                    delta_tas = all_deltas.get(f'{season_key}_tas', {}).get(gwl, {}).get(model_run_key)
+                    delta_pr_percent = all_deltas.get(f'{season_key}_pr', {}).get(gwl, {}).get(model_run_key)
 
-                        all_model_spei_ts.append(future_spei_window.sel(season_year=common_years).rename({'season_year': 'year'}))
-                        all_model_discharge_ts.append(future_discharge_window.sel(season_year=common_years).rename({'season_year': 'year'}))
+                    if delta_tas is None or delta_pr_percent is None:
+                        continue
 
-                    # --- 4. Correlate the ensemble means ---
-                    if len(all_model_spei_ts) > 1:
-                        ensemble_spei = xr.concat(all_model_spei_ts, dim='model').mean('model', skipna=True)
-                        ensemble_discharge = xr.concat(all_model_discharge_ts, dim='model').mean('model', skipna=True)
-                        
-                        if ensemble_spei.size > 5 and ensemble_discharge.size > 5:
-                            slope, intercept, r_value, p_value, std_err = StatsAnalyzer.calculate_regression(ensemble_spei.values, ensemble_discharge.values)
+                    # 2. Create future climate for THIS model
+                    future_tas = xr.where(hist_tas_monthly_seas.season == season_name, hist_tas_monthly_seas + delta_tas, hist_tas_monthly_seas)
+                    future_pr = xr.where(hist_tas_monthly_seas.season == season_name, hist_tas_monthly_seas * (1 + delta_pr_percent / 100.0), hist_tas_monthly_seas)
+                    
+                    # 3. Calculate future SPEI timeseries for THIS model
+                    future_spei_monthly = DataProcessor.calculate_spei(future_pr, future_tas, lat=lat_center_of_box, scale=4)
+                    if future_spei_monthly is None:
+                        continue
+                    
+                    future_spei_seasonal = DataProcessor.filter_by_season(DataProcessor.assign_season_to_dataarray(future_spei_monthly), season_name)
+                    future_spei_ts = future_spei_seasonal.groupby('season_year').mean('time')
+
+                    # 4. Get future Discharge timeseries for THIS model
+                    discharge_ts_abs = metric_timeseries.get(model_run_key, {}).get(f'{season_key}_discharge')
+                    if discharge_ts_abs is None:
+                        continue
+
+                    # 5. Slice both to the model's specific 30-year window
+                    threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
+                    if threshold_year is None:
+                        continue
+                    start_year, end_year = threshold_year - window // 2, threshold_year + (window - 1) // 2
+                    
+                    future_spei_window = future_spei_ts.sel(season_year=slice(start_year, end_year))
+                    future_discharge_window = discharge_ts_abs.sel(season_year=slice(start_year, end_year))
+                    
+                    common_years = np.intersect1d(future_spei_window.season_year.values, future_discharge_window.season_year.values)
+                    if len(common_years) < window * 0.8:
+                        continue
+
+                    # 6. Append INDIVIDUAL future timeseries to lists for ensembling
+                    all_model_spei_ts.append(future_spei_window.sel(season_year=common_years).rename({'season_year': 'year'}))
+                    all_model_discharge_ts.append(future_discharge_window.sel(season_year=common_years).rename({'season_year': 'year'}))
+
+                # 7. Correlate the ENSEMBLE MEANS
+                if len(all_model_spei_ts) > 1:
+                    ensemble_spei = xr.concat(all_model_spei_ts, dim='model').mean('model', skipna=True)
+                    ensemble_discharge = xr.concat(all_model_discharge_ts, dim='model').mean('model', skipna=True)
+                    
+                    if ensemble_spei.size > 5 and ensemble_discharge.size > 5:
+                        _, _, r_value, p_value, _ = StatsAnalyzer.calculate_regression(ensemble_spei.values, ensemble_discharge.values)
+                        if not np.isnan(r_value):
                             correlations[gwl][season_key][storyline_name] = {'r': r_value, 'p': p_value}
         
         logging.info("Finished calculating storyline-based timeseries correlations.")

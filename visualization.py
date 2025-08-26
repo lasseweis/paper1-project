@@ -22,6 +22,7 @@ import seaborn as sns
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from scipy.stats import chi2
+import json
 
 # Import local modules
 from config import Config
@@ -2011,12 +2012,13 @@ class Visualizer:
             return
 
         plt.style.use('seaborn-v0_8-whitegrid')
-        fig, axs = plt.subplots(4, 2, figsize=(16, 22))
+        
+        # --- KORREKTUR 1: FIGUR ETWAS HÖHER MACHEN ---
+        fig, axs = plt.subplots(4, 2, figsize=(16, 24)) # Höhe von 22 auf 24 erhöht
 
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         gwl_colors = {gwls_to_plot[0]: '#4575b4', gwls_to_plot[1]: '#d73027'}
 
-        # (Der Rest der Datenaufbereitung bleibt unverändert)
         all_impacts = final_impacts.copy()
         for gwl, data in discharge_impacts.items():
             if gwl not in all_impacts: all_impacts[gwl] = {}
@@ -2043,14 +2045,12 @@ class Visualizer:
             'Extreme NW', 'Extreme SE'
         ]
 
-        # --- Plotting-Schleife (weitgehend unverändert) ---
         for (row, col), plot_info in plot_grid.items():
             ax = axs[row, col]
             impact_key = plot_info['key']
             season = impact_key.split('_')[0]
             season_lower = 'winter' if season == 'DJF' else 'summer'
             
-            # (Die Logik zum Erstellen der Balken bleibt dieselbe)
             gwl_data = all_impacts.get(gwls_to_plot[0], {}).get(impact_key, {})
             available_storylines = [s for s in storyline_display_order if s in gwl_data]
             
@@ -2096,10 +2096,6 @@ class Visualizer:
                     if thresh30: ax.axhline(thresh30-hist_mean, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5)
                     if thresh10: ax.axhline(thresh10-hist_mean, color='black', linestyle=':', linewidth=2.5, zorder=5)
                 
-                # --- START DER ÄNDERUNG: Der alte ax.text-Block wird hier entfernt ---
-                # Der Code zur Anzeige der Korrelation im Plot wurde entfernt.
-                # --- ENDE DER ÄNDERUNG ---
-
             if is_spei_plot:
                 ax.set_ylim(-0.5, 0.5)
 
@@ -2122,7 +2118,6 @@ class Visualizer:
             
             ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
 
-        # --- Legende (bleibt gleich) ---
         handles, labels = axs[0, 0].get_legend_handles_labels()
         low_flow_10_val = discharge_data_historical.get('winter_lowflow_threshold', 'N/A')
         low_flow_30_val = discharge_data_historical.get('winter_lowflow_threshold_30', 'N/A')
@@ -2137,27 +2132,23 @@ class Visualizer:
             '1x Std. Dev. of interannual variability', '2x Std. Dev. of interannual variability'
         ])
 
-        fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.05), ncol=2, fontsize=12, frameon=False)
+        # --- KORREKTUR 2: LEGENDE UND TABELLE PRÄZISE PLATZIEREN ---
+        # Legende etwas höher setzen
+        fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.08), ncol=2, fontsize=12, frameon=False)
         
-        # --- START DER ÄNDERUNG: Korrelationstabelle hinzufügen ---
         if storyline_correlations:
             table_text = "Correlation (ρ) between SPEI-4 and Discharge Change per Storyline:\n"
-            
-            # Erstelle Header
             header = f"{'Storyline':<30}"
             for gwl in gwls_to_plot:
                 header += f" | DJF (+{gwl}°C) | JJA (+{gwl}°C)"
             table_text += header + "\n"
             table_text += "-" * len(header) + "\n"
 
-            # Fülle Zeilen
-            # Hole alle Storylines, die in den Korrelationen vorkommen
             all_storylines_in_corr = set()
             for gwl in gwls_to_plot:
                 for season in ['DJF', 'JJA']:
                     all_storylines_in_corr.update(storyline_correlations.get(gwl, {}).get(season, {}).keys())
             
-            # Sortiere sie in der gewünschten Reihenfolge
             ordered_storylines_for_table = [s for s in storyline_display_order if s in all_storylines_in_corr]
 
             for storyline in ordered_storylines_for_table:
@@ -2168,18 +2159,17 @@ class Visualizer:
                         row_text += f" | {r_val: >10.2f}"
                 table_text += row_text + "\n"
             
-            # Füge die formatierte Tabelle als Text zur Abbildung hinzu
-            plt.figtext(0.5, 0.0, table_text, ha="center", fontsize=9, 
+            # Tabelle ganz unten platzieren
+            plt.figtext(0.5, 0.01, table_text, ha="center", va="bottom", fontsize=9, 
                         family='monospace', bbox=dict(boxstyle='round,pad=0.5', fc='white', alpha=0.8))
-        # --- ENDE DER ÄNDERUNG ---
 
-        # Titel und Layout
         main_title = "Projected Changes in Climate, Discharge & Drought for Jet Stream Storylines"
         ref_period_text = f"Changes relative to the {config.CMIP6_ANOMALY_REF_START}-{config.CMIP6_ANOMALY_REF_END} reference period"
         fig.suptitle(f"{main_title}\n{ref_period_text}", fontsize=16, weight='bold', y=0.99)
         
-        # Positioniere das Layout neu, um Platz für Legende und Tabelle zu schaffen
-        fig.tight_layout(rect=[0, 0.1, 1, 0.97])
+        # --- KORREKTUR 3: LAYOUT ANPASSEN, UM UNTEN MEHR PLATZ ZU SCHAFFEN ---
+        # Ersetzt fig.tight_layout(...)
+        plt.subplots_adjust(left=0.07, right=0.98, top=0.95, bottom=0.18, hspace=0.3)
         
         filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_4x2_with_spei_and_corr_table.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')

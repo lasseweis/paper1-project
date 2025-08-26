@@ -2274,6 +2274,9 @@ class StorylineAnalyzer:
         CORRECTED VERSION: This function now calculates future SPEI and discharge on a per-model
         basis before creating the ensemble means to be correlated.
         """
+        # --- DEBUG-BLOCK 1: START ---
+        logging.info("\n--- DEBUG: Betrete calculate_storyline_timeseries_correlation ---")
+        
         logging.info("Calculating storyline-based SPEI vs. Discharge timeseries correlations (Corrected Logic)...")
         correlations = {gwl: {'DJF': {}, 'JJA': {}} for gwl in config.GLOBAL_WARMING_LEVELS}
 
@@ -2288,6 +2291,7 @@ class StorylineAnalyzer:
 
         if not all(v is not None for v in [classification, all_deltas, metric_timeseries, gwl_years, hist_pr_monthly, hist_tas_monthly]):
             logging.error("Missing data for timeseries correlation calculation.")
+            logging.info("--- DEBUG: Funktion wird wegen fehlender Eingangsdaten vorzeitig beendet. ---") # DEBUG
             return {}
 
         hist_pr_monthly_seas = DataProcessor.assign_season_to_dataarray(hist_pr_monthly)
@@ -2295,6 +2299,7 @@ class StorylineAnalyzer:
         lat_center_of_box = (config.BOX_LAT_MIN + config.BOX_LAT_MAX) / 2
 
         for gwl in config.GLOBAL_WARMING_LEVELS:
+            logging.info(f"\n--- DEBUG: Verarbeite GWL +{gwl}°C ---") # DEBUG
             storylines_in_gwl = classification.get(gwl, {})
             for storyline_key, model_list in storylines_in_gwl.items():
                 if not model_list:
@@ -2303,6 +2308,8 @@ class StorylineAnalyzer:
                 season_key = 'DJF' if 'DJF' in storyline_key else 'JJA'
                 season_name = 'Winter' if season_key == 'DJF' else 'Summer'
                 storyline_name = storyline_key.replace(f'{season_key}_', '')
+                
+                logging.info(f"  --- DEBUG: Analysiere Storyline '{storyline_name}' ({season_key}) mit {len(model_list)} Modellen ---") # DEBUG
 
                 all_model_spei_ts = []
                 all_model_discharge_ts = []
@@ -2313,6 +2320,7 @@ class StorylineAnalyzer:
                     delta_pr_percent = all_deltas.get(f'{season_key}_pr', {}).get(gwl, {}).get(model_run_key)
 
                     if delta_tas is None or delta_pr_percent is None:
+                        logging.info(f"    - DEBUG: SKIP {model_run_key}, da delta_tas oder delta_pr fehlt.") # DEBUG
                         continue
 
                     # 2. Create future climate for THIS model
@@ -2322,6 +2330,7 @@ class StorylineAnalyzer:
                     # 3. Calculate future SPEI timeseries for THIS model
                     future_spei_monthly = DataProcessor.calculate_spei(future_pr, future_tas, lat=lat_center_of_box, scale=4)
                     if future_spei_monthly is None:
+                        logging.info(f"    - DEBUG: SKIP {model_run_key}, da SPEI-Berechnung fehlschlug.") # DEBUG
                         continue
                     
                     future_spei_seasonal = DataProcessor.filter_by_season(DataProcessor.assign_season_to_dataarray(future_spei_monthly), season_name)
@@ -2330,11 +2339,13 @@ class StorylineAnalyzer:
                     # 4. Get future Discharge timeseries for THIS model
                     discharge_ts_abs = metric_timeseries.get(model_run_key, {}).get(f'{season_key}_discharge')
                     if discharge_ts_abs is None:
+                        logging.info(f"    - DEBUG: SKIP {model_run_key}, da Abfluss-Zeitreihe fehlt.") # DEBUG
                         continue
 
                     # 5. Slice both to the model's specific 30-year window
                     threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
                     if threshold_year is None:
+                        logging.info(f"    - DEBUG: SKIP {model_run_key}, da kein Schwellenjahr für GWL {gwl}°C gefunden wurde.") # DEBUG
                         continue
                     start_year, end_year = threshold_year - window // 2, threshold_year + (window - 1) // 2
                     
@@ -2343,6 +2354,7 @@ class StorylineAnalyzer:
                     
                     common_years = np.intersect1d(future_spei_window.season_year.values, future_discharge_window.season_year.values)
                     if len(common_years) < window * 0.8:
+                        logging.info(f"    - DEBUG: SKIP {model_run_key}, zu wenig gemeinsame Jahre ({len(common_years)}) im Fenster.") # DEBUG
                         continue
 
                     # 6. Append INDIVIDUAL future timeseries to lists for ensembling
@@ -2351,6 +2363,7 @@ class StorylineAnalyzer:
 
                 # 7. Correlate the ENSEMBLE MEANS
                 if len(all_model_spei_ts) > 1:
+                    logging.info(f"    - DEBUG: Berechne Ensemble-Korrelation aus {len(all_model_spei_ts)} Modellen.") # DEBUG
                     ensemble_spei = xr.concat(all_model_spei_ts, dim='model').mean('model', skipna=True)
                     ensemble_discharge = xr.concat(all_model_discharge_ts, dim='model').mean('model', skipna=True)
                     
@@ -2358,6 +2371,62 @@ class StorylineAnalyzer:
                         _, _, r_value, p_value, _ = StatsAnalyzer.calculate_regression(ensemble_spei.values, ensemble_discharge.values)
                         if not np.isnan(r_value):
                             correlations[gwl][season_key][storyline_name] = {'r': r_value, 'p': p_value}
+                            logging.info(f"    --> DEBUG: ERGEBNIS für '{storyline_name}': r = {r_value:.2f}") # DEBUG
+                else:
+                    logging.info(f"    - DEBUG: SKIP Korrelation für '{storyline_name}', da nur {len(all_model_spei_ts)} Modelle erfolgreich verarbeitet wurden (benötigt > 1).") # DEBUG
         
         logging.info("Finished calculating storyline-based timeseries correlations.")
+        
+        # --- DEBUG-BLOCK 2: FINALE DATENSTRUKTUR LOGGEN ---
+        logging.info("\n--- DEBUG: Finale 'correlations' Struktur vor dem Verlassen der Funktion: ---")
+        try:
+            # json.dumps ist eine gute Methode, um verschachtelte Dictionaries lesbar zu machen
+            correlations_str = json.dumps(correlations, indent=2, default=str)
+            for line in correlations_str.split('\n'):
+                logging.info(line)
+        except Exception as e:
+            logging.error(f"Konnte 'correlations' nicht als JSON loggen: {e}")
+        logging.info("-----------------------------------------------------------------------\n")
+        # --- ENDE DEBUG-BLOCK 2 ---
+        
+        return correlations
+    
+    @staticmethod
+    def calculate_storyline_impact_correlation(storyline_spei_impacts, direct_impacts_discharge, config):
+        """
+        Calculates the correlation between the final SPEI and Discharge impact values across all storylines.
+        This is a more robust method that avoids timeseries alignment issues.
+        """
+        logging.info("Calculating correlation between storyline SPEI and Discharge impacts...")
+        correlations = {gwl: {'DJF': {}, 'JJA': {}} for gwl in config.GLOBAL_WARMING_LEVELS}
+
+        for gwl in config.GLOBAL_WARMING_LEVELS:
+            for season_key in ['DJF', 'JJA']:
+                spei_key = f"{season_key}_spei"
+                discharge_key = f"{season_key}_discharge"
+
+                impacts_spei = storyline_spei_impacts.get(gwl, {}).get(spei_key, {})
+                impacts_discharge = direct_impacts_discharge.get(gwl, {}).get(discharge_key, {})
+
+                # Finde die gemeinsamen Storylines, für die beide Werte berechnet wurden
+                common_storylines = sorted(list(set(impacts_spei.keys()) & set(impacts_discharge.keys())))
+                
+                if len(common_storylines) < 3:
+                    logging.warning(f"Skipping impact correlation for GWL {gwl}°C {season_key}: Not enough common storylines ({len(common_storylines)}).")
+                    continue
+
+                # Erstelle Listen der Werte in der gleichen Reihenfolge
+                spei_values = [impacts_spei[s]['total'] for s in common_storylines]
+                discharge_values = [impacts_discharge[s]['total'] for s in common_storylines]
+                
+                # Berechne die Korrelation
+                _, _, r_value, p_value, _ = StatsAnalyzer.calculate_regression(spei_values, discharge_values)
+
+                if not np.isnan(r_value):
+                    # Speichere das Ergebnis für jede einzelne Storyline (obwohl es für alle das gleiche ist)
+                    # Dies passt zur erwarteten Struktur der Plot-Funktion
+                    for storyline in common_storylines:
+                        correlations[gwl][season_key][storyline] = {'r': r_value, 'p': p_value}
+                    logging.info(f"  -> Correlation for GWL +{gwl}°C {season_key}: r={r_value:.2f} (p={p_value:.3f}) from {len(common_storylines)} storylines.")
+
         return correlations

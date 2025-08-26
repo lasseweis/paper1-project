@@ -574,14 +574,10 @@ class ClimateAnalysis:
                 
                 # Step 3: Create the new summary bar chart with all impacts (jetzt mit SPEI)
                 if final_impacts_pr_tas and direct_impacts_discharge:
-                    # NEU: Berechne die Korrelationen, bevor der Plot aufgerufen wird
-                    storyline_correlations = storyline_analyzer.calculate_storyline_timeseries_correlation(
-                        cmip6_results=cmip6_results,
-                        storyline_impacts=final_impacts_pr_tas,
-                        historical_monthly_data={
-                            'pr_box_monthly': pr_box_monthly_hist,
-                            'tas_box_monthly': tas_box_monthly_hist
-                        },
+                    # NEU: Berechne die Korrelationen direkt aus den Impact-Werten
+                    storyline_correlations = storyline_analyzer.calculate_storyline_impact_correlation(
+                        storyline_spei_impacts=storyline_spei_impacts,
+                        direct_impacts_discharge=direct_impacts_discharge,
                         config=Config()
                     )
 

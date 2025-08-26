@@ -2390,7 +2390,7 @@ class StorylineAnalyzer:
         # --- ENDE DEBUG-BLOCK 2 ---
         
         return correlations
-
+    
     @staticmethod
     def calculate_storyline_impact_correlation(storyline_spei_impacts, direct_impacts_discharge, storyline_pr_tas_impacts, config):
         """
@@ -2414,14 +2414,12 @@ class StorylineAnalyzer:
                 if len(common_storylines_spei) >= 3:
                     spei_values = [impacts_spei[s]['total'] for s in common_storylines_spei]
                     discharge_values_spei = [impacts_discharge[s]['total'] for s in common_storylines_spei]
-                    # KORREKTUR: Die Variablen heißen r_val und p_val
                     _, _, r_val, p_val, _ = StatsAnalyzer.calculate_regression(spei_values, discharge_values_spei)
                     if not np.isnan(r_val):
-                        # KORREKTUR: Korrekte Variablennamen hier verwenden
                         correlations[gwl][season_key]['spei_vs_discharge'] = {'r': r_val, 'p': p_val}
                         logging.info(f"  -> SPEI vs Discharge Corr for GWL +{gwl}°C {season_key}: r={r_val:.2f}")
 
-                # --- Correlation 2: Precip vs. Discharge ---
+                # --- NEU: Correlation 2: Precip vs. Discharge ---
                 pr_key = f"{season_key}_pr"
                 impacts_pr = storyline_pr_tas_impacts.get(gwl, {}).get(pr_key, {})
                 
@@ -2430,10 +2428,8 @@ class StorylineAnalyzer:
                 if len(common_storylines_pr) >= 3:
                     pr_values = [impacts_pr[s]['total'] for s in common_storylines_pr]
                     discharge_values_pr = [impacts_discharge[s]['total'] for s in common_storylines_pr]
-                    # KORREKTUR: Die Variablen heißen r_val und p_val
                     _, _, r_val, p_val, _ = StatsAnalyzer.calculate_regression(pr_values, discharge_values_pr)
                     if not np.isnan(r_val):
-                        # KORREKTUR: Korrekte Variablennamen hier verwenden
                         correlations[gwl][season_key]['pr_vs_discharge'] = {'r': r_val, 'p': p_val}
                         logging.info(f"  -> Precip vs Discharge Corr for GWL +{gwl}°C {season_key}: r={r_val:.2f}")
 

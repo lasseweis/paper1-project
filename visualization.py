@@ -2013,14 +2013,111 @@ class Visualizer:
 
         plt.style.use('seaborn-v0_8-whitegrid')
         
-        # Figurenhöhe angepasst für die größere Tabelle
+        # Figurenhöhe angepasst für die Tabelle
         fig, axs = plt.subplots(4, 2, figsize=(16, 23))
 
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         gwl_colors = {gwls_to_plot[0]: '#4575b4', gwls_to_plot[1]: '#d73027'}
 
-        # ... (der Code zur Erstellung der Balkendiagramme bleibt unverändert) ...
-        # ... (ich zeige hier nur den geänderten Teil am Ende der Funktion) ...
+        all_impacts = final_impacts.copy()
+        for gwl, data in discharge_impacts.items():
+            if gwl not in all_impacts: all_impacts[gwl] = {}
+            all_impacts[gwl].update(data)
+        for gwl, data in spei_impacts.items():
+            if gwl not in all_impacts: all_impacts[gwl] = {}
+            all_impacts[gwl].update(data)
+
+        plot_grid = {
+            (0, 0): {'key': 'DJF_tas', 'title': 'a) Winter (DJF) Temperature'},
+            (0, 1): {'key': 'JJA_tas', 'title': 'b) Summer (JJA) Temperature'},
+            (1, 0): {'key': 'DJF_pr', 'title': 'c) Winter (DJF) Precipitation'},
+            (1, 1): {'key': 'JJA_pr', 'title': 'd) Summer (JJA) Precipitation'},
+            (2, 0): {'key': 'DJF_spei', 'title': 'e) Winter (DJF) SPEI-4'},
+            (2, 1): {'key': 'JJA_spei', 'title': 'f) Summer (JJA) SPEI-4'},
+            (3, 0): {'key': 'DJF_discharge', 'title': 'g) Winter (DJF) Discharge'},
+            (3, 1): {'key': 'JJA_discharge', 'title': 'h) Summer (JJA) Discharge'}
+        }
+        
+        storyline_display_order = [
+            'Core Mean', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
+            'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
+            'Slow Jet Only', 'Fast Jet Only',
+            'Extreme NW', 'Extreme SE'
+        ]
+
+        for (row, col), plot_info in plot_grid.items():
+            ax = axs[row, col]
+            impact_key = plot_info['key']
+            season = impact_key.split('_')[0]
+            season_lower = 'winter' if season == 'DJF' else 'summer'
+            
+            # Sicherstellen, dass Daten für das erste GWL vorhanden sind, um die Storylines zu bestimmen
+            gwl_data = all_impacts.get(gwls_to_plot[0], {}).get(impact_key, {})
+            available_storylines = [s for s in storyline_display_order if s in gwl_data]
+            
+            df_change = pd.DataFrame(index=available_storylines, columns=gwls_to_plot, dtype=float)
+            df_std_dev = pd.DataFrame(index=available_storylines, columns=gwls_to_plot, dtype=float)
+
+            for gwl in gwls_to_plot:
+                for name in available_storylines:
+                    impact_data = all_impacts.get(gwl, {}).get(impact_key, {}).get(name, {})
+                    df_change.loc[name, gwl] = impact_data.get('total')
+                    if 'discharge' in impact_key:
+                        df_std_dev.loc[name, gwl] = impact_data.get('mean_std_dev')
+            
+            x_pos = np.arange(len(available_storylines))
+            bar_width = 0.35
+            rects1 = ax.bar(x_pos - bar_width/2, df_change[gwls_to_plot[0]], bar_width, label=f'+{gwls_to_plot[0]}°C GWL', color=gwl_colors[gwls_to_plot[0]], zorder=10)
+            rects2 = ax.bar(x_pos + bar_width/2, df_change[gwls_to_plot[1]], bar_width, label=f'+{gwls_to_plot[1]}°C GWL', color=gwl_colors[gwls_to_plot[1]], zorder=10)
+
+            ax.set_title(plot_info['title'], loc='left', fontsize=14, weight='bold')
+            is_discharge_plot = 'discharge' in impact_key
+            is_spei_plot = 'spei' in impact_key
+            
+            unit = ''
+            if 'tas' in impact_key: unit = '(°C)'
+            elif is_discharge_plot: unit = '(m³/s)'
+            elif 'pr' in impact_key: unit = '(%)'
+            elif is_spei_plot: unit = '(Standard Deviations)'
+
+            if col == 0: ax.set_ylabel(f'Projected Change {unit}', fontsize=12)
+            ax.axhline(0, color='black', linestyle='-', linewidth=0.8, zorder=1)
+
+            if is_discharge_plot:
+                for i_gwl, gwl in enumerate(gwls_to_plot):
+                    bar_pos = x_pos + (bar_width/2 * (1 if i_gwl==1 else -1))
+                    for pos, height, std in zip(bar_pos, df_change[gwl].values, df_std_dev[gwl].values):
+                        if not np.isnan(std) and not np.isnan(height):
+                            ax.errorbar(pos, height, yerr=2*std, fmt='none', ecolor=gwl_colors[gwl], elinewidth=1.5, capsize=4, alpha=0.4, zorder=11)
+                            ax.errorbar(pos, height, yerr=std, fmt='none', ecolor=gwl_colors[gwl], elinewidth=2.5, capsize=6, zorder=12)
+                hist_mean = discharge_data_historical.get(f'{season_lower}_mean')
+                if hist_mean:
+                    thresh30 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold_30')
+                    thresh10 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold')
+                    if thresh30: ax.axhline(thresh30-hist_mean, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5)
+                    if thresh10: ax.axhline(thresh10-hist_mean, color='black', linestyle=':', linewidth=2.5, zorder=5)
+                
+            if is_spei_plot:
+                ax.set_ylim(-0.5, 0.5)
+
+            ax.set_xticks(x_pos)
+            xtick_labels = [name.replace(' & ', ' &\n').replace(' (MMM)','').replace(' Only', '\n(Only)') for name in available_storylines]
+            ax.set_xticklabels(xtick_labels, rotation=45, ha="right", fontsize=10)
+            if row < 3:
+                ax.set_xticklabels([])
+            
+            hist_mean = discharge_data_historical.get(f'{season_lower}_mean', 0) if is_discharge_plot else 0
+            for rects in [rects1, rects2]:
+                for rect in rects:
+                    change_val = rect.get_height()
+                    if np.isnan(change_val): continue
+                    offset = (ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.03
+                    text_pos = change_val + offset if change_val >= 0 else change_val - offset
+                    va = 'bottom' if change_val >= 0 else 'top'
+                    label_text = f'{change_val:+.0f}\n({hist_mean + change_val:.0f})' if is_discharge_plot and hist_mean else f'{change_val:+.2f}'
+                    ax.annotate(label_text, xy=(rect.get_x() + rect.get_width() / 2, text_pos), ha='center', va=va, fontsize=8)
+            
+            ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
 
         handles, labels = axs[0, 0].get_legend_handles_labels()
         low_flow_10_val = discharge_data_historical.get('winter_lowflow_threshold', 'N/A')
@@ -2036,23 +2133,19 @@ class Visualizer:
             '1x Std. Dev. of interannual variability', '2x Std. Dev. of interannual variability'
         ])
 
-        # Legende und Tabelle neu positionieren
         fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.08), ncol=2, fontsize=12, frameon=False)
         
         if storyline_correlations:
-            # --- START DER ÄNDERUNG: Tabelle mit zwei Zeilen ---
             header = f"{'Correlation (ρ)':<25}"
             for gwl in gwls_to_plot:
                 header += f" | DJF (+{gwl}°C) | JJA (+{gwl}°C)"
             
-            # Zeile 1: SPEI vs. Discharge
             row1_text = f"{'SPEI-4 vs. Discharge':<25}"
             for gwl in gwls_to_plot:
                 for season in ['DJF', 'JJA']:
                     r_val = storyline_correlations.get(gwl, {}).get(season, {}).get('spei_vs_discharge', {}).get('r', np.nan)
                     row1_text += f" | {r_val: >10.2f}"
 
-            # Zeile 2: Precip vs. Discharge
             row2_text = f"{'Precip vs. Discharge':<25}"
             for gwl in gwls_to_plot:
                 for season in ['DJF', 'JJA']:
@@ -2067,7 +2160,6 @@ class Visualizer:
                 f"{row2_text}"
             )
             
-            # Tabelle am unteren Rand platzieren
             plt.figtext(0.5, 0.01, table_text, ha="center", va="bottom", fontsize=10, 
                         family='monospace', bbox=dict(boxstyle='round,pad=0.5', fc='white', alpha=0.8))
 
@@ -2075,9 +2167,7 @@ class Visualizer:
         ref_period_text = f"Changes relative to the {config.CMIP6_ANOMALY_REF_START}-{config.CMIP6_ANOMALY_REF_END} reference period"
         fig.suptitle(f"{main_title}\n{ref_period_text}", fontsize=16, weight='bold', y=0.99)
         
-        # Layout anpassen, um Platz für die Legende und die größere Tabelle zu schaffen
         plt.subplots_adjust(left=0.07, right=0.98, top=0.95, bottom=0.18, hspace=0.3)
-        # --- ENDE DER ÄNDERUNG ---
         
         filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_4x2_with_spei_and_corr_table.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')

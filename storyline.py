@@ -2390,43 +2390,51 @@ class StorylineAnalyzer:
         # --- ENDE DEBUG-BLOCK 2 ---
         
         return correlations
-    
+
     @staticmethod
-    def calculate_storyline_impact_correlation(storyline_spei_impacts, direct_impacts_discharge, config):
+    def calculate_storyline_impact_correlation(storyline_spei_impacts, direct_impacts_discharge, storyline_pr_tas_impacts, config):
         """
-        Calculates the correlation between the final SPEI and Discharge impact values across all storylines.
-        This is a more robust method that avoids timeseries alignment issues.
+        Calculates the correlation between final impact values (e.g., SPEI vs Discharge, Precip vs Discharge) across all storylines.
         """
-        logging.info("Calculating correlation between storyline SPEI and Discharge impacts...")
+        logging.info("Calculating correlation between storyline impacts (SPEI vs Discharge, Precip vs Discharge)...")
         correlations = {gwl: {'DJF': {}, 'JJA': {}} for gwl in config.GLOBAL_WARMING_LEVELS}
 
         for gwl in config.GLOBAL_WARMING_LEVELS:
             for season_key in ['DJF', 'JJA']:
+                
+                # --- Correlation 1: SPEI vs. Discharge ---
                 spei_key = f"{season_key}_spei"
                 discharge_key = f"{season_key}_discharge"
 
                 impacts_spei = storyline_spei_impacts.get(gwl, {}).get(spei_key, {})
                 impacts_discharge = direct_impacts_discharge.get(gwl, {}).get(discharge_key, {})
-
-                # Finde die gemeinsamen Storylines, für die beide Werte berechnet wurden
-                common_storylines = sorted(list(set(impacts_spei.keys()) & set(impacts_discharge.keys())))
                 
-                if len(common_storylines) < 3:
-                    logging.warning(f"Skipping impact correlation for GWL {gwl}°C {season_key}: Not enough common storylines ({len(common_storylines)}).")
-                    continue
-
-                # Erstelle Listen der Werte in der gleichen Reihenfolge
-                spei_values = [impacts_spei[s]['total'] for s in common_storylines]
-                discharge_values = [impacts_discharge[s]['total'] for s in common_storylines]
+                common_storylines_spei = sorted(list(set(impacts_spei.keys()) & set(impacts_discharge.keys())))
                 
-                # Berechne die Korrelation
-                _, _, r_value, p_value, _ = StatsAnalyzer.calculate_regression(spei_values, discharge_values)
+                if len(common_storylines_spei) >= 3:
+                    spei_values = [impacts_spei[s]['total'] for s in common_storylines_spei]
+                    discharge_values_spei = [impacts_discharge[s]['total'] for s in common_storylines_spei]
+                    # KORREKTUR: Die Variablen heißen r_val und p_val
+                    _, _, r_val, p_val, _ = StatsAnalyzer.calculate_regression(spei_values, discharge_values_spei)
+                    if not np.isnan(r_val):
+                        # KORREKTUR: Korrekte Variablennamen hier verwenden
+                        correlations[gwl][season_key]['spei_vs_discharge'] = {'r': r_val, 'p': p_val}
+                        logging.info(f"  -> SPEI vs Discharge Corr for GWL +{gwl}°C {season_key}: r={r_val:.2f}")
 
-                if not np.isnan(r_value):
-                    # Speichere das Ergebnis für jede einzelne Storyline (obwohl es für alle das gleiche ist)
-                    # Dies passt zur erwarteten Struktur der Plot-Funktion
-                    for storyline in common_storylines:
-                        correlations[gwl][season_key][storyline] = {'r': r_value, 'p': p_value}
-                    logging.info(f"  -> Correlation for GWL +{gwl}°C {season_key}: r={r_value:.2f} (p={p_value:.3f}) from {len(common_storylines)} storylines.")
+                # --- Correlation 2: Precip vs. Discharge ---
+                pr_key = f"{season_key}_pr"
+                impacts_pr = storyline_pr_tas_impacts.get(gwl, {}).get(pr_key, {})
+                
+                common_storylines_pr = sorted(list(set(impacts_pr.keys()) & set(impacts_discharge.keys())))
+
+                if len(common_storylines_pr) >= 3:
+                    pr_values = [impacts_pr[s]['total'] for s in common_storylines_pr]
+                    discharge_values_pr = [impacts_discharge[s]['total'] for s in common_storylines_pr]
+                    # KORREKTUR: Die Variablen heißen r_val und p_val
+                    _, _, r_val, p_val, _ = StatsAnalyzer.calculate_regression(pr_values, discharge_values_pr)
+                    if not np.isnan(r_val):
+                        # KORREKTUR: Korrekte Variablennamen hier verwenden
+                        correlations[gwl][season_key]['pr_vs_discharge'] = {'r': r_val, 'p': p_val}
+                        logging.info(f"  -> Precip vs Discharge Corr for GWL +{gwl}°C {season_key}: r={r_val:.2f}")
 
         return correlations

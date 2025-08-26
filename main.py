@@ -574,20 +574,23 @@ class ClimateAnalysis:
                 
                 # Step 3: Create the new summary bar chart with all impacts (jetzt mit SPEI)
                 if final_impacts_pr_tas and direct_impacts_discharge:
-                    # NEU: Berechne die Korrelationen direkt aus den Impact-Werten
+                    # --- START DER KORREKTUR ---
+                    # Das fehlende Argument wird hier hinzugefügt
                     storyline_correlations = storyline_analyzer.calculate_storyline_impact_correlation(
                         storyline_spei_impacts=storyline_spei_impacts,
                         direct_impacts_discharge=direct_impacts_discharge,
+                        storyline_pr_tas_impacts=final_impacts_pr_tas, # DIESES ARGUMENT WURDE HINZUGEFÜGT
                         config=Config()
                     )
+                    # --- ENDE DER KORREKTUR ---
 
                     Visualizer.plot_storyline_impact_barchart_with_discharge(
                         final_impacts=final_impacts_pr_tas,
                         discharge_impacts=direct_impacts_discharge,
-                        spei_impacts=storyline_spei_impacts, # NEU
+                        spei_impacts=storyline_spei_impacts, 
                         discharge_data_historical=discharge_data_loaded,
                         config=Config(),
-                        storyline_correlations=storyline_correlations # NEU: Übergebe die Korrelationen
+                        storyline_correlations=storyline_correlations
                     )
             else:
                 logging.warning("Skipping final storyline impact calculation and plot: Multivariate betas are missing.")

@@ -151,7 +151,7 @@ class ClimateAnalysis:
                     season_lower = season.lower()
                     season_ts = DataProcessor.filter_by_season(seasonal_means_ts, season)
                     if season_ts is not None and season_ts.size > 0:
-                        result[f'{season_lower}_discharge_detrended'] = DataProcessor.detrend_data(season_ts)
+                        result[f'{season_lower}_discharge'] = DataProcessor.detrend_data(season_ts)
                         result[f'{season_lower}_mean'] = season_ts.mean().item()
                         result[f'{season_lower}_lowflow_threshold'] = 1064
                         result[f'{season_lower}_lowflow_threshold_30'] = 1417

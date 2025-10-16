@@ -2174,21 +2174,12 @@ class StorylineAnalyzer:
         return spei_impacts
     
     @staticmethod
-    def calculate_storyline_wind_change_maps(cmip6_results, config):
+    def calculate_storyline_wind_change_maps(cmip6_results, config, historical_mmm_u850_by_season=None):
         """
         Calculates the 2D U850 wind change maps for each defined storyline.
 
-        Instead of a zonal mean, this function preserves the spatial grid to create
-        a map of wind changes for each storyline group.
-
-        Returns:
-        --------
-        dict
-            A nested dictionary structured as:
-            {gwl: {season: {storyline: {
-                'mean_change_map': xr.DataArray (lat, lon),
-                'historical_mean_map': xr.DataArray (lat, lon)
-            }}}}
+        This version can accept a pre-calculated historical multi-model mean to use as
+        a consistent baseline for all storylines.
         """
         logging.info("Calculating 2D U850 wind change maps for each storyline...")
         classification = cmip6_results.get('storyline_classification_2d')
@@ -2213,7 +2204,7 @@ class StorylineAnalyzer:
                 storyline_name = storyline_key.replace(f'{season}_', '')
                 
                 model_change_maps = []
-                model_hist_maps = []
+                model_hist_maps = [] # Still needed for the fallback case
 
                 for model_run_key in model_list:
                     ua_data = model_data_loaded.get(model_run_key, {}).get('ua')
@@ -2240,7 +2231,6 @@ class StorylineAnalyzer:
                     if hist_ua_season is None or future_ua_season is None or hist_ua_season.season_year.size == 0 or future_ua_season.season_year.size == 0:
                         continue
 
-                    # Calculate the mean over time, but keep lat/lon dimensions
                     hist_map = hist_ua_season.mean(dim='season_year', skipna=True)
                     future_map = future_ua_season.mean(dim='season_year', skipna=True)
                     
@@ -2250,12 +2240,18 @@ class StorylineAnalyzer:
                     model_hist_maps.append(hist_map)
                 
                 if model_change_maps:
-                    # Align all maps to the grid of the first model before averaging
                     aligned_changes = [da.reindex_like(model_change_maps[0], method='nearest') for da in model_change_maps]
-                    aligned_hists = [da.reindex_like(model_hist_maps[0], method='nearest') for da in model_hist_maps]
-                    
                     mmm_change_map = xr.concat(aligned_changes, dim='model').mean(dim='model', skipna=True)
-                    mmm_hist_map = xr.concat(aligned_hists, dim='model').mean(dim='model', skipna=True)
+                    
+                    # --- MODIFIED LOGIC ---
+                    # Use the provided historical MMM if available, otherwise use the old method as a fallback.
+                    if historical_mmm_u850_by_season and season in historical_mmm_u850_by_season:
+                        mmm_hist_map = historical_mmm_u850_by_season[season]
+                        logging.info(f"  -> Using consistent MMM historical baseline for GWL {gwl}°C, {season}, {storyline_name}")
+                    else:
+                        aligned_hists = [da.reindex_like(model_hist_maps[0], method='nearest') for da in model_hist_maps]
+                        mmm_hist_map = xr.concat(aligned_hists, dim='model').mean(dim='model', skipna=True)
+                    # --- END MODIFIED LOGIC ---
                     
                     results[gwl][season][storyline_name] = {
                         'mean_change_map': mmm_change_map.load(),

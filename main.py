@@ -640,34 +640,74 @@ class ClimateAnalysis:
         # =================================================================================
         # === END OF THE NEW BLOCK ===
         # =================================================================================
-        # =================================================================================
-        # === NEW: STORYLINE U850 WIND CHANGE MAPS ===
-        # =================================================================================
-        logging.info("\n\n--- Checking for Storyline U850 Wind Change Maps ---")
-        map_plot_filename = os.path.join(Config.PLOT_DIR, "storyline_u850_change_maps.png")
-        if not os.path.exists(map_plot_filename):
-            logging.info(f"Plot '{map_plot_filename}' not found. Calculating data and creating plot...")
-            if cmip6_results:
-                # Calculate the 2D wind change maps for each storyline
-                storyline_change_maps = storyline_analyzer.calculate_storyline_wind_change_maps(
-                    cmip6_results=cmip6_results,
-                    config=Config()
-                )
+        
+        # --- CMIP6 MMM Analysis & Storyline Wind Change ---
+        # --- MODIFIED BLOCK: Rearranged logic ---
+        logging.info("\n\n--- Checking for CMIP6 U850 Change and Storyline Maps ---")
+        u850_change_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_mmm_u850_change_djf_jja.png")
+        storyline_map_plot_filename = os.path.join(Config.PLOT_DIR, "storyline_u850_change_maps.png")
+        
+        # Only proceed if either plot is missing
+        if not os.path.exists(u850_change_plot_filename) or not os.path.exists(storyline_map_plot_filename):
+            if cmip6_results and 'cmip6_model_data_loaded' in cmip6_results:
+                future_period = (2070, 2099)
+                hist_period = (Config.CMIP6_ANOMALY_REF_START, Config.CMIP6_ANOMALY_REF_END)
+                preloaded_data = cmip6_results['cmip6_model_data_loaded']
+                models_for_calc = sorted(list(set(key.split('_')[0] for key in preloaded_data.keys())))
                 
-                if storyline_change_maps:
-                    # Create the map plot
-                    Visualizer.plot_storyline_wind_change_maps(
-                        map_data=storyline_change_maps,
-                        config=Config()
+                if models_for_calc:
+                    # This calculation is needed for BOTH plots, so we do it once
+                    u850_change_data = storyline_analyzer.calculate_cmip6_u850_change_fields(
+                        models_to_run=models_for_calc,
+                        future_scenario=Config.CMIP6_SCENARIOS[0],
+                        future_period=future_period,
+                        historical_period=hist_period,
+                        preloaded_cmip6_data=preloaded_data
                     )
-                else:
-                    logging.warning("Calculation of storyline wind change maps failed. Skipping plot.")
-            else:
-                logging.warning("Skipping storyline wind change maps: Main CMIP6 results are missing.")
-        else:
-            logging.info(f"Plot '{map_plot_filename}' already exists. Skipping calculation and creation.")
-        # =================================================================================
 
+                    # Plot 1: CMIP6 MMM U850 Change
+                    if not os.path.exists(u850_change_plot_filename):
+                        logging.info(f"Plot '{u850_change_plot_filename}' not found. Creating plot...")
+                        if u850_change_data:
+                            Visualizer.plot_cmip6_u850_change_panel(
+                                u850_change_data, Config(), future_period=future_period,
+                                historical_period=hist_period, filename=os.path.basename(u850_change_plot_filename)
+                            )
+                        else:
+                            logging.warning("Calculation of U850 change data failed. Skipping MMM plot.")
+                    else:
+                        logging.info(f"Plot '{u850_change_plot_filename}' already exists.")
+
+                    # Plot 2: Storyline U850 Change Maps
+                    if not os.path.exists(storyline_map_plot_filename):
+                        logging.info(f"Plot '{storyline_map_plot_filename}' not found. Creating plot...")
+                        if u850_change_data:
+                            # Extract the historical mean to pass to the storyline function
+                            historical_mmm_u850_for_storylines = {
+                                'DJF': u850_change_data['DJF']['u850_historical_mean_mmm'],
+                                'JJA': u850_change_data['JJA']['u850_historical_mean_mmm']
+                            }
+                            storyline_change_maps = storyline_analyzer.calculate_storyline_wind_change_maps(
+                                cmip6_results=cmip6_results,
+                                config=Config(),
+                                historical_mmm_u850_by_season=historical_mmm_u850_for_storylines
+                            )
+                            if storyline_change_maps:
+                                Visualizer.plot_storyline_wind_change_maps(map_data=storyline_change_maps, config=Config())
+                            else:
+                                logging.warning("Calculation of storyline wind change maps failed. Skipping plot.")
+                        else:
+                            logging.warning("Cannot create storyline maps because U850 change data calculation failed.")
+                    else:
+                        logging.info(f"Plot '{storyline_map_plot_filename}' already exists.")
+                else:
+                    logging.warning("No models available for U850 change calculation.")
+            else:
+                logging.warning("Skipping U850 change and storyline map plots: CMIP6 results are missing.")
+        else:
+            logging.info(f"Plots '{u850_change_plot_filename}' and '{storyline_map_plot_filename}' already exist.")
+        # --- END MODIFIED BLOCK ---
+        
         # --- PART 5: JET INTER-RELATIONSHIP SCATTER PLOTS ---
         logging.info("\n\n--- Plotting CMIP6 Jet Inter-relationship Scatter Plots ---")
         if cmip6_results:
@@ -683,41 +723,6 @@ class ClimateAnalysis:
                 logging.info(f"Plot '{inter_rel_plot_filename}' already exists. Skipping creation.")
         else:
             logging.warning("Skipping CMIP6 jet inter-relationship scatter plots due to missing cmip6_results.")
-
-        # --- CMIP6 MMM Analysis ---
-        logging.info("\n\n--- Checking for CMIP6 U850 Change Maps ---")
-        u850_change_plot_filename = os.path.join(Config.PLOT_DIR, "cmip6_mmm_u850_change_djf_jja.png")
-        if not os.path.exists(u850_change_plot_filename):
-            logging.info(f"Plot '{u850_change_plot_filename}' not found. Calculating data and creating plot...")
-            if cmip6_results and 'cmip6_model_data_loaded' in cmip6_results:
-                future_period = (2070, 2099)
-                hist_period = (Config.CMIP6_ANOMALY_REF_START, Config.CMIP6_ANOMALY_REF_END)
-                preloaded_data = cmip6_results['cmip6_model_data_loaded']
-                models_for_calc = sorted(list(set(key.split('_')[0] for key in preloaded_data.keys())))
-                if models_for_calc:
-                    u850_change_data = storyline_analyzer.calculate_cmip6_u850_change_fields(
-                        models_to_run=models_for_calc,
-                        future_scenario=Config.CMIP6_SCENARIOS[0],
-                        future_period=future_period,
-                        historical_period=hist_period,
-                        preloaded_cmip6_data=preloaded_data
-                    )
-                    if u850_change_data:
-                        Visualizer.plot_cmip6_u850_change_panel(
-                            u850_change_data,
-                            Config(),
-                            future_period=future_period,
-                            historical_period=hist_period,
-                            filename=os.path.basename(u850_change_plot_filename)
-                        )
-                    else:
-                        logging.warning("Calculation of U850 change data failed.")
-                else:
-                    logging.warning("No models available for U850 change calculation.")
-            else:
-                logging.warning("Skipping U850 change plot: CMIP6 results are missing.")
-        else:
-            logging.info(f"Plot '{u850_change_plot_filename}' already exists. Skipping creation.")
 
         # --- FINAL SUMMARIES ---
         if cmip6_results:

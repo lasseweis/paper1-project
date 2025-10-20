@@ -1316,64 +1316,54 @@ class Visualizer:
         ax.legend(by_label.values(), by_label.keys(), loc='upper center', bbox_to_anchor=(0.5, -0.25), ncol=2, fontsize=8)
         
     @staticmethod
-    def plot_jet_inter_relationship_scatter_combined_gwl(cmip6_results):
+    def plot_jet_inter_relationship_scatter_combined_gwl(cmip6_results, scenario):
         """
         Erstellt einen kombinierten Scatter-Plot, der die Beziehung zwischen den Jet-Indizes
         in den CMIP6-Modellen für alle GWLs, getrennt nach Jahreszeiten, darstellt.
         NEU: Verwendet die Quadranten-Visualisierungsmethode.
+        MODIFIED: Accepts a scenario parameter for filename and title.
         """
         if not cmip6_results or 'all_individual_model_deltas_for_plot' not in cmip6_results:
-            logging.warning("Cannot plot combined jet inter-relationship scatter: Missing CMIP6 results.")
+            logging.warning(f"Cannot plot combined jet inter-relationship scatter for {scenario}: Missing CMIP6 results.")
             return
 
         gwls_to_plot = Config.GLOBAL_WARMING_LEVELS
         if not gwls_to_plot:
-            logging.warning("No global warming levels to plot. Skipping jet inter-relationship plot.")
+            logging.warning(f"No global warming levels to plot for {scenario}. Skipping jet inter-relationship plot.")
             return
 
-        # Holen des neuen Radius-Parameters aus der Konfiguration
         inner_radius = Config.STORYLINE_INNER_RADIUS
 
-        logging.info(f"Plotting seasonal CMIP6 jet inter-relationship scatter for GWLs: {gwls_to_plot}...")
+        logging.info(f"Plotting seasonal CMIP6 jet inter-relationship scatter for scenario {scenario}, GWLs: {gwls_to_plot}...")
         Visualizer.ensure_plot_dir_exists()
 
         fig, axs = plt.subplots(len(gwls_to_plot), 2, figsize=(14, 6.5 * len(gwls_to_plot)), squeeze=False)
 
         for i, gwl in enumerate(gwls_to_plot):
-            # Panel 1 (Links): Winter (DJF)
             Visualizer._plot_single_jet_relationship_panel(
-                ax=axs[i, 0],
-                cmip6_results=cmip6_results,
-                gwl_to_plot=gwl,
-                x_jet_key='DJF_JetSpeed',
-                y_jet_key='DJF_JetLat',
+                ax=axs[i, 0], cmip6_results=cmip6_results, gwl_to_plot=gwl,
+                x_jet_key='DJF_JetSpeed', y_jet_key='DJF_JetLat',
                 title=f'Winter: Speed vs. Latitude ({gwl}°C GWL)',
                 inner_radius=inner_radius
             )
-            
-            # Panel 2 (Rechts): Sommer (JJA)
             Visualizer._plot_single_jet_relationship_panel(
-                ax=axs[i, 1],
-                cmip6_results=cmip6_results,
-                gwl_to_plot=gwl,
-                x_jet_key='JJA_JetSpeed',
-                y_jet_key='JJA_JetLat',
+                ax=axs[i, 1], cmip6_results=cmip6_results, gwl_to_plot=gwl,
+                x_jet_key='JJA_JetSpeed', y_jet_key='JJA_JetLat',
                 title=f'Summer: Speed vs. Latitude ({gwl}°C GWL)',
                 inner_radius=inner_radius
             )
 
         ref_period = f"{Config.CMIP6_ANOMALY_REF_START}-{Config.CMIP6_ANOMALY_REF_END}"
-        fig.suptitle(f"CMIP6 Jet Index Inter-relationships by Season\n"
-                    f"(Changes relative to {ref_period})",
-                    fontsize=16, weight='bold')
+        fig.suptitle(f"CMIP6 Jet Index Inter-relationships by Season for {scenario.upper()}\n"
+                     f"(Changes relative to {ref_period})",
+                     fontsize=16, weight='bold')
 
         fig.tight_layout(rect=[0, 0, 1, 0.95], h_pad=5.0)
         
-        # Dateinamen aktualisieren, um die neue Methode widerzuspiegeln
-        filename = os.path.join(Config.PLOT_DIR, "cmip6_jet_inter_relationship_scatter_quadrants.png")
+        filename = os.path.join(Config.PLOT_DIR, f"cmip6_jet_inter_relationship_scatter_quadrants_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved seasonal CMIP6 jet inter-relationship scatter plot (quadrant style) to {filename}")
+        logging.info(f"Saved seasonal CMIP6 jet inter-relationship scatter plot for {scenario} to {filename}")
 
     @staticmethod
     def plot_u850_change_map(ax, u850_change_data, historical_mean_contours,
@@ -1999,21 +1989,20 @@ class Visualizer:
         logging.info(f"Saved vertical storyline impacts summary plot to {filename}")
 
     @staticmethod
-    def plot_storyline_impact_barchart_with_discharge(final_impacts, discharge_impacts, spei_impacts, discharge_data_historical, config, storyline_correlations=None):
+    def plot_storyline_impact_barchart_with_discharge(final_impacts, discharge_impacts, spei_impacts, discharge_data_historical, config, scenario, storyline_correlations=None):
         """
         Creates a 4x2 vertical bar chart to visualize storyline impacts for Temp, Precip, Discharge, and SPEI.
-        NOW ADDS A CORRELATION TABLE AT THE BOTTOM.
+        MODIFIED: Accepts a scenario parameter for filename and title.
         """
-        logging.info("Plotting final storyline impacts (incl. discharge and SPEI) as a 4x2 bar chart...")
+        logging.info(f"Plotting final storyline impacts (incl. discharge and SPEI) for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
 
         if not final_impacts:
-            logging.warning("Cannot plot impacts: Input data is empty.")
+            logging.warning(f"Cannot plot impacts for {scenario}: Input data is empty.")
             return
 
         plt.style.use('seaborn-v0_8-whitegrid')
         
-        # Figurenhöhe angepasst für die Tabelle
         fig, axs = plt.subplots(4, 2, figsize=(16, 23))
 
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
@@ -2045,13 +2034,13 @@ class Visualizer:
             'Extreme NW', 'Extreme SE'
         ]
 
+        # The rest of the function remains the same until the end
         for (row, col), plot_info in plot_grid.items():
             ax = axs[row, col]
             impact_key = plot_info['key']
             season = impact_key.split('_')[0]
             season_lower = 'winter' if season == 'DJF' else 'summer'
             
-            # Sicherstellen, dass Daten für das erste GWL vorhanden sind, um die Storylines zu bestimmen
             gwl_data = all_impacts.get(gwls_to_plot[0], {}).get(impact_key, {})
             available_storylines = [s for s in storyline_display_order if s in gwl_data]
             
@@ -2118,7 +2107,8 @@ class Visualizer:
                     ax.annotate(label_text, xy=(rect.get_x() + rect.get_width() / 2, text_pos), ha='center', va=va, fontsize=8)
             
             ax.spines['top'].set_visible(False); ax.spines['right'].set_visible(False)
-
+        
+        # This part remains the same...
         handles, labels = axs[0, 0].get_legend_handles_labels()
         low_flow_10_val = discharge_data_historical.get('winter_lowflow_threshold', 'N/A')
         low_flow_30_val = discharge_data_historical.get('winter_lowflow_threshold_30', 'N/A')
@@ -2153,7 +2143,7 @@ class Visualizer:
                     row2_text += f" | {r_val: >10.2f}"
 
             table_text = (
-                "Correlation between Climate Impacts and Discharge Change across Storylines:\n"
+                f"Correlation between Climate Impacts and Discharge Change across Storylines ({scenario.upper()}):\n"
                 f"{header}\n"
                 f"{'-' * len(header)}\n"
                 f"{row1_text}\n"
@@ -2162,17 +2152,18 @@ class Visualizer:
             
             plt.figtext(0.5, 0.01, table_text, ha="center", va="bottom", fontsize=10, 
                         family='monospace', bbox=dict(boxstyle='round,pad=0.5', fc='white', alpha=0.8))
-
-        main_title = "Projected Changes in Climate, Discharge & Drought for Jet Stream Storylines"
+        
+        # MODIFIED: Title and filename
+        main_title = f"Projected Changes for Jet Stream Storylines ({scenario.upper()})"
         ref_period_text = f"Changes relative to the {config.CMIP6_ANOMALY_REF_START}-{config.CMIP6_ANOMALY_REF_END} reference period"
         fig.suptitle(f"{main_title}\n{ref_period_text}", fontsize=16, weight='bold', y=0.99)
         
         plt.subplots_adjust(left=0.07, right=0.98, top=0.95, bottom=0.18, hspace=0.3)
         
-        filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_4x2_with_spei_and_corr_table.png")
+        filename = os.path.join(config.PLOT_DIR, f"storyline_impacts_summary_4x2_with_spei_and_corr_table_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved 4x2 storyline impacts summary plot with correlation table to {filename}")
+        logging.info(f"Saved 4x2 storyline impacts summary plot for {scenario} to {filename}")
         
     @staticmethod
     def plot_extreme_discharge_frequency_comparison(frequency_data, config):
@@ -2236,16 +2227,17 @@ class Visualizer:
         logging.info(f"Saved extreme discharge frequency comparison plot to {filename}")
 
     @staticmethod
-    def plot_storyline_return_period_change(results, config):
+    def plot_storyline_return_period_change(results, config, scenario):
         """
         Creates a comprehensive plot showing the change in return periods for
         low-flow events and the change in interannual standard deviation.
+        MODIFIED: Accepts a scenario parameter for filename and title.
         """
         if not results or not config or 'thresholds' not in results:
-            logging.warning("Cannot plot return period/std dev change: Missing results or thresholds.")
+            logging.warning(f"Cannot plot return period/std dev change for {scenario}: Missing results or thresholds.")
             return
 
-        logging.info("Plotting storyline return period and std dev changes...")
+        logging.info(f"Plotting storyline return period and std dev changes for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
@@ -2267,17 +2259,16 @@ class Visualizer:
 
         plt.style.use('seaborn-v0_8-whitegrid')
 
-        # --- MODIFIED BLOCK ---
         storyline_order = [
             'Core Mean', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
             'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
             'Slow Jet Only', 'Fast Jet Only',
-            'Extreme NW', 'Extreme SE' # Added new storylines here
+            'Extreme NW', 'Extreme SE'
         ]
-        # --- END MODIFIED BLOCK ---
         
         gwl_colors = {gwls_to_plot[0]: '#ff7f0e', gwls_to_plot[1]: '#d62728'}
-
+        
+        # The rest of the function remains the same until the end...
         for row, season in enumerate(seasons_to_plot):
             plot_data_for_season = results.get(gwls_to_plot[0], {}).get(season, {})
             storylines_for_row = [s for s in storyline_order if s in plot_data_for_season]
@@ -2380,25 +2371,26 @@ class Visualizer:
         by_label = dict(zip(labels, handles))
         fig.legend(by_label.values(), by_label.keys(), loc='lower center', bbox_to_anchor=(0.5, 0.0), ncol=4, fontsize=12)
         
-        fig.suptitle(f"Change in Return Period and Variability of Low-Flow Events",
-                    fontsize=16, weight='bold')
+        # MODIFIED: Title and filename
+        fig.suptitle(f"Change in Return Period and Variability of Low-Flow Events for {scenario.upper()}",
+                     fontsize=16, weight='bold')
         fig.tight_layout(rect=[0.02, 0.05, 0.98, 0.94], h_pad=2, w_pad=1.5)
         
-        filename = os.path.join(config.PLOT_DIR, "storyline_discharge_return_period_comparison_FULL.png")
+        filename = os.path.join(config.PLOT_DIR, f"storyline_discharge_return_period_comparison_FULL_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         
     @staticmethod
-    def plot_storyline_wind_change_maps(map_data, config, filename="storyline_u850_change_maps.png"):
+    def plot_storyline_wind_change_maps(map_data, config, scenario, filename="storyline_u850_change_maps.png"):
         """
         Creates a panel plot of 2D maps showing U850 wind changes for each storyline.
-        MODIFIED to include a comprehensive title on each subplot and a central legend.
+        MODIFIED: Accepts a scenario parameter for filename and title.
         """
-        logging.info("Plotting U850 wind change maps for each storyline...")
+        logging.info(f"Plotting U850 wind change maps for each storyline for scenario {scenario}...")
         Visualizer.ensure_plot_dir_exists()
 
         if not map_data:
-            logging.warning("Cannot plot wind change maps: Input data is empty.")
+            logging.warning(f"Cannot plot wind change maps for {scenario}: Input data is empty.")
             return
 
         storyline_order = [
@@ -2425,10 +2417,6 @@ class Visualizer:
                 for col_idx, storyline_name in enumerate(storyline_order):
                     ax = fig.add_subplot(gs[row_idx, col_idx], projection=ccrs.PlateCarree())
                     
-                    # --- START DER KORREKTUR ---
-                    # Der Aufruf von ax.set_title() wird hier entfernt.
-                    # Stattdessen werden die Titel-Komponenten an die Hilfsfunktion übergeben.
-                    
                     storyline_title_formatted = storyline_name.replace(" & ", " &\n")
                     main_title_part = f'GWL +{gwl}°C, {season_full} ({season})'
 
@@ -2438,7 +2426,6 @@ class Visualizer:
                         change_map = data['mean_change_map']
                         hist_map = data['historical_mean_map']
                         
-                        # Die Titel-Parameter werden nun korrekt an die Hilfsfunktion übergeben.
                         cf, _ = Visualizer.plot_u850_change_map(
                             ax, u850_change_data=change_map.data, 
                             historical_mean_contours=hist_map.data,
@@ -2450,40 +2437,28 @@ class Visualizer:
                         if cf is not None:
                             cf_ref = cf
                     else:
-                        # Fallback-Titel für Subplots ohne Daten
                         ax.set_title(f'GWL +{gwl}°C, {season}\n{storyline_name}', fontsize=10)
                         ax.text(0.5, 0.5, "N/A", ha='center', va='center', transform=ax.transAxes)
                         ax.set_xticks([])
                         ax.set_yticks([])
-                    # --- ENDE DER KORREKTUR ---
                         
                 row_idx += 1
 
-        # Shared colorbar
         if cf_ref:
             cax = fig.add_subplot(gs[:, -1])
             cbar = fig.colorbar(cf_ref, cax=cax, extend='both')
             cbar.set_label('U850 Change (m/s)', fontsize=12)
 
-        # Central legend at the bottom
         contour_handle = plt.Line2D([0], [0], color='black', lw=0.8, label='Historical Mean U850 (m/s)')
-        fig.legend(handles=[contour_handle],
-                loc='lower center',
-                bbox_to_anchor=(0.5, 0.01),
-                ncol=1,
-                fontsize=12,
-                frameon=True,
-                edgecolor='gray')
+        fig.legend(handles=[contour_handle], loc='lower center', bbox_to_anchor=(0.5, 0.01),
+                   ncol=1, fontsize=12, frameon=True, edgecolor='gray')
 
-        # Erstellt den Text für die historische Periode
         hist_period_text = f"Historical Reference: {config.CMIP6_ANOMALY_REF_START}-{config.CMIP6_ANOMALY_REF_END}"
-
-        # Setzt den neuen, zweizeiligen Titel
-        fig.suptitle(f'Storyline-Based U850 Zonal Wind Change\n({hist_period_text})', fontsize=18, weight='bold')
+        fig.suptitle(f'Storyline-Based U850 Zonal Wind Change for {scenario.upper()}\n({hist_period_text})', fontsize=18, weight='bold')
                 
-        # Adjust layout to make space for titles and legend
         fig.tight_layout(rect=[0.01, 0.04, 0.95, 0.96])
         
-        filepath = os.path.join(config.PLOT_DIR, filename)
-        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        # MODIFIED: Filename now includes scenario
+        filename_out = os.path.join(config.PLOT_DIR, f"storyline_u850_change_maps_{scenario}.png")
+        plt.savefig(filename_out, dpi=300, bbox_inches='tight')
         plt.close(fig)

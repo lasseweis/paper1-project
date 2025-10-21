@@ -2237,16 +2237,15 @@ class Visualizer:
         Creates a comprehensive plot showing the change in return periods for
         low-flow events and the change in interannual standard deviation.
         MODIFIED: Accepts a scenario parameter for filename and title.
-        CORRECTED: Plots each storyline's data points and lines individually within a loop
-                   to ensure perfect horizontal alignment and prevent data mismatching.
-                   Also corrects the y-tick label setting to handle different numbers
-                   of storylines per season.
+        CORRECTED: Enforces a fixed y-axis limit (ylim) on all subplots to guarantee
+                   that each storyline maintains a consistent vertical position,
+                   preventing matplotlib from autoscaling axes with sparse data.
         """
         if not results or not config or 'thresholds' not in results:
             logging.warning(f"Cannot plot return period/std dev change for {scenario}: Missing results or thresholds.")
             return
 
-        logging.info(f"Plotting storyline return period and std dev changes for {scenario}...")
+        logging.info(f"Plotting storyline return period and std dev changes for {scenario} (with fixed y-axis)...")
         Visualizer.ensure_plot_dir_exists()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
@@ -2274,17 +2273,28 @@ class Visualizer:
             'Slow Jet Only', 'Fast Jet Only',
             'Extreme NW', 'Extreme SE'
         ]
+        y_pos_map = {storyline: i for i, storyline in enumerate(storyline_order)}
+        y_ticks = np.arange(len(storyline_order))
+        y_tick_labels = [s.replace(' & ', ' &\n') for s in storyline_order]
+        
+        # --- START DER KORREKTUR ---
+        # Definiere feste Y-Achsen-Grenzwerte. Da die Achse invertiert wird (invert_yaxis),
+        # ist der obere Grenzwert kleiner als der untere. Der Puffer von 0.5 sorgt für Abstand.
+        num_storylines = len(storyline_order)
+        y_limits = (num_storylines - 0.5, -0.5)
+        # --- ENDE DER KORREKTUR ---
         
         gwl_colors = {gwls_to_plot[0]: '#ff7f0e', gwls_to_plot[1]: '#d62728'}
         
         for row, season in enumerate(seasons_to_plot):
-            plot_data_for_season = results.get(gwls_to_plot[0], {}).get(season, {})
-            storylines_for_row = [s for s in storyline_order if s in plot_data_for_season]
-            y_pos_map = {storyline: i for i, storyline in enumerate(storylines_for_row)}
-
             for col, event_key in enumerate(event_keys):
                 ax = axs[row][col]
                 
+                # --- START DER KORREKTUR ---
+                # Wende die festen Y-Achsen-Grenzwerte auf JEDEN Subplot an.
+                ax.set_ylim(y_limits)
+                # --- ENDE DER KORREKTUR ---
+
                 if row == 0:
                     ax.set_title(event_key.replace(" Low-Flow", "\nLow-Flow"), fontsize=11, weight='bold')
                 if col == 0:
@@ -2293,9 +2303,15 @@ class Visualizer:
                 data_season_threshold = results.get('thresholds', {}).get(season, {}).get(event_key)
                 if not data_season_threshold:
                     ax.text(0.5, 0.5, "Data Unavailable", ha='center', va='center', transform=ax.transAxes)
+                    # Dennoch die Achsen-Ticks setzen, damit die leere Box korrekt aussieht
+                    ax.invert_yaxis()
+                    ax.set_yticks(y_ticks)
+                    ax.set_yticklabels([])
+                    if col == 0:
+                        ax.set_yticklabels(y_tick_labels, fontsize=9)
                     continue
                 
-                for storyline in storylines_for_row:
+                for storyline in storyline_order:
                     y_coord = y_pos_map[storyline]
                     
                     event_data_gwl1 = results.get(gwls_to_plot[0], {}).get(season, {}).get(storyline, {}).get(event_key)
@@ -2314,48 +2330,44 @@ class Visualizer:
                         ax.scatter(future_period2, y_coord, color=gwl_colors[gwls_to_plot[1]], s=100, zorder=10, ec='black')
                 
                 ax.invert_yaxis()
-                ax.set_yticks(np.arange(len(storylines_for_row)))
+                ax.set_yticks(y_ticks)
                 ax.grid(axis='y', linestyle='none')
                 ax.grid(axis='x', linestyle=':', which='both')
                 
-                # --- START DER KORREKTUR ---
-                # Die Y-Achsen-Beschriftungen werden jetzt HIER gesetzt.
                 if col == 0:
-                    # Setze die Beschriftungen für die aktuelle Zeile/Saison
-                    ax.set_yticklabels([s.replace(' & ', ' &\n') for s in storylines_for_row], fontsize=9)
+                    ax.set_yticklabels(y_tick_labels, fontsize=9)
                 else:
-                    # Blende die Beschriftungen für die anderen Spalten aus
                     ax.set_yticklabels([])
-                # --- ENDE DER KORREKTUR ---
-
 
             axs[0][0].scatter([], [], color='skyblue', s=80, ec='black', label='Historical')
             axs[0][0].scatter([], [], color=gwl_colors[gwls_to_plot[0]], s=100, ec='black', label=f'Future (+{gwls_to_plot[0]}°C)')
             axs[0][0].scatter([], [], color=gwl_colors[gwls_to_plot[1]], s=100, ec='black', label=f'Future (+{gwls_to_plot[1]}°C)')
 
             ax_std = axs[row][num_event_cols]
+            # --- START DER KORREKTUR ---
+            # Wende die Y-Grenzwerte auch auf das Balkendiagramm an.
+            ax_std.set_ylim(y_limits)
+            # --- ENDE DER KORREKTUR ---
+            
             if row == 0:
                 ax_std.set_title("Interannual\nVariability (σ)", fontsize=11, weight='bold')
 
             hist_std_dev = results.get('thresholds', {}).get(season, {}).get('historical_std_dev')
-            if hist_std_dev is not None and storylines_for_row:
+            if hist_std_dev is not None:
                 bar_height = 0.25
-                future_std_gwl1 = [results.get(gwls_to_plot[0], {}).get(season, {}).get(s, {}).get('future_std_dev', np.nan) for s in storylines_for_row]
-                future_std_gwl2 = [results.get(gwls_to_plot[1], {}).get(season, {}).get(s, {}).get('future_std_dev', np.nan) for s in storylines_for_row]
-                y_pos_for_bars = np.arange(len(storylines_for_row))
-
-                ax_std.barh(y_pos_for_bars + bar_height, future_std_gwl2, height=bar_height, color=gwl_colors[gwls_to_plot[1]], edgecolor='black', zorder=10)
-                ax_std.barh(y_pos_for_bars, future_std_gwl1, height=bar_height, color=gwl_colors[gwls_to_plot[0]], edgecolor='black', zorder=10)
+                future_std_gwl1 = [results.get(gwls_to_plot[0], {}).get(season, {}).get(s, {}).get('future_std_dev', np.nan) for s in storyline_order]
+                future_std_gwl2 = [results.get(gwls_to_plot[1], {}).get(season, {}).get(s, {}).get('future_std_dev', np.nan) for s in storyline_order]
+                
+                ax_std.barh(y_ticks + bar_height/2, future_std_gwl2, height=bar_height, color=gwl_colors[gwls_to_plot[1]], edgecolor='black', zorder=10)
+                ax_std.barh(y_ticks - bar_height/2, future_std_gwl1, height=bar_height, color=gwl_colors[gwls_to_plot[0]], edgecolor='black', zorder=10)
                 
                 ax_std.axvline(x=hist_std_dev, color='skyblue', linestyle='--', linewidth=3, zorder=5, label='Historical σ')
             
             ax_std.invert_yaxis()
-            ax_std.set_yticks([])
+            ax_std.set_yticks(y_ticks)
+            ax_std.set_yticklabels([])
             ax_std.grid(axis='y', linestyle='none')
             ax_std.grid(axis='x', linestyle=':', which='both')
-        
-        # Die Logik hier unten, die den Fehler verursacht hat, wird entfernt,
-        # da sie jetzt oben in der Schleife ist.
         
         for row_axs in axs:
             for i, ax in enumerate(row_axs):

@@ -477,6 +477,17 @@ class ClimateAnalysis:
                 else:
                     logging.info(f"Plot '{inter_rel_plot_filename}' already exists.")
 
+                # --- START: NEUER PLOT ---
+                # --- PLOT: Cross-Season Jet Relationship (nur für ssp585) ---
+                if scenario == 'ssp585':
+                    cross_season_plot_filename = os.path.join(Config.PLOT_DIR, f"cmip6_jet_cross_season_relationship_{scenario}.png")
+                    if not os.path.exists(cross_season_plot_filename):
+                        logging.info(f"Plot '{cross_season_plot_filename}' not found, creating...")
+                        Visualizer.plot_jet_cross_season_relationship(cmip6_results, scenario)
+                    else:
+                        logging.info(f"Plot '{cross_season_plot_filename}' already exists.")
+                # --- ENDE: NEUER PLOT ---
+
                 # --- PLOT: Climate Evolution Timeseries (per scenario) ---
                 evolution_plot_filename = os.path.join(Config.PLOT_DIR, f"climate_indices_evolution_{scenario}.png")
                 if not os.path.exists(evolution_plot_filename):

@@ -162,7 +162,7 @@ class Config:
     STORYLINE_JET_CHANGES_2D = {
         'DJF': {
             2.0: [
-                'Core Mean', 'Neutral',
+                'MMM', 'Neutral',
                 'Fast Jet & Northward Shift',
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
@@ -173,7 +173,7 @@ class Config:
                 'Extreme NW', 'Extreme SE',
             ],
             3.0: [
-                'Core Mean', 'Neutral',
+                'MMM', 'Neutral',
                 'Fast Jet & Northward Shift',
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
@@ -186,7 +186,7 @@ class Config:
         },
         'JJA': {
             2.0: [
-                'Core Mean', 'Neutral',
+                'MMM', 'Neutral',
                 'Fast Jet & Northward Shift',
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
@@ -197,7 +197,7 @@ class Config:
                 'Extreme NW', 'Extreme SE',
             ],
             3.0: [
-                'Core Mean', 'Neutral',
+                'MMM', 'Neutral',
                 'Fast Jet & Northward Shift',
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',

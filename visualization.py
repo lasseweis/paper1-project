@@ -334,7 +334,7 @@ class Visualizer:
         ]
 
         storyline_styles = {
-            'Core Mean':    {'color': '#1f77b4', 'marker': 'X', 's': 60}, 
+            'MMM':    {'color': '#1f77b4', 'marker': 'X', 's': 60}, 
             'Core High':    {'color': '#ff7f0e', 'marker': 'X', 's': 60},
             'Extreme Low':  {'color': '#2ca02c', 'marker': 'P', 's': 70},
             'Extreme High': {'color': '#d62728', 'marker': 'P', 's': 70}
@@ -1244,7 +1244,7 @@ class Visualizer:
         ax.axvline(mmm_x, color='dimgrey', linestyle='-', linewidth=1.0, zorder=6)
 
         if inner_radius:
-            inner_ellipse = mpatches.Ellipse(xy=(mmm_x, mmm_y), width=2*inner_radius*std_dev_x, height=2*inner_radius*std_dev_y, angle=0, edgecolor='black', facecolor='grey', alpha=0.2, linewidth=1.0, zorder=5, label='Core Mean Zone')
+            inner_ellipse = mpatches.Ellipse(xy=(mmm_x, mmm_y), width=2*inner_radius*std_dev_x, height=2*inner_radius*std_dev_y, angle=0, edgecolor='black', facecolor='grey', alpha=0.2, linewidth=1.0, zorder=5, label='Axial Storyline Zone')
             ax.add_patch(inner_ellipse)
             t_80 = np.sqrt(chi2.ppf(0.8, 2) / 2)
             outer_ellipse = mpatches.Ellipse(xy=(mmm_x, mmm_y), width=2*t_80*std_dev_x, height=2*t_80*std_dev_y, angle=0, edgecolor='black', facecolor='none', linestyle='--', linewidth=1.5, zorder=5, label='80% Confidence Region')
@@ -2033,7 +2033,7 @@ class Visualizer:
         }
         
         storyline_display_order = [
-            'Core Mean', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
+            'MMM', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
             'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
             'Slow Jet Only', 'Fast Jet Only',
             'Extreme NW', 'Extreme SE'
@@ -2268,7 +2268,7 @@ class Visualizer:
         plt.style.use('seaborn-v0_8-whitegrid')
 
         storyline_order = [
-            'Core Mean', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
+            'MMM', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
             'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
             'Slow Jet Only', 'Fast Jet Only',
             'Extreme NW', 'Extreme SE'
@@ -2422,7 +2422,7 @@ class Visualizer:
             return
 
         storyline_order = [
-            'Core Mean', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
+            'MMM', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
             'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
             'Slow Jet Only', 'Fast Jet Only', 'Extreme NW', 'Extreme SE'
         ]
@@ -2489,4 +2489,87 @@ class Visualizer:
         # MODIFIED: Filename now includes scenario
         filename_out = os.path.join(config.PLOT_DIR, f"storyline_u850_change_maps_{scenario}.png")
         plt.savefig(filename_out, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        
+    @staticmethod
+    def plot_jet_cross_season_relationship(cmip6_results, scenario):
+        """
+        Creates a scatter plot to analyze the relationship between Summer Jet Latitude
+        and Winter Jet Speed changes for different Global Warming Levels.
+        """
+        logging.info(f"Plotting cross-season jet relationship for {scenario}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        all_deltas = cmip6_results.get('all_individual_model_deltas_for_plot')
+        if not all_deltas:
+            logging.warning("Cannot plot cross-season jet relationship: Missing delta values.")
+            return
+
+        gwls_to_plot = [2.0, 3.0]
+        fig, axs = plt.subplots(1, 2, figsize=(16, 7), sharey=True, squeeze=False)
+        axs = axs.flatten()
+
+        # Define the variables for x and y axes
+        x_jet_key = 'JJA_JetLat'
+        y_jet_key = 'DJF_JetSpeed'
+
+        for i, gwl in enumerate(gwls_to_plot):
+            ax = axs[i]
+            
+            # Extract delta values for the specific variables and GWL
+            x_deltas = all_deltas.get(x_jet_key, {}).get(gwl, {})
+            y_deltas = all_deltas.get(y_jet_key, {}).get(gwl, {})
+
+            if not x_deltas or not y_deltas:
+                ax.text(0.5, 0.5, "Data Missing", ha='center', va='center', transform=ax.transAxes)
+                ax.set_title(f"GWL +{gwl}°C", fontsize=12)
+                continue
+
+            # Align data using common model keys
+            common_models = sorted(list(set(x_deltas.keys()) & set(y_deltas.keys())))
+            if not common_models:
+                ax.text(0.5, 0.5, "No Common Models", ha='center', va='center', transform=ax.transAxes)
+                ax.set_title(f"GWL +{gwl}°C", fontsize=12)
+                continue
+                
+            x_vals = np.array([x_deltas[m] for m in common_models])
+            y_vals = np.array([y_deltas[m] for m in common_models])
+
+            # Plot scatter of individual models
+            ax.scatter(x_vals, y_vals, color='gray', alpha=0.7, s=30, label=f'CMIP6 Models (N={len(common_models)})')
+
+            # Calculate and plot the linear regression fit
+            slope, intercept, r_value, p_value, _ = StatsAnalyzer.calculate_regression(x_vals, y_vals)
+            
+            if not np.isnan(slope):
+                x_fit = np.array(ax.get_xlim())
+                y_fit = intercept + slope * x_fit
+                
+                # Add significance stars to p-value
+                p_str = ""
+                if p_value < 0.01: p_str = "**"
+                elif p_value < 0.05: p_str = "*"
+
+                fit_label = f'Fit (r={r_value:.2f}{p_str})'
+                ax.plot(x_fit, y_fit, color='red', linestyle='--', linewidth=2, label=fit_label)
+
+            # --- Formatting ---
+            ax.set_xlabel('Change in Summer Jet Latitude (°Lat)', fontsize=11)
+            if i == 0:
+                ax.set_ylabel('Change in Winter Jet Speed (m/s)', fontsize=11)
+            
+            ax.set_title(f"GWL +{gwl}°C", fontsize=14, weight='bold')
+            ax.grid(True, linestyle=':', alpha=0.7)
+            ax.axhline(0, color='black', lw=0.8, linestyle='-')
+            ax.axvline(0, color='black', lw=0.8, linestyle='-')
+            ax.legend(fontsize=10)
+
+        ref_period_changes = f"{Config.CMIP6_ANOMALY_REF_START}-{Config.CMIP6_ANOMALY_REF_END}"
+        fig.suptitle(f"Cross-Season Jet Relationship for {scenario.upper()}\n(Changes relative to {ref_period_changes})",
+                     fontsize=16, weight='bold')
+        
+        fig.tight_layout(rect=[0.02, 0.02, 1, 0.93])
+        
+        filename = os.path.join(Config.PLOT_DIR, f"cmip6_jet_cross_season_relationship_{scenario}.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)

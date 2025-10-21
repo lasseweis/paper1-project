@@ -353,7 +353,7 @@ class StorylineAnalyzer:
                         if hist_val is not None and gwl_val is not None and not np.isnan(hist_val) and not np.isnan(gwl_val):
                             delta = gwl_val - hist_val
                             # For precipitation and discharge, calculate percentage change
-                            if ('_pr' in met or '_discharge' in met) and abs(hist_val) > 1e-9:
+                            if '_pr' in met and abs(hist_val) > 1e-9:
                                 delta = (delta / hist_val) * 100.0
                             all_deltas[met][gwl][key] = delta
 

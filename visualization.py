@@ -2107,10 +2107,29 @@ class Visualizer:
                 if not df_spei_list: continue
                 df_spei = pd.pivot_table(pd.DataFrame(df_spei_list),
                                         index='storyline', columns='gwl', values='value').reindex(storyline_display_order).dropna(how='all')
+                
+                # --- START DER KORREKTUR FÜR EINHEITLICHE FARBEN ---
                 if not df_spei.empty:
-                    df_spei.plot(kind='bar', ax=ax, color=gwl_colors, width=0.8)
-                    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right", fontsize=11)
-                    ax.legend().set_title("GWL")
+                    n_gwls = len(df_spei.columns)
+                    total_bar_width = 0.8
+                    bar_width = total_bar_width / n_gwls
+                    x_pos = np.arange(len(df_spei.index))
+
+                    for i, gwl_label in enumerate(df_spei.columns):
+                        # Position für jede Balkengruppe berechnen
+                        offset = (i - (n_gwls - 1) / 2) * bar_width
+                        positions = x_pos + offset
+                        
+                        # Korrekte Farbe aus dem Dictionary holen
+                        color = gwl_colors.get(gwl_label, f'C{i}') # Fallback, falls Schlüssel nicht existiert
+                        
+                        ax.bar(positions, df_spei[gwl_label], width=bar_width, label=gwl_label, color=color)
+                    
+                    # X-Achsen-Ticks und Beschriftungen für die Gruppen setzen
+                    ax.set_xticks(x_pos)
+                    ax.set_xticklabels(df_spei.index, rotation=45, ha="right", fontsize=11)
+                    ax.legend(title="GWL")
+                # --- ENDE DER KORREKTUR ---
 
             # Boxplots + Stripplots für alle anderen Variablen
             else:

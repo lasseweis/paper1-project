@@ -523,10 +523,15 @@ class StorylineAnalyzer:
         """
         Classifies CMIP6 models into 2D storylines using a multi-zone method,
         now including on-axis storylines and two dynamically identified corner extremes.
+        
+        MODIFIED: The 'Core Mean' storyline now includes all models within the
+        80% confidence ellipse, as requested. The 'Neutral' category is no longer
+        populated in the initial classification.
         """
-        logging.info(f"Classifying models into 2D, Axial, and Extreme storylines (Inner Radius: {radius} std. dev.)...")
+        logging.info(f"Classifying models into 2D, Axial, and Extreme storylines (Inner Radius for Axial: {radius} std. dev.)...")
         classification_results = {}
         
+        # This value corresponds to the radius of the 80% confidence ellipse.
         outer_radius_t_value = np.sqrt(chi2.ppf(0.8, 2) / 2)
 
         for season, gwl_storylines in storyline_defs_2d.items():
@@ -558,15 +563,19 @@ class StorylineAnalyzer:
                     storyline_key = f"{season}_{storyline_type}"
                     classification_results[gwl][storyline_key] = []
 
-                # --- PART 1: Classify into Core, Extreme, and Neutral zones ---
+                # --- PART 1: Classify into Core and Extreme zones ---
+                # MODIFICATION: The 'Core Mean' now includes everything within the 80% confidence zone.
+                # The 'Neutral' category is effectively removed from this initial classification step.
                 for model_key in common_models:
                     norm_dist_sq = ((model_deltas_speed[model_key] - mmm_speed) / std_dev_speed)**2 + \
                                 ((model_deltas_lat[model_key] - mmm_lat) / std_dev_lat)**2
                     norm_dist = np.sqrt(norm_dist_sq)
 
-                    if norm_dist <= radius:
+                    # If the model is INSIDE the 80% confidence ellipse, it's 'Core Mean'.
+                    if norm_dist <= outer_radius_t_value:
                         classification_results[gwl][f"{season}_Core Mean"].append(model_key)
-                    elif norm_dist > outer_radius_t_value:
+                    # If the model is OUTSIDE the 80% confidence ellipse, it's an extreme quadrant.
+                    else: # This is equivalent to: elif norm_dist > outer_radius_t_value
                         is_north = model_deltas_lat[model_key] > mmm_lat
                         is_fast = model_deltas_speed[model_key] > mmm_speed
                         storyline_name = ""
@@ -576,10 +585,9 @@ class StorylineAnalyzer:
                         elif is_fast and not is_north: storyline_name = 'Fast Jet & Southward Shift'
                         if storyline_name:
                             classification_results[gwl][f"{season}_{storyline_name}"].append(model_key)
-                    else:
-                        classification_results[gwl][f"{season}_Neutral"].append(model_key)
                 
                 # --- PART 2: Define and classify axial storylines ---
+                # This part remains unchanged as it uses the 'radius' parameter for a different purpose.
                 extreme_storyline_means = {}
                 extreme_types_in_config = [s for s in storylines if 'Shift' in s and 'Core' not in s and 'Only' not in s and 'Extreme' not in s]
                 
@@ -615,13 +623,15 @@ class StorylineAnalyzer:
                     
                     classification_results[gwl][storyline_key] = classified_models_for_axial
                     
+                    # NOTE: This part used to remove models from 'Neutral'. Since 'Neutral' is no longer
+                    # populated in PART 1, this logic is now obsolete but kept for structure.
                     if classified_models_for_axial:
                         neutral_key = f"{season}_Neutral"
                         current_neutral = set(classification_results[gwl].get(neutral_key, []))
                         to_remove = set(classified_models_for_axial)
                         classification_results[gwl][neutral_key] = sorted(list(current_neutral - to_remove))
 
-                # --- NEW BLOCK: PART 3 - Identify and add corner extreme storylines ---
+                # --- PART 3 - Identify and add corner extreme storylines ---
                 if common_models:
                     # Normalize values for fair comparison
                     norm_speed = (speed_values - np.min(speed_values)) / (np.max(speed_values) - np.min(speed_values))
@@ -640,7 +650,6 @@ class StorylineAnalyzer:
                     classification_results[gwl][f"{season}_Extreme SE"] = [model_se]
                     logging.info(f"    - Extreme NW model for {season} @ {gwl}C: {model_nw}")
                     logging.info(f"    - Extreme SE model for {season} @ {gwl}C: {model_se}")
-                # --- END NEW BLOCK ---
 
         return classification_results
 

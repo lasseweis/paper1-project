@@ -300,7 +300,7 @@ class Visualizer:
         plt.close(fig)
 
     @staticmethod
-    def plot_jet_changes_vs_gwl(cmip6_results, filename="cmip6_jet_changes_vs_gwl.png"):
+    def plot_jet_changes_vs_gwl(cmip6_results, scenario, filename=None):
         """
         Plots CMIP6 jet index changes vs GWL, with percentile spread.
         MODIFIED to create a 2x2 grid for Winter/Summer and Speed/Latitude.
@@ -451,7 +451,10 @@ class Visualizer:
 
         fig.tight_layout(rect=[0, 0.06, 1, 0.95])
         
-        fig.suptitle("CMIP6 Projected Jet Changes vs. Global Warming Level", fontsize=16, weight='bold')
+        # Use the scenario argument for a dynamic title and filename
+        fig.suptitle(f"CMIP6 Projected Jet Changes vs. Global Warming Level ({scenario.upper()})", fontsize=16, weight='bold')
+        if filename is None:
+            filename = f"cmip6_jet_changes_vs_gwl_{scenario}.png"
         filepath = os.path.join(Config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -1145,16 +1148,17 @@ class Visualizer:
         ax.legend(fontsize=8)
 
     @staticmethod
-    def plot_cmip6_scatter_comparison(cmip6_results, beta_obs_slopes, gwl_to_plot):
+    def plot_cmip6_scatter_comparison(cmip6_results, beta_obs_slopes, gwl_to_plot, scenario):
         """
         Creates a 2x4 subplot figure comparing CMIP6 projected changes for all 8 combinations
         of jet indices and impact variables at a specific Global Warming Level.
+        MODIFIED: Accepts a scenario parameter for filename and title.
         """
         if not cmip6_results or not beta_obs_slopes:
-            logging.warning("Cannot plot CMIP6 scatter comparison: Missing results or beta slopes.")
+            logging.warning(f"Cannot plot CMIP6 scatter comparison for {scenario}: Missing results or beta slopes.")
             return
             
-        logging.info(f"Plotting expanded 2x4 CMIP6 scatter comparison for {gwl_to_plot}°C GWL...")
+        logging.info(f"Plotting expanded 2x4 CMIP6 scatter comparison for {gwl_to_plot}°C GWL (Scenario: {scenario})...")
         Visualizer.ensure_plot_dir_exists()
 
         # Change subplot layout to 2x4 and adjust figsize to be wider
@@ -1189,16 +1193,17 @@ class Visualizer:
         
         ref_period_changes = f"{Config.CMIP6_ANOMALY_REF_START}-{Config.CMIP6_ANOMALY_REF_END}"
         ref_period_gwl = f"{Config.CMIP6_PRE_INDUSTRIAL_REF_START}-{Config.CMIP6_PRE_INDUSTRIAL_REF_END}"
-        fig.suptitle(f"CMIP6 Projected Changes at {gwl_to_plot}°C Global Warming Level\n"
+        # MODIFIED: Add scenario to the title
+        fig.suptitle(f"CMIP6 Projected Changes at {gwl_to_plot}°C GWL for {scenario.upper()}\n"
                      f"(Changes relative to {ref_period_changes}; GWL defined relative to {ref_period_gwl})",
                      fontsize=16, weight='bold') 
         
-        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
-        fig.tight_layout(rect=[0, 0, 1, 0.94]) # Top-Wert angepasst, um Platz für den längeren Titel zu schaffen
-        filename = os.path.join(Config.PLOT_DIR, f"cmip6_scatter_comparison_gwl_{gwl_to_plot:.1f}_extended.png") # Added _extended to filename
+        fig.tight_layout(rect=[0, 0, 1, 0.94])
+        # MODIFIED: Add scenario to the filename to make it unique
+        filename = os.path.join(Config.PLOT_DIR, f"cmip6_scatter_comparison_gwl_{gwl_to_plot:.1f}_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved expanded CMIP6 scatter comparison plot to {filename}")
+        logging.info(f"Saved expanded CMIP6 scatter comparison plot for {scenario} to {filename}")
 
     @staticmethod
     def _plot_single_jet_relationship_panel(ax, cmip6_results, gwl_to_plot, x_jet_key, y_jet_key, title,
@@ -1477,7 +1482,7 @@ class Visualizer:
         
     @staticmethod
     def plot_model_fidelity_comparison(cmip6_historical_slopes, cmip6_future_temporal_slopes, beta_obs_slopes,
-                                     historical_period, gwls_to_plot):
+                                     historical_period, gwls_to_plot, scenario):
         """
         Creates a comprehensive, publication-quality plot comparing the distribution
         of temporal jet-impact slopes from historical simulations and future projections.
@@ -1578,7 +1583,7 @@ class Visualizer:
         fig.suptitle('Comparison of Jet-Impact Regression Slopes: Historical vs. Future', fontsize=16, weight='bold')
         fig.tight_layout(rect=[0, 0.08, 1, 0.93])
         
-        filename = os.path.join(Config.PLOT_DIR, "cmip6_fidelity_vs_future_temporal_slopes.png")
+        filename = os.path.join(Config.PLOT_DIR, f"cmip6_fidelity_vs_future_temporal_slopes_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved comprehensive temporal slope comparison plot to {filename}")
@@ -2232,6 +2237,10 @@ class Visualizer:
         Creates a comprehensive plot showing the change in return periods for
         low-flow events and the change in interannual standard deviation.
         MODIFIED: Accepts a scenario parameter for filename and title.
+        CORRECTED: Plots each storyline's data points and lines individually within a loop
+                   to ensure perfect horizontal alignment and prevent data mismatching.
+                   Also corrects the y-tick label setting to handle different numbers
+                   of storylines per season.
         """
         if not results or not config or 'thresholds' not in results:
             logging.warning(f"Cannot plot return period/std dev change for {scenario}: Missing results or thresholds.")
@@ -2268,7 +2277,6 @@ class Visualizer:
         
         gwl_colors = {gwls_to_plot[0]: '#ff7f0e', gwls_to_plot[1]: '#d62728'}
         
-        # The rest of the function remains the same until the end...
         for row, season in enumerate(seasons_to_plot):
             plot_data_for_season = results.get(gwls_to_plot[0], {}).get(season, {})
             storylines_for_row = [s for s in storyline_order if s in plot_data_for_season]
@@ -2286,35 +2294,44 @@ class Visualizer:
                 if not data_season_threshold:
                     ax.text(0.5, 0.5, "Data Unavailable", ha='center', va='center', transform=ax.transAxes)
                     continue
-
-                y_coords_plot, hist_periods_plot = [], []
-                future_periods_gwl1_plot, future_periods_gwl2_plot = [], []
-
+                
                 for storyline in storylines_for_row:
                     y_coord = y_pos_map[storyline]
+                    
                     event_data_gwl1 = results.get(gwls_to_plot[0], {}).get(season, {}).get(storyline, {}).get(event_key)
                     event_data_gwl2 = results.get(gwls_to_plot[1], {}).get(season, {}).get(storyline, {}).get(event_key)
                     
                     if event_data_gwl1 and event_data_gwl2:
-                        y_coords_plot.append(y_coord)
-                        hist_periods_plot.append(data_season_threshold['hist_return_period'])
-                        future_periods_gwl1_plot.append(event_data_gwl1['future_return_period'])
-                        future_periods_gwl2_plot.append(event_data_gwl2['future_return_period'])
+                        hist_period = data_season_threshold['hist_return_period']
+                        future_period1 = event_data_gwl1['future_return_period']
+                        future_period2 = event_data_gwl2['future_return_period']
 
-                if y_coords_plot:
-                    ax.hlines(y=y_coords_plot, xmin=hist_periods_plot, xmax=future_periods_gwl1_plot, color='grey', alpha=0.4, lw=1.5, linestyle='--')
-                    ax.hlines(y=y_coords_plot, xmin=future_periods_gwl1_plot, xmax=future_periods_gwl2_plot, color='grey', alpha=0.8, lw=1.5)
+                        ax.hlines(y=y_coord, xmin=hist_period, xmax=future_period1, color='grey', alpha=0.4, lw=1.5, linestyle='--')
+                        ax.hlines(y=y_coord, xmin=future_period1, xmax=future_period2, color='grey', alpha=0.8, lw=1.5)
 
-                    ax.scatter(hist_periods_plot, y_coords_plot, color='skyblue', s=80, zorder=10, ec='black', label='Historical')
-                    ax.scatter(future_periods_gwl1_plot, y_coords_plot, color=gwl_colors[gwls_to_plot[0]], s=100, zorder=10, ec='black', label=f'Future (+{gwls_to_plot[0]}°C)')
-                    ax.scatter(future_periods_gwl2_plot, y_coords_plot, color=gwl_colors[gwls_to_plot[1]], s=100, zorder=10, ec='black', label=f'Future (+{gwls_to_plot[1]}°C)')
+                        ax.scatter(hist_period, y_coord, color='skyblue', s=80, zorder=10, ec='black')
+                        ax.scatter(future_period1, y_coord, color=gwl_colors[gwls_to_plot[0]], s=100, zorder=10, ec='black')
+                        ax.scatter(future_period2, y_coord, color=gwl_colors[gwls_to_plot[1]], s=100, zorder=10, ec='black')
                 
                 ax.invert_yaxis()
                 ax.set_yticks(np.arange(len(storylines_for_row)))
                 ax.grid(axis='y', linestyle='none')
                 ax.grid(axis='x', linestyle=':', which='both')
-                if col > 0:
+                
+                # --- START DER KORREKTUR ---
+                # Die Y-Achsen-Beschriftungen werden jetzt HIER gesetzt.
+                if col == 0:
+                    # Setze die Beschriftungen für die aktuelle Zeile/Saison
+                    ax.set_yticklabels([s.replace(' & ', ' &\n') for s in storylines_for_row], fontsize=9)
+                else:
+                    # Blende die Beschriftungen für die anderen Spalten aus
                     ax.set_yticklabels([])
+                # --- ENDE DER KORREKTUR ---
+
+
+            axs[0][0].scatter([], [], color='skyblue', s=80, ec='black', label='Historical')
+            axs[0][0].scatter([], [], color=gwl_colors[gwls_to_plot[0]], s=100, ec='black', label=f'Future (+{gwls_to_plot[0]}°C)')
+            axs[0][0].scatter([], [], color=gwl_colors[gwls_to_plot[1]], s=100, ec='black', label=f'Future (+{gwls_to_plot[1]}°C)')
 
             ax_std = axs[row][num_event_cols]
             if row == 0:
@@ -2336,10 +2353,9 @@ class Visualizer:
             ax_std.set_yticks([])
             ax_std.grid(axis='y', linestyle='none')
             ax_std.grid(axis='x', linestyle=':', which='both')
-
-        if storylines_for_row:
-            axs[0][0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines_for_row], fontsize=9)
-            axs[1][0].set_yticklabels([s.replace(' & ', ' &\n') for s in storylines_for_row], fontsize=9)
+        
+        # Die Logik hier unten, die den Fehler verursacht hat, wird entfernt,
+        # da sie jetzt oben in der Schleife ist.
         
         for row_axs in axs:
             for i, ax in enumerate(row_axs):
@@ -2371,9 +2387,9 @@ class Visualizer:
         by_label = dict(zip(labels, handles))
         fig.legend(by_label.values(), by_label.keys(), loc='lower center', bbox_to_anchor=(0.5, 0.0), ncol=4, fontsize=12)
         
-        # MODIFIED: Title and filename
         fig.suptitle(f"Change in Return Period and Variability of Low-Flow Events for {scenario.upper()}",
                      fontsize=16, weight='bold')
+        
         fig.tight_layout(rect=[0.02, 0.05, 0.98, 0.94], h_pad=2, w_pad=1.5)
         
         filename = os.path.join(config.PLOT_DIR, f"storyline_discharge_return_period_comparison_FULL_{scenario}.png")

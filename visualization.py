@@ -2271,99 +2271,96 @@ class Visualizer:
         """
         Creates a comprehensive plot showing the change in return periods for
         low-flow events and the change in interannual standard deviation.
-        MODIFIED: Accepts a scenario parameter for filename and title.
-        CORRECTED: Enforces a fixed y-axis limit (ylim) on all subplots to guarantee
-                   that each storyline maintains a consistent vertical position,
-                   preventing matplotlib from autoscaling axes with sparse data.
+        MODIFIED: Now visualizes individual model members for each storyline using
+        boxplots with an overlaid stripplot.
         """
         if not results or not config or 'thresholds' not in results:
             logging.warning(f"Cannot plot return period/std dev change for {scenario}: Missing results or thresholds.")
             return
 
-        logging.info(f"Plotting storyline return period and std dev changes for {scenario} (with fixed y-axis)...")
+        logging.info(f"Plotting storyline return period and std dev changes for {scenario} (boxplots with stripplot)...")
         Visualizer.ensure_plot_dir_exists()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
-        if len(gwls_to_plot) != 2:
-            logging.error("This plot function is designed for exactly two GWLs.")
-            return
-
         seasons_to_plot = ['Winter', 'Summer']
         event_keys = list(results.get('thresholds', {}).get(seasons_to_plot[0], {}).keys())
-        if 'historical_std_dev' in event_keys:
-            event_keys.remove('historical_std_dev')
+        if 'historical_std_dev' in event_keys: event_keys.remove('historical_std_dev')
 
         num_event_cols = len(event_keys)
         num_total_cols = num_event_cols + 1
         fig = plt.figure(figsize=(5.5 * num_total_cols, 12))
-        gs = matplotlib.gridspec.GridSpec(len(seasons_to_plot), num_total_cols, 
-                                        width_ratios=[5] * num_event_cols + [3.5])
+        gs = matplotlib.gridspec.GridSpec(len(seasons_to_plot), num_total_cols, width_ratios=[5] * num_event_cols + [3.5])
         axs = [[fig.add_subplot(gs[r, c]) for c in range(num_total_cols)] for r in range(len(seasons_to_plot))]
-
+        
         plt.style.use('seaborn-v0_8-whitegrid')
 
         storyline_order = [
             'MMM', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
             'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
-            'Slow Jet Only', 'Fast Jet Only',
-            'Extreme NW', 'Extreme SE'
+            'Slow Jet Only', 'Fast Jet Only', 'Extreme NW', 'Extreme SE'
         ]
-        y_pos_map = {storyline: i for i, storyline in enumerate(storyline_order)}
-        y_ticks = np.arange(len(storyline_order))
-        y_tick_labels = [s.replace(' & ', ' &\n') for s in storyline_order]
         
-        # --- START DER KORREKTUR ---
-        # Definiere feste Y-Achsen-Grenzwerte. Da die Achse invertiert wird (invert_yaxis),
-        # ist der obere Grenzwert kleiner als der untere. Der Puffer von 0.5 sorgt für Abstand.
         num_storylines = len(storyline_order)
         y_limits = (num_storylines - 0.5, -0.5)
-        # --- ENDE DER KORREKTUR ---
+        y_ticks = np.arange(len(storyline_order))
+        y_tick_labels = [s.replace(' & ', ' &\n') for s in storyline_order]
+
+        gwl_colors = {f'+{gwls_to_plot[0]}°C': '#ff7f0e', f'+{gwls_to_plot[1]}°C': '#d62728'}
         
-        gwl_colors = {gwls_to_plot[0]: '#ff7f0e', gwls_to_plot[1]: '#d62728'}
+        # --- Datenaufbereitung (bleibt unverändert) ---
+        plot_data_list = []
+        for gwl in gwls_to_plot:
+            for season in seasons_to_plot:
+                for event_key in event_keys:
+                    for storyline in storyline_order:
+                        event_data = results.get(gwl, {}).get(season, {}).get(storyline, {}).get(event_key)
+                        if event_data and 'future_return_periods_all_models' in event_data:
+                            for model_period in event_data['future_return_periods_all_models']:
+                                if np.isfinite(model_period):
+                                    plot_data_list.append({
+                                        'season': season,
+                                        'event': event_key,
+                                        'storyline': storyline,
+                                        'gwl': f'+{gwl}°C',
+                                        'return_period': model_period,
+                                    })
         
+        if not plot_data_list:
+            logging.warning("No finite return period data to plot for individual models.")
+            plt.close(fig)
+            return
+
+        df_plot = pd.DataFrame(plot_data_list)
+        max_return_period_for_plot = 1000
+        df_plot_clipped = df_plot[df_plot['return_period'] <= max_return_period_for_plot].copy()
+        
+        # --- Plot-Schleife für Wiederkehrperioden (mit Boxplot + Stripplot) ---
         for row, season in enumerate(seasons_to_plot):
             for col, event_key in enumerate(event_keys):
                 ax = axs[row][col]
-                
-                # --- START DER KORREKTUR ---
-                # Wende die festen Y-Achsen-Grenzwerte auf JEDEN Subplot an.
                 ax.set_ylim(y_limits)
-                # --- ENDE DER KORREKTUR ---
 
-                if row == 0:
-                    ax.set_title(event_key.replace(" Low-Flow", "\nLow-Flow"), fontsize=11, weight='bold')
-                if col == 0:
-                    ax.set_ylabel(season, fontsize=14, weight='bold')
-
-                data_season_threshold = results.get('thresholds', {}).get(season, {}).get(event_key)
-                if not data_season_threshold:
-                    ax.text(0.5, 0.5, "Data Unavailable", ha='center', va='center', transform=ax.transAxes)
-                    # Dennoch die Achsen-Ticks setzen, damit die leere Box korrekt aussieht
-                    ax.invert_yaxis()
-                    ax.set_yticks(y_ticks)
-                    ax.set_yticklabels([])
-                    if col == 0:
-                        ax.set_yticklabels(y_tick_labels, fontsize=9)
-                    continue
+                data_subset = df_plot_clipped[(df_plot_clipped['season'] == season) & (df_plot_clipped['event'] == event_key)]
                 
-                for storyline in storyline_order:
-                    y_coord = y_pos_map[storyline]
+                if not data_subset.empty:
+                    # 1. Zeichne die Boxplots
+                    sns.boxplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
+                                order=storyline_order, palette=gwl_colors,
+                                ax=ax, linewidth=1.2, showfliers=False, orient='h',
+                                boxprops={'alpha': 0.85})
                     
-                    event_data_gwl1 = results.get(gwls_to_plot[0], {}).get(season, {}).get(storyline, {}).get(event_key)
-                    event_data_gwl2 = results.get(gwls_to_plot[1], {}).get(season, {}).get(storyline, {}).get(event_key)
-                    
-                    if event_data_gwl1 and event_data_gwl2:
-                        hist_period = data_season_threshold['hist_return_period']
-                        future_period1 = event_data_gwl1['future_return_period']
-                        future_period2 = event_data_gwl2['future_return_period']
+                    # 2. Lege die einzelnen Punkte darüber
+                    sns.stripplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
+                                order=storyline_order, palette=gwl_colors,
+                                ax=ax, dodge=True, jitter=0.15, size=4, 
+                                edgecolor='gray', linewidth=0.5, alpha=0.9, orient='h')
 
-                        ax.hlines(y=y_coord, xmin=hist_period, xmax=future_period1, color='grey', alpha=0.4, lw=1.5, linestyle='--')
-                        ax.hlines(y=y_coord, xmin=future_period1, xmax=future_period2, color='grey', alpha=0.8, lw=1.5)
+                # Zeichne die historische Baseline als vertikale Linie
+                hist_period = results.get('thresholds', {}).get(season, {}).get(event_key, {}).get('hist_return_period')
+                if hist_period is not None and np.isfinite(hist_period):
+                    ax.axvline(x=hist_period, color='skyblue', linestyle='--', linewidth=3, zorder=5)
 
-                        ax.scatter(hist_period, y_coord, color='skyblue', s=80, zorder=10, ec='black')
-                        ax.scatter(future_period1, y_coord, color=gwl_colors[gwls_to_plot[0]], s=100, zorder=10, ec='black')
-                        ax.scatter(future_period2, y_coord, color=gwl_colors[gwls_to_plot[1]], s=100, zorder=10, ec='black')
-                
+                # Formatierung
                 ax.invert_yaxis()
                 ax.set_yticks(y_ticks)
                 ax.grid(axis='y', linestyle='none')
@@ -2371,18 +2368,22 @@ class Visualizer:
                 
                 if col == 0:
                     ax.set_yticklabels(y_tick_labels, fontsize=9)
+                    ax.set_ylabel(season, fontsize=14, weight='bold')
                 else:
                     ax.set_yticklabels([])
+                    ax.set_ylabel('')
 
-            axs[0][0].scatter([], [], color='skyblue', s=80, ec='black', label='Historical')
-            axs[0][0].scatter([], [], color=gwl_colors[gwls_to_plot[0]], s=100, ec='black', label=f'Future (+{gwls_to_plot[0]}°C)')
-            axs[0][0].scatter([], [], color=gwl_colors[gwls_to_plot[1]], s=100, ec='black', label=f'Future (+{gwls_to_plot[1]}°C)')
+                if row == 0:
+                    ax.set_title(event_key.replace(" Low-Flow", "\nLow-Flow"), fontsize=11, weight='bold')
+                
+                # Die automatisch erstellte Legende entfernen, wir erstellen eine zentrale Legende
+                if ax.get_legend() is not None:
+                    ax.get_legend().remove()
 
+        # --- Plot-Schleife für die Standardabweichung (bleibt ein Balkendiagramm) ---
+        for row, season in enumerate(seasons_to_plot):
             ax_std = axs[row][num_event_cols]
-            # --- START DER KORREKTUR ---
-            # Wende die Y-Grenzwerte auch auf das Balkendiagramm an.
             ax_std.set_ylim(y_limits)
-            # --- ENDE DER KORREKTUR ---
             
             if row == 0:
                 ax_std.set_title("Interannual\nVariability (σ)", fontsize=11, weight='bold')
@@ -2393,17 +2394,18 @@ class Visualizer:
                 future_std_gwl1 = [results.get(gwls_to_plot[0], {}).get(season, {}).get(s, {}).get('future_std_dev', np.nan) for s in storyline_order]
                 future_std_gwl2 = [results.get(gwls_to_plot[1], {}).get(season, {}).get(s, {}).get('future_std_dev', np.nan) for s in storyline_order]
                 
-                ax_std.barh(y_ticks + bar_height/2, future_std_gwl2, height=bar_height, color=gwl_colors[gwls_to_plot[1]], edgecolor='black', zorder=10)
-                ax_std.barh(y_ticks - bar_height/2, future_std_gwl1, height=bar_height, color=gwl_colors[gwls_to_plot[0]], edgecolor='black', zorder=10)
+                ax_std.barh(y_ticks + bar_height/2, future_std_gwl2, height=bar_height, color=gwl_colors[f'+{gwls_to_plot[1]}°C'], edgecolor='black', zorder=10)
+                ax_std.barh(y_ticks - bar_height/2, future_std_gwl1, height=bar_height, color=gwl_colors[f'+{gwls_to_plot[0]}°C'], edgecolor='black', zorder=10)
                 
-                ax_std.axvline(x=hist_std_dev, color='skyblue', linestyle='--', linewidth=3, zorder=5, label='Historical σ')
+                ax_std.axvline(x=hist_std_dev, color='skyblue', linestyle='--', linewidth=3, zorder=5)
             
             ax_std.invert_yaxis()
             ax_std.set_yticks(y_ticks)
             ax_std.set_yticklabels([])
             ax_std.grid(axis='y', linestyle='none')
             ax_std.grid(axis='x', linestyle=':', which='both')
-        
+
+        # --- Finale Formatierung der gesamten Figur ---
         for row_axs in axs:
             for i, ax in enumerate(row_axs):
                 if i < num_event_cols:
@@ -2411,37 +2413,30 @@ class Visualizer:
                     ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
                     ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
                     ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 500, 1000])
+                    ax.set_xlim(left=0.8, right=max_return_period_for_plot * 1.5)
 
         for col in range(num_event_cols):
             axs[-1][col].set_xlabel('Return Period (Years)', fontsize=11)
         axs[-1][-1].set_xlabel('Std. Dev. (m³/s)', fontsize=11)
         
-        handles, labels = axs[0][0].get_legend_handles_labels()
-        
-        std_handles, _ = axs[0][-1].get_legend_handles_labels()
-        if std_handles:
-            hist_sigma_handle = next((h for h in std_handles if isinstance(h, plt.Line2D) and h.get_color() == 'skyblue'), None)
-            if hist_sigma_handle:
-                handles.append(hist_sigma_handle)
-                hist_std_winter = results.get('thresholds', {}).get('Winter', {}).get('historical_std_dev')
-                hist_std_summer = results.get('thresholds', {}).get('Summer', {}).get('historical_std_dev')
-                
-                if hist_std_winter is not None and hist_std_summer is not None:
-                    labels.append(f'Historical σ (Winter: {hist_std_winter:.0f}, Summer: {hist_std_summer:.0f})')
-                else:
-                    labels.append('Historical σ')
-
-        by_label = dict(zip(labels, handles))
-        fig.legend(by_label.values(), by_label.keys(), loc='lower center', bbox_to_anchor=(0.5, 0.0), ncol=4, fontsize=12)
+        # Erstelle eine saubere, zentrale Legende
+        legend_handles = [
+            plt.Line2D([0], [0], color='skyblue', linestyle='--', linewidth=3, label='Historical'),
+            mpatches.Patch(color=gwl_colors[f'+{gwls_to_plot[0]}°C'], label=f'Future (+{gwls_to_plot[0]}°C)'),
+            mpatches.Patch(color=gwl_colors[f'+{gwls_to_plot[1]}°C'], label=f'Future (+{gwls_to_plot[1]}°C)')
+        ]
+        fig.legend(handles=legend_handles, loc='lower center', bbox_to_anchor=(0.5, 0.0), ncol=3, fontsize=12)
         
         fig.suptitle(f"Change in Return Period and Variability of Low-Flow Events for {scenario.upper()}",
-                     fontsize=16, weight='bold')
+                    fontsize=16, weight='bold')
         
         fig.tight_layout(rect=[0.02, 0.05, 0.98, 0.94], h_pad=2, w_pad=1.5)
         
-        filename = os.path.join(config.PLOT_DIR, f"storyline_discharge_return_period_comparison_FULL_{scenario}.png")
+        # Der Dateiname bleibt gleich, da diese verbesserte Version die vorherige ersetzt
+        filename = os.path.join(config.PLOT_DIR, f"storyline_discharge_return_period_comparison_boxplots_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
+        logging.info(f"Saved return period boxplot with stripplot to {filename}")
         
     @staticmethod
     def plot_storyline_wind_change_maps(map_data, config, scenario, filename="storyline_u850_change_maps.png"):

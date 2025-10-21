@@ -526,35 +526,21 @@ class ClimateAnalysis:
                 else:
                     logging.info(f"Plot '{storyline_map_plot_filename}' already exists.")
 
-                # --- CALCULATE FINAL IMPACTS (per scenario) ---
-                final_impacts_pr_tas = storyline_analyzer.calculate_storyline_impacts(cmip6_results=cmip6_results)
-                direct_impacts_discharge = storyline_analyzer.calculate_direct_discharge_impacts(cmip6_results=cmip6_results, config=Config())
-                
-                storyline_spei_impacts = {}
-                if final_impacts_pr_tas:
-                    pr_box_monthly_hist = DataProcessor.calculate_spatial_mean(datasets_reanalysis['ERA5_pr_monthly'], Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
-                    tas_box_monthly_hist = DataProcessor.calculate_spatial_mean(datasets_reanalysis['ERA5_tas_monthly'], Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
-                    if pr_box_monthly_hist is not None and tas_box_monthly_hist is not None:
-                        storyline_spei_impacts = storyline_analyzer.calculate_storyline_spei_impacts(
-                            storyline_impacts=final_impacts_pr_tas,
-                            historical_monthly_data={'pr_box_monthly': pr_box_monthly_hist, 'tas_box_monthly': tas_box_monthly_hist},
-                            config=Config()
-                        )
-
+                # =========================================================================
+                # === HIER IST DIE GEÄNDERTE STELLE FÜR DEN PLOT-AUFRUF ===
+                # =========================================================================
                 # --- PLOT: Storyline Impacts Bar Chart (per scenario) ---
-                impacts_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_impacts_summary_{scenario}.png")
+                # Der neue Dateiname reflektiert den geänderten Plot-Typ
+                impacts_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_impacts_summary_4x2_boxplots_{scenario}.png")
                 if not os.path.exists(impacts_plot_filename):
-                    if final_impacts_pr_tas and direct_impacts_discharge:
-                        storyline_correlations = storyline_analyzer.calculate_storyline_impact_correlation(
-                            storyline_spei_impacts=storyline_spei_impacts,
-                            direct_impacts_discharge=direct_impacts_discharge,
-                            storyline_pr_tas_impacts=final_impacts_pr_tas,
-                            config=Config()
-                        )
+                    logging.info(f"Plot '{impacts_plot_filename}' not found, creating...")
+                    if cmip6_results:
+                        # Die Korrelationen können optional immer noch berechnet und übergeben werden
+                        storyline_correlations = None # Optional
+
+                        # WICHTIG: Stellen Sie sicher, dass Visualizer die Klassen StorylineAnalyzer und ClimateAnalysis importiert
                         Visualizer.plot_storyline_impact_barchart_with_discharge(
-                            final_impacts=final_impacts_pr_tas,
-                            discharge_impacts=direct_impacts_discharge,
-                            spei_impacts=storyline_spei_impacts,
+                            cmip6_results=cmip6_results, # Haupt-Ergebnis-Dictionary übergeben
                             discharge_data_historical=discharge_data_loaded,
                             config=Config(),
                             scenario=scenario,
@@ -562,6 +548,9 @@ class ClimateAnalysis:
                         )
                 else:
                     logging.info(f"Plot '{impacts_plot_filename}' already exists.")
+                # =========================================================================
+                # === ENDE DER ÄNDERUNG ===
+                # =========================================================================
 
                 # --- PLOT: Storyline Discharge Return Periods (per scenario) ---
                 return_period_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_discharge_return_period_change_{scenario}.png")

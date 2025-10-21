@@ -538,10 +538,10 @@ class ClimateAnalysis:
                         # Die Korrelationen können optional immer noch berechnet und übergeben werden
                         storyline_correlations = None # Optional
 
-                        # WICHTIG: Stellen Sie sicher, dass Visualizer die Klassen StorylineAnalyzer und ClimateAnalysis importiert
                         Visualizer.plot_storyline_impact_barchart_with_discharge(
-                            cmip6_results=cmip6_results, # Haupt-Ergebnis-Dictionary übergeben
+                            cmip6_results=cmip6_results,
                             discharge_data_historical=discharge_data_loaded,
+                            reanalysis_data=datasets_reanalysis,  # HIER WIRD DAS NEUE ARGUMENT ÜBERGEBEN
                             config=Config(),
                             scenario=scenario,
                             storyline_correlations=storyline_correlations

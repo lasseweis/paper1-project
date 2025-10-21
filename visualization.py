@@ -26,7 +26,6 @@ import json
 import seaborn as sns
 
 # Import local modules
-from main import ClimateAnalysis 
 from storyline import StorylineAnalyzer 
 from config import Config
 from stats_analyzer import StatsAnalyzer
@@ -1997,7 +1996,7 @@ class Visualizer:
         logging.info(f"Saved vertical storyline impacts summary plot to {filename}")
 
     @staticmethod
-    def plot_storyline_impact_barchart_with_discharge(cmip6_results, discharge_data_historical, config, scenario, storyline_correlations=None):
+    def plot_storyline_impact_barchart_with_discharge(cmip6_results, discharge_data_historical, reanalysis_data, config, scenario, storyline_correlations=None):
         """
         Creates a 4x2 plot to visualize storyline impacts for Temp, Precip, Discharge, and SPEI.
         For TAS, PR, and Discharge, it shows boxplots of the model distributions and individual model members as points.
@@ -2016,9 +2015,8 @@ class Visualizer:
         classification = cmip6_results.get('storyline_classification_2d', {})
         
         # Holen der reanalysierten Daten für die SPEI-Baseline
-        era5_data = ClimateAnalysis.process_era5_data()
-        pr_box_monthly_hist = DataProcessor.calculate_spatial_mean(era5_data.get('ERA5_pr_monthly'), config.BOX_LAT_MIN, config.BOX_LAT_MAX, config.BOX_LON_MIN, config.BOX_LON_MAX)
-        tas_box_monthly_hist = DataProcessor.calculate_spatial_mean(era5_data.get('ERA5_tas_monthly'), config.BOX_LAT_MIN, config.BOX_LAT_MAX, config.BOX_LON_MIN, config.BOX_LON_MAX)
+        pr_box_monthly_hist = DataProcessor.calculate_spatial_mean(reanalysis_data.get('ERA5_pr_monthly'), config.BOX_LAT_MIN, config.BOX_LAT_MAX, config.BOX_LON_MIN, config.BOX_LON_MAX)
+        tas_box_monthly_hist = DataProcessor.calculate_spatial_mean(reanalysis_data.get('ERA5_tas_monthly'), config.BOX_LAT_MIN, config.BOX_LAT_MAX, config.BOX_LON_MIN, config.BOX_LON_MAX)
 
         spei_impacts = {}
         if pr_box_monthly_hist is not None and tas_box_monthly_hist is not None:

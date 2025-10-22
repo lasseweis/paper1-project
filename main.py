@@ -155,6 +155,7 @@ class ClimateAnalysis:
                         result[f'{season_lower}_mean'] = season_ts.mean().item()
                         result[f'{season_lower}_lowflow_threshold'] = 1064
                         result[f'{season_lower}_lowflow_threshold_30'] = 1417
+                        result[f'{season_lower}_lowflow_lnwl'] = 970  # <-- NEU: LNWL-Schwellenwert
             
             high_flow_threshold = df['discharge'].quantile(0.90)
             low_flow_threshold_overall = df['discharge'].quantile(0.10)
@@ -171,7 +172,8 @@ class ClimateAnalysis:
                     if season_data is not None:
                         result[f'{season.lower()}_extreme_flow'] = DataProcessor.detrend_data(season_data)
 
-            logging.info(f"Discharge processing complete. Using fixed low-flow thresholds: 1417 m³/s (30th) and 1064 m³/s (10th).")
+            # <-- GEÄNDERT: Log-Nachricht aktualisiert
+            logging.info(f"Discharge processing complete. Using fixed low-flow thresholds: 1417 m³/s (30th), 1064 m³/s (10th), and 970 m³/s (LNWL).")
             return result
 
         except Exception as e:

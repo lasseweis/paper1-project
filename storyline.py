@@ -2021,17 +2021,19 @@ class StorylineAnalyzer:
             
             moderate_fixed_threshold = discharge_thresholds.get(f'{season_lower}_lowflow_threshold_30')
             extreme_fixed_threshold = discharge_thresholds.get(f'{season_lower}_lowflow_threshold')
+            lnwl_fixed_threshold = discharge_thresholds.get(f'{season_lower}_lowflow_lnwl') # <-- NEU
 
             event_definitions = {
                 f'Moderate (-1σ)': {'val': mean - 1 * std},
                 f'Severe (-2σ)': {'val': mean - 2 * std},
                 f'Moderate Low-Flow (<{moderate_fixed_threshold} m³/s)': {'val': moderate_fixed_threshold},
-                f'Extreme Low-Flow (<{extreme_fixed_threshold} m³/s)': {'val': extreme_fixed_threshold}
+                f'Extreme Low-Flow (<{extreme_fixed_threshold} m³/s)': {'val': extreme_fixed_threshold},
+                f'Low Navigable (LNWL) (<{lnwl_fixed_threshold} m³/s)': {'val': lnwl_fixed_threshold} # <-- NEU
             }
             
             season_thresholds = {}
             for name, data in event_definitions.items():
-                if data['val'] is None: continue
+                if data['val'] is None: continue # <-- NEU: Stellt sicher, dass kein Fehler auftritt, falls ein Threshold fehlt
                 
                 hist_count = (hist_seasonal < data['val']).sum().item()
                 hist_freq = hist_count / total_years if total_years > 0 else 0
@@ -2052,6 +2054,9 @@ class StorylineAnalyzer:
         if not all([storyline_classification, metric_timeseries, gwl_years]):
             logging.error("Missing CMIP6 data for storyline discharge analysis.")
             return None
+
+        # (Der Rest der Funktion bleibt unverändert, da die Schleifen 
+        # dynamisch über die 'event_definitions' iterieren)
 
         for gwl in config.GLOBAL_WARMING_LEVELS:
             results[gwl] = {}

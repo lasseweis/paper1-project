@@ -2190,8 +2190,11 @@ class Visualizer:
                 if hist_mean:
                     thresh30 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold_30')
                     thresh10 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold')
+                    threshLNWL = discharge_data_historical.get(f'{season_lower}_lowflow_lnwl') # <-- NEU
+                    
                     if thresh30: ax.axhline(thresh30-hist_mean, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5)
                     if thresh10: ax.axhline(thresh10-hist_mean, color='black', linestyle=':', linewidth=2.5, zorder=5)
+                    if threshLNWL: ax.axhline(threshLNWL-hist_mean, color='red', linestyle='-.', linewidth=2.5, zorder=5) # <-- NEU
 
         # --- 5. Finale Formatierung der gesamten Figur ---
         handles, labels = axs[0, 0].get_legend_handles_labels()
@@ -2199,9 +2202,14 @@ class Visualizer:
         
         low_flow_10_val = discharge_data_historical.get('winter_lowflow_threshold', 'N/A')
         low_flow_30_val = discharge_data_historical.get('winter_lowflow_threshold_30', 'N/A')
+        lnwl_val = discharge_data_historical.get('winter_lowflow_lnwl', 'N/A') # <-- NEU
+        
         if low_flow_10_val != 'N/A':
             unique_labels_map[f'Moderate Low-Flow ({low_flow_30_val} m³/s)'] = plt.Line2D([0], [0], color='saddlebrown', linestyle='dotted', linewidth=2.5)
             unique_labels_map[f'Extreme Low-Flow ({low_flow_10_val} m³/s)'] = plt.Line2D([0], [0], color='black', linestyle=':', linewidth=2.5)
+        
+        if lnwl_val != 'N/A': # <-- NEU
+            unique_labels_map[f'Low Navigable (LNWL) ({lnwl_val} m³/s)'] = plt.Line2D([0], [0], color='red', linestyle='-.', linewidth=2.5) # <-- NEU
 
         fig.legend(unique_labels_map.values(), unique_labels_map.keys(), loc='lower center', bbox_to_anchor=(0.5, 0.08), ncol=2, fontsize=12, frameon=False)
         

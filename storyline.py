@@ -529,7 +529,7 @@ class StorylineAnalyzer:
         classification_results = {}
         
         # This value corresponds to the radius of the 80% confidence ellipse.
-        outer_radius_t_value = np.sqrt(chi2.ppf(0.8, 2) / 2)
+        outer_radius_t_value = np.sqrt(chi2.ppf(0.5, 2) / 2)
 
         for season, gwl_storylines in storyline_defs_2d.items():
             jet_speed_key = f'{season}_JetSpeed'

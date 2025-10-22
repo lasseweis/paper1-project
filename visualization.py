@@ -2272,7 +2272,7 @@ class Visualizer:
         Creates a comprehensive plot showing the change in return periods for
         low-flow events and the change in interannual standard deviation.
         MODIFIED: Now visualizes individual model members for each storyline using
-        boxplots with an overlaid stripplot.
+        boxplots with an overlaid stripplot AND adds n=X/Y annotations.
         """
         if not results or not config or 'thresholds' not in results:
             logging.warning(f"Cannot plot return period/std dev change for {scenario}: Missing results or thresholds.")
@@ -2287,9 +2287,11 @@ class Visualizer:
         if 'historical_std_dev' in event_keys: event_keys.remove('historical_std_dev')
 
         num_event_cols = len(event_keys)
+        # <<< MODIFIZIERT >>> Verbreitere die Plots ein wenig, um Platz für Text zu schaffen
         num_total_cols = num_event_cols + 1
-        fig = plt.figure(figsize=(5.5 * num_total_cols, 12))
-        gs = matplotlib.gridspec.GridSpec(len(seasons_to_plot), num_total_cols, width_ratios=[5] * num_event_cols + [3.5])
+        fig = plt.figure(figsize=(6 * num_total_cols, 12)) # Breite von 5.5 auf 6 erhöht
+        # <<< MODIFIZIERT >>> width_ratios angepasst, um mehr Platz für die Anmerkungen zu geben
+        gs = matplotlib.gridspec.GridSpec(len(seasons_to_plot), num_total_cols, width_ratios=[6] * num_event_cols + [3.5])
         axs = [[fig.add_subplot(gs[r, c]) for c in range(num_total_cols)] for r in range(len(seasons_to_plot))]
         
         plt.style.use('seaborn-v0_8-whitegrid')
@@ -2376,9 +2378,35 @@ class Visualizer:
                 if row == 0:
                     ax.set_title(event_key.replace(" Low-Flow", "\nLow-Flow"), fontsize=11, weight='bold')
                 
-                # Die automatisch erstellte Legende entfernen, wir erstellen eine zentrale Legende
                 if ax.get_legend() is not None:
                     ax.get_legend().remove()
+                
+                # <<< --- NEUER CODE-BLOCK START --- >>>
+                # Füge n=X/Y Anmerkungen hinzu
+                for i, storyline in enumerate(storyline_order):
+                    y_base = y_ticks[i] # Die Y-Position der Storyline
+                    
+                    # Daten für GWL 1
+                    event_data_1 = results.get(gwls_to_plot[0], {}).get(season, {}).get(storyline, {}).get(event_key)
+                    if event_data_1 and 'model_count_X' in event_data_1:
+                        X1, Y1 = event_data_1['model_count_X'], event_data_1['model_count_Y']
+                        text_1 = f"n={X1}/{Y1}"
+                        # Platziere den Text rechtsbündig bei 98% der Y-Achsen-Transformation (innerhalb des Plots)
+                        ax.text(0.98, y_base - 0.2, text_1, transform=ax.get_yaxis_transform(), 
+                                horizontalalignment='right', fontsize=7, weight='bold', color=gwl_colors[f'+{gwls_to_plot[0]}°C'],
+                                bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
+
+                    # Daten für GWL 2
+                    event_data_2 = results.get(gwls_to_plot[1], {}).get(season, {}).get(storyline, {}).get(event_key)
+                    if event_data_2 and 'model_count_X' in event_data_2:
+                        X2, Y2 = event_data_2['model_count_X'], event_data_2['model_count_Y']
+                        text_2 = f"n={X2}/{Y2}"
+                        # Platziere den Text rechtsbündig bei 98% der Y-Achsen-Transformation (innerhalb des Plots)
+                        ax.text(0.98, y_base + 0.2, text_2, transform=ax.get_yaxis_transform(), 
+                                horizontalalignment='right', fontsize=7, weight='bold', color=gwl_colors[f'+{gwls_to_plot[1]}°C'],
+                                bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
+                # <<< --- NEUER CODE-BLOCK ENDE --- >>>
+
 
         # --- Plot-Schleife für die Standardabweichung (bleibt ein Balkendiagramm) ---
         for row, season in enumerate(seasons_to_plot):
@@ -2414,6 +2442,9 @@ class Visualizer:
                     ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
                     ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 500, 1000])
                     ax.set_xlim(left=0.8, right=max_return_period_for_plot * 1.5)
+                    # <<< MODIFIZIERT >>> Passe den rechten Rand an, um Platz für den Text zu machen
+                    ax.set_xlim(right=max_return_period_for_plot * 2.5) 
+
 
         for col in range(num_event_cols):
             axs[-1][col].set_xlabel('Return Period (Years)', fontsize=11)

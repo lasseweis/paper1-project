@@ -1971,7 +1971,7 @@ class StorylineAnalyzer:
         Analyzes the frequency and return period of low-flow discharge events
         for multiple statistical and fixed thresholds, AND calculates the change
         in interannual standard deviation.
-        MODIFIED: Now returns individual model return periods for each storyline.
+        MODIFIED: Now returns individual model return periods AND model counts (X/Y) for each storyline.
         """
         logging.info("Analyzing storyline discharge return periods and standard deviation (with individual models)...")
         
@@ -2049,6 +2049,8 @@ class StorylineAnalyzer:
                     storyline_name = storyline_key.replace(f'{season_label}_', '')
                     results[gwl][season][storyline_name] = {}
                     
+                    Y_total_in_storyline = len(model_list)  # <<< NEU >>> Total number of models in storyline
+                    
                     model_std_devs = []
                     for model_run_key in model_list:
                         threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
@@ -2088,12 +2090,15 @@ class StorylineAnalyzer:
                         
                         if model_return_periods:
                             finite_periods = [p for p in model_return_periods if np.isfinite(p)]
+                            X_finite_models = len(finite_periods) # <<< NEU >>> Number of models with finite results
                             mean_period = np.mean(finite_periods) if finite_periods else np.inf
                             
                             results[gwl][season][storyline_name][event_name] = {
                                 'hist_return_period': data['hist_return_period'],
                                 'future_return_periods_all_models': model_return_periods,
-                                'future_return_period_mean': mean_period
+                                'future_return_period_mean': mean_period,
+                                'model_count_X': X_finite_models,      # <<< NEU >>>
+                                'model_count_Y': Y_total_in_storyline  # <<< NEU >>>
                             }
 
         results['thresholds'] = thresholds

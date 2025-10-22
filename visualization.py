@@ -1266,48 +1266,51 @@ class Visualizer:
                         edgecolor='black', linewidth=1.0, label=f'Mean: {storyline_name}')
         
         # --- NEW BLOCK: Plot single models for the new extreme storylines ---
-        extreme_storylines_to_plot = {
-            'Extreme NW': {'color': '#8c564b', 'marker': '*'}, # brown star
-            'Extreme SE': {'color': '#e377c2', 'marker': '*'}  # pink star
-        }
-        for storyline_name, style in extreme_storylines_to_plot.items():
-            storyline_key = f"{season_prefix}_{storyline_name}"
-            model_in_storyline = gwl_classification.get(storyline_key) # Should be a list with one model
-            if model_in_storyline:
-                model_key = model_in_storyline[0]
-                x_coord = x_deltas.get(model_key)
-                y_coord = y_deltas.get(model_key)
-                if x_coord is not None and y_coord is not None:
-                    ax.scatter(x_coord, y_coord, color=style['color'], marker=style['marker'], s=250, zorder=12,
-                            edgecolor='black', linewidth=1.2, label=f'Model: {storyline_name}')
-        # --- END NEW BLOCK ---
+        # --- AUSKOMMENTIERT START ---
+        # extreme_storylines_to_plot = {
+        #     'Extreme NW': {'color': '#8c564b', 'marker': '*'}, # brown star
+        #     'Extreme SE': {'color': '#e377c2', 'marker': '*'}  # pink star
+        # }
+        # for storyline_name, style in extreme_storylines_to_plot.items():
+        #     storyline_key = f"{season_prefix}_{storyline_name}"
+        #     model_in_storyline = gwl_classification.get(storyline_key) # Should be a list with one model
+        #     if model_in_storyline:
+        #         model_key = model_in_storyline[0]
+        #         x_coord = x_deltas.get(model_key)
+        #         y_coord = y_deltas.get(model_key)
+        #         if x_coord is not None and y_coord is not None:
+        #             ax.scatter(x_coord, y_coord, color=style['color'], marker=style['marker'], s=250, zorder=12,
+        #                     edgecolor='black', linewidth=1.2, label=f'Model: {storyline_name}')
+        # --- AUSKOMMENTIERT ENDE ---
 
-        axial_colors = {'Northward': '#1f77b4', 'Southward': '#ff7f0e', 'Fast': '#2ca02c', 'Slow': '#d62728'}
-        extreme_storyline_means = {}
-        extreme_types = [k.replace(f'{season_prefix}_', '') for k in gwl_classification if 'Shift' in k and 'Only' not in k and 'Extreme' not in k]
-        for storyline_name in extreme_types:
-            models_in_storyline = gwl_classification.get(f"{season_prefix}_{storyline_name}", [])
-            if models_in_storyline:
-                mean_x = np.mean([x_deltas[m] for m in models_in_storyline])
-                mean_y = np.mean([y_deltas[m] for m in models_in_storyline])
-                extreme_storyline_means[storyline_name] = {'speed': mean_x, 'lat': mean_y}
-        
-        if extreme_storyline_means:
-            max_lat_storyline = max(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['lat'])
-            min_lat_storyline = min(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['lat'])
-            max_speed_storyline = max(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['speed'])
-            min_speed_storyline = min(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['speed'])
-            axial_centers = {
-                'Northward Shift Only': {'center': (0, extreme_storyline_means[max_lat_storyline]['lat']), 'color': axial_colors['Northward']},
-                'Southward Shift Only': {'center': (0, extreme_storyline_means[min_lat_storyline]['lat']), 'color': axial_colors['Southward']},
-                'Fast Jet Only': {'center': (extreme_storyline_means[max_speed_storyline]['speed'], 0), 'color': axial_colors['Fast']},
-                'Slow Jet Only': {'center': (extreme_storyline_means[min_speed_storyline]['speed'], 0), 'color': axial_colors['Slow']},
-            }
-            for name, data in axial_centers.items():
-                center_x, center_y = data['center']
-                ax.scatter(center_x, center_y, marker='D', s=80, color=data['color'], edgecolor='black', zorder=11, label=f'Center: {name}')
-                axial_ellipse = mpatches.Ellipse(xy=(center_x, center_y), width=2*inner_radius*std_dev_x, height=2*inner_radius*std_dev_y, angle=0, edgecolor=data['color'], facecolor='none', linestyle=':', linewidth=2.0, zorder=10)
-                ax.add_patch(axial_ellipse)
+        # --- AUSKOMMENTIERT START ---
+        # axial_colors = {'Northward': '#1f77b4', 'Southward': '#ff7f0e', 'Fast': '#2ca02c', 'Slow': '#d62728'}
+        # extreme_storyline_means = {}
+        # extreme_types = [k.replace(f'{season_prefix}_', '') for k in gwl_classification if 'Shift' in k and 'Only' not in k and 'Extreme' not in k]
+        # for storyline_name in extreme_types:
+        #     models_in_storyline = gwl_classification.get(f"{season_prefix}_{storyline_name}", [])
+        #     if models_in_storyline:
+        #         mean_x = np.mean([x_deltas[m] for m in models_in_storyline])
+        #         mean_y = np.mean([y_deltas[m] for m in models_in_storyline])
+        #         extreme_storyline_means[storyline_name] = {'speed': mean_x, 'lat': mean_y}
+        # 
+        # if extreme_storyline_means:
+        #     max_lat_storyline = max(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['lat'])
+        #     min_lat_storyline = min(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['lat'])
+        #     max_speed_storyline = max(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['speed'])
+        #     min_speed_storyline = min(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['speed'])
+        #     axial_centers = {
+        #         'Northward Shift Only': {'center': (0, extreme_storyline_means[max_lat_storyline]['lat']), 'color': axial_colors['Northward']},
+        #         'Southward Shift Only': {'center': (0, extreme_storyline_means[min_lat_storyline]['lat']), 'color': axial_colors['Southward']},
+        #         'Fast Jet Only': {'center': (extreme_storyline_means[max_speed_storyline]['speed'], 0), 'color': axial_colors['Fast']},
+        #         'Slow Jet Only': {'center': (extreme_storyline_means[min_speed_storyline]['speed'], 0), 'color': axial_colors['Slow']},
+        #     }
+        #     for name, data in axial_centers.items():
+        #         center_x, center_y = data['center']
+        #         ax.scatter(center_x, center_y, marker='D', s=80, color=data['color'], edgecolor='black', zorder=11, label=f'Center: {name}')
+        #         axial_ellipse = mpatches.Ellipse(xy=(center_x, center_y), width=2*inner_radius*std_dev_x, height=2*inner_radius*std_dev_y, angle=0, edgecolor=data['color'], facecolor='none', linestyle=':', linewidth=2.0, zorder=10)
+        #         ax.add_patch(axial_ellipse)
+        # --- AUSKOMMENTIERT ENDE ---
         
         def get_axis_label(key):
             label = f'Change in {key.replace("_", " ")}';
@@ -2057,7 +2060,7 @@ class Visualizer:
 
         if not plot_data_list:
             logging.warning("No data available to plot after processing individual models.")
-            return
+            #return # Nicht abbrechen, SPEI könnte noch funktionieren
             
         df_plot = pd.DataFrame(plot_data_list)
 
@@ -2079,10 +2082,17 @@ class Visualizer:
         }
         
         storyline_display_order = [
-            'MMM', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
-            'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
-            'Slow Jet Only', 'Fast Jet Only',
-            'Extreme NW', 'Extreme SE'
+            'MMM', 
+            # 'Northward Shift Only', # <-- AUSKOMMENTIERT
+            'Slow Jet & Northward Shift', 
+            'Fast Jet & Northward Shift',
+            # 'Southward Shift Only', # <-- AUSKOMMENTIERT
+            'Slow Jet & Southward Shift', 
+            'Fast Jet & Southward Shift',
+            # 'Slow Jet Only',        # <-- AUSKOMMENTIERT
+            # 'Fast Jet Only',        # <-- AUSKOMMENTIERT
+            # 'Extreme NW',           # <-- AUSKOMMENTIERT
+            # 'Extreme SE'            # <-- AUSKOMMENTIERT
         ]
         
         # --- 3. Plotting-Schleife ---
@@ -2127,12 +2137,15 @@ class Visualizer:
                     
                     # X-Achsen-Ticks und Beschriftungen für die Gruppen setzen
                     ax.set_xticks(x_pos)
-                    ax.set_xticklabels(df_spei.index, rotation=45, ha="right", fontsize=11)
+                    # Anpassung der Labels für die reduzierten Storylines
+                    xtick_labels_spei = [name.replace(' & ', ' &\n').replace(' (MMM)','') for name in df_spei.index]
+                    ax.set_xticklabels(xtick_labels_spei, rotation=45, ha="right", fontsize=11)
                     ax.legend(title="GWL")
                 # --- ENDE DER KORREKTUR ---
 
             # Boxplots + Stripplots für alle anderen Variablen
             else:
+                if df_plot.empty: continue # Prüfen ob df_plot leer ist
                 data_subset = df_plot[df_plot['impact_key'] == impact_key]
                 if data_subset.empty: continue
 
@@ -2167,6 +2180,7 @@ class Visualizer:
                 if row < 3:
                     ax.set_xticklabels([])
                 else:
+                    # Anpassung der Labels für die reduzierten Storylines
                     xtick_labels = [name.replace(' & ', ' &\n').replace(' (MMM)','').replace(' Only', '\n(Only)') for name in storyline_display_order]
                     ax.set_xticklabels(xtick_labels, rotation=45, ha="right", fontsize=11)
             
@@ -2297,9 +2311,17 @@ class Visualizer:
         plt.style.use('seaborn-v0_8-whitegrid')
 
         storyline_order = [
-            'MMM', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
-            'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
-            'Slow Jet Only', 'Fast Jet Only', 'Extreme NW', 'Extreme SE'
+            'MMM', 
+            # 'Northward Shift Only', # <-- AUSKOMMENTIERT
+            'Slow Jet & Northward Shift', 
+            'Fast Jet & Northward Shift',
+            # 'Southward Shift Only', # <-- AUSKOMMENTIERT
+            'Slow Jet & Southward Shift', 
+            'Fast Jet & Southward Shift',
+            # 'Slow Jet Only',        # <-- AUSKOMMENTIERT
+            # 'Fast Jet Only',        # <-- AUSKOMMENTIERT
+            # 'Extreme NW',           # <-- AUSKOMMENTIERT
+            # 'Extreme SE'            # <-- AUSKOMMENTIERT
         ]
         
         num_storylines = len(storyline_order)
@@ -2483,9 +2505,17 @@ class Visualizer:
             return
 
         storyline_order = [
-            'MMM', 'Northward Shift Only', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
-            'Southward Shift Only', 'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
-            'Slow Jet Only', 'Fast Jet Only', 'Extreme NW', 'Extreme SE'
+            'MMM', 
+            # 'Northward Shift Only', # <-- AUSKOMMENTIERT
+            'Slow Jet & Northward Shift', 
+            'Fast Jet & Northward Shift',
+            # 'Southward Shift Only', # <-- AUSKOMMENTIERT
+            'Slow Jet & Southward Shift', 
+            'Fast Jet & Southward Shift',
+            # 'Slow Jet Only',        # <-- AUSKOMMENTIERT
+            # 'Fast Jet Only',        # <-- AUSKOMMENTIERT
+            # 'Extreme NW',           # <-- AUSKOMMENTIERT
+            # 'Extreme SE'            # <-- AUSKOMMENTIERT
         ]
         
         gwls = config.GLOBAL_WARMING_LEVELS

@@ -167,10 +167,10 @@ class Config:
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
                 'Fast Jet & Southward Shift',
-                'Northward Shift Only', 'Southward Shift Only',
-                'Fast Jet Only', 'Slow Jet Only',
+                # 'Northward Shift Only', 'Southward Shift Only',  # <-- AUSKOMMENTIERT
+                # 'Fast Jet Only', 'Slow Jet Only',               # <-- AUSKOMMENTIERT
                 # --- NEW EXTREME STORYLINES ---
-                'Extreme NW', 'Extreme SE',
+                # 'Extreme NW', 'Extreme SE',                      # <-- AUSKOMMENTIERT
             ],
             3.0: [
                 'MMM', 'Neutral',
@@ -178,10 +178,10 @@ class Config:
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
                 'Fast Jet & Southward Shift',
-                'Northward Shift Only', 'Southward Shift Only',
-                'Fast Jet Only', 'Slow Jet Only',
+                # 'Northward Shift Only', 'Southward Shift Only',  # <-- AUSKOMMENTIERT
+                # 'Fast Jet Only', 'Slow Jet Only',               # <-- AUSKOMMENTIERT
                 # --- NEW EXTREME STORYLINES ---
-                'Extreme NW', 'Extreme SE',
+                # 'Extreme NW', 'Extreme SE',                      # <-- AUSKOMMENTIERT
             ]
         },
         'JJA': {
@@ -191,10 +191,10 @@ class Config:
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
                 'Fast Jet & Southward Shift',
-                'Northward Shift Only', 'Southward Shift Only',
-                'Fast Jet Only', 'Slow Jet Only',
+                # 'Northward Shift Only', 'Southward Shift Only',  # <-- AUSKOMMENTIERT
+                # 'Fast Jet Only', 'Slow Jet Only',               # <-- AUSKOMMENTIERT
                 # --- NEW EXTREME STORYLINES ---
-                'Extreme NW', 'Extreme SE',
+                # 'Extreme NW', 'Extreme SE',                      # <-- AUSKOMMENTIERT
             ],
             3.0: [
                 'MMM', 'Neutral',
@@ -202,10 +202,10 @@ class Config:
                 'Slow Jet & Northward Shift',
                 'Slow Jet & Southward Shift',
                 'Fast Jet & Southward Shift',
-                'Northward Shift Only', 'Southward Shift Only',
-                'Fast Jet Only', 'Slow Jet Only',
+                # 'Northward Shift Only', 'Southward Shift Only',  # <-- AUSKOMMENTIERT
+                # 'Fast Jet Only', 'Slow Jet Only',               # <-- AUSKOMMENTIERT
                 # --- NEW EXTREME STORYLINES ---
-                'Extreme NW', 'Extreme SE',
+                # 'Extreme NW', 'Extreme SE',                      # <-- AUSKOMMENTIERT
             ]
         }
     }

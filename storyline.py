@@ -582,57 +582,61 @@ class StorylineAnalyzer:
                             classification_results[gwl][f"{season}_{storyline_name}"].append(model_key)
                 
                 # --- PART 3: Define and classify axial storylines ---
-                extreme_storyline_means = {}
-                extreme_types_in_config = [s for s in storylines if 'Shift' in s and 'MMM' not in s and 'Only' not in s and 'Extreme' not in s]
-                
-                for storyline_name in extreme_types_in_config:
-                    full_key = f"{season}_{storyline_name}"
-                    models_in_storyline = classification_results[gwl].get(full_key, [])
-                    if models_in_storyline:
-                        mean_speed = np.mean([model_deltas_speed[m] for m in models_in_storyline])
-                        mean_lat = np.mean([model_deltas_lat[m] for m in models_in_storyline])
-                        extreme_storyline_means[storyline_name] = {'speed': mean_speed, 'lat': mean_lat}
-
-                axial_centers = {}
-                if extreme_storyline_means:
-                    max_lat_storyline = max(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['lat'])
-                    min_lat_storyline = min(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['lat'])
-                    max_speed_storyline = max(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['speed'])
-                    min_speed_storyline = min(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['speed'])
-
-                    axial_centers['Northward Shift Only'] = {'speed': 0, 'lat': extreme_storyline_means[max_lat_storyline]['lat']}
-                    axial_centers['Southward Shift Only'] = {'speed': 0, 'lat': extreme_storyline_means[min_lat_storyline]['lat']}
-                    axial_centers['Fast Jet Only'] = {'speed': extreme_storyline_means[max_speed_storyline]['speed'], 'lat': 0}
-                    axial_centers['Slow Jet Only'] = {'speed': extreme_storyline_means[min_speed_storyline]['speed'], 'lat': 0}
-
-                for storyline_name, center in axial_centers.items():
-                    storyline_key = f"{season}_{storyline_name}"
-                    classified_models_for_axial = []
-                    
-                    for model_key in common_models:
-                        norm_dist_sq = ((model_deltas_speed[model_key] - center['speed']) / std_dev_speed)**2 + \
-                                    ((model_deltas_lat[model_key] - center['lat']) / std_dev_lat)**2
-                        if np.sqrt(norm_dist_sq) <= radius:
-                            classified_models_for_axial.append(model_key)
-                    
-                    classification_results[gwl][storyline_key] = classified_models_for_axial
+                # --- AUSKOMMENTIERT START ---
+                # extreme_storyline_means = {}
+                # extreme_types_in_config = [s for s in storylines if 'Shift' in s and 'MMM' not in s and 'Only' not in s and 'Extreme' not in s]
+                # 
+                # for storyline_name in extreme_types_in_config:
+                #     full_key = f"{season}_{storyline_name}"
+                #     models_in_storyline = classification_results[gwl].get(full_key, [])
+                #     if models_in_storyline:
+                #         mean_speed = np.mean([model_deltas_speed[m] for m in models_in_storyline])
+                #         mean_lat = np.mean([model_deltas_lat[m] for m in models_in_storyline])
+                #         extreme_storyline_means[storyline_name] = {'speed': mean_speed, 'lat': mean_lat}
+                # 
+                # axial_centers = {}
+                # if extreme_storyline_means:
+                #     max_lat_storyline = max(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['lat'])
+                #     min_lat_storyline = min(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['lat'])
+                #     max_speed_storyline = max(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['speed'])
+                #     min_speed_storyline = min(extreme_storyline_means, key=lambda k: extreme_storyline_means[k]['speed'])
+                # 
+                #     axial_centers['Northward Shift Only'] = {'speed': 0, 'lat': extreme_storyline_means[max_lat_storyline]['lat']}
+                #     axial_centers['Southward Shift Only'] = {'speed': 0, 'lat': extreme_storyline_means[min_lat_storyline]['lat']}
+                #     axial_centers['Fast Jet Only'] = {'speed': extreme_storyline_means[max_speed_storyline]['speed'], 'lat': 0}
+                #     axial_centers['Slow Jet Only'] = {'speed': extreme_storyline_means[min_speed_storyline]['speed'], 'lat': 0}
+                # 
+                # for storyline_name, center in axial_centers.items():
+                #     storyline_key = f"{season}_{storyline_name}"
+                #     classified_models_for_axial = []
+                #     
+                #     for model_key in common_models:
+                #         norm_dist_sq = ((model_deltas_speed[model_key] - center['speed']) / std_dev_speed)**2 + \
+                #                     ((model_deltas_lat[model_key] - center['lat']) / std_dev_lat)**2
+                #         if np.sqrt(norm_dist_sq) <= radius:
+                #             classified_models_for_axial.append(model_key)
+                #     
+                #     classification_results[gwl][storyline_key] = classified_models_for_axial
+                # --- AUSKOMMENTIERT ENDE ---
                     
                 # --- PART 4 - Identify and add corner extreme storylines ---
-                if common_models:
-                    norm_speed = (speed_values - np.min(speed_values)) / (np.max(speed_values) - np.min(speed_values))
-                    norm_lat = (lat_values - np.min(lat_values)) / (np.max(lat_values) - np.min(lat_values))
-                    
-                    metric_nw = norm_lat - norm_speed
-                    metric_se = norm_speed - norm_lat
-                    
-                    model_list_common = list(common_models)
-                    model_nw = model_list_common[np.argmax(metric_nw)]
-                    model_se = model_list_common[np.argmax(metric_se)]
-
-                    classification_results[gwl][f"{season}_Extreme NW"] = [model_nw]
-                    classification_results[gwl][f"{season}_Extreme SE"] = [model_se]
-                    logging.info(f"    - Extreme NW model for {season} @ {gwl}C: {model_nw}")
-                    logging.info(f"    - Extreme SE model for {season} @ {gwl}C: {model_se}")
+                # --- AUSKOMMENTIERT START ---
+                # if common_models:
+                #     norm_speed = (speed_values - np.min(speed_values)) / (np.max(speed_values) - np.min(speed_values))
+                #     norm_lat = (lat_values - np.min(lat_values)) / (np.max(lat_values) - np.min(lat_values))
+                #     
+                #     metric_nw = norm_lat - norm_speed
+                #     metric_se = norm_speed - norm_lat
+                #     
+                #     model_list_common = list(common_models)
+                #     model_nw = model_list_common[np.argmax(metric_nw)]
+                #     model_se = model_list_common[np.argmax(metric_se)]
+                # 
+                #     classification_results[gwl][f"{season}_Extreme NW"] = [model_nw]
+                #     classification_results[gwl][f"{season}_Extreme SE"] = [model_se]
+                #     logging.info(f"    - Extreme NW model for {season} @ {gwl}C: {model_nw}")
+                #     logging.info(f"    - Extreme SE model for {season} @ {gwl}C: {model_se}")
+                # --- AUSKOMMENTIERT ENDE ---
 
         return classification_results
 
@@ -1982,6 +1986,20 @@ class StorylineAnalyzer:
         results = {}
         thresholds = {}
 
+        storyline_order = [
+            'MMM', 
+            # 'Northward Shift Only', # <-- AUSKOMMENTIERT
+            'Slow Jet & Northward Shift', 
+            'Fast Jet & Northward Shift',
+            # 'Southward Shift Only', # <-- AUSKOMMENTIERT
+            'Slow Jet & Southward Shift', 
+            'Fast Jet & Southward Shift',
+            # 'Slow Jet Only',        # <-- AUSKOMMENTIERT
+            # 'Fast Jet Only',        # <-- AUSKOMMENTIERT
+            # 'Extreme NW',           # <-- AUSKOMMENTIERT
+            # 'Extreme SE'            # <-- AUSKOMMENTIERT
+        ]
+
         for season in ['Winter', 'Summer']:
             season_lower = season.lower()
             
@@ -2043,13 +2061,16 @@ class StorylineAnalyzer:
                 season_label = 'DJF' if season == 'Winter' else 'JJA'
                 impact_key = f"{season_label}_discharge"
                 
-                storylines_in_gwl = storyline_classification.get(gwl, {})
-                for storyline_key, model_list in storylines_in_gwl.items():
-                    if not model_list or season_label not in storyline_key: continue
-                    storyline_name = storyline_key.replace(f'{season_label}_', '')
-                    results[gwl][season][storyline_name] = {}
+                # Iteriere über die definierte Reihenfolge
+                for storyline_name in storyline_order:
+                    storyline_key = f"{season_label}_{storyline_name}"
+                    model_list = storyline_classification.get(gwl, {}).get(storyline_key, [])
                     
-                    Y_total_in_storyline = len(model_list)  # <<< NEU >>> Total number of models in storyline
+                    if not model_list:
+                        continue
+                    
+                    results[gwl][season][storyline_name] = {}
+                    Y_total_in_storyline = len(model_list)
                     
                     model_std_devs = []
                     for model_run_key in model_list:
@@ -2090,15 +2111,15 @@ class StorylineAnalyzer:
                         
                         if model_return_periods:
                             finite_periods = [p for p in model_return_periods if np.isfinite(p)]
-                            X_finite_models = len(finite_periods) # <<< NEU >>> Number of models with finite results
+                            X_finite_models = len(finite_periods)
                             mean_period = np.mean(finite_periods) if finite_periods else np.inf
                             
                             results[gwl][season][storyline_name][event_name] = {
                                 'hist_return_period': data['hist_return_period'],
                                 'future_return_periods_all_models': model_return_periods,
                                 'future_return_period_mean': mean_period,
-                                'model_count_X': X_finite_models,      # <<< NEU >>>
-                                'model_count_Y': Y_total_in_storyline  # <<< NEU >>>
+                                'model_count_X': X_finite_models,
+                                'model_count_Y': Y_total_in_storyline
                             }
 
         results['thresholds'] = thresholds
@@ -2210,69 +2231,89 @@ class StorylineAnalyzer:
         
         results = {gwl: {'DJF': {}, 'JJA': {}} for gwl in config.GLOBAL_WARMING_LEVELS}
 
+        storyline_order = [
+            'MMM', 
+            # 'Northward Shift Only', # <-- AUSKOMMENTIERT
+            'Slow Jet & Northward Shift', 
+            'Fast Jet & Northward Shift',
+            # 'Southward Shift Only', # <-- AUSKOMMENTIERT
+            'Slow Jet & Southward Shift', 
+            'Fast Jet & Southward Shift',
+            # 'Slow Jet Only',        # <-- AUSKOMMENTIERT
+            # 'Fast Jet Only',        # <-- AUSKOMMENTIERT
+            # 'Extreme NW',           # <-- AUSKOMMENTIERT
+            # 'Extreme SE'            # <-- AUSKOMMENTIERT
+        ]
+
         for gwl in config.GLOBAL_WARMING_LEVELS:
-            for storyline_key, model_list in classification.get(gwl, {}).items():
-                if not model_list:
-                    continue
-                
-                season = 'DJF' if 'DJF' in storyline_key else 'JJA'
-                storyline_name = storyline_key.replace(f'{season}_', '')
-                
-                model_change_maps = []
-                model_hist_maps = [] # Still needed for the fallback case
+            # Iteriere über die definierte Reihenfolge, um sicherzustellen, dass MMM zuerst kommt
+            for storyline_name in storyline_order:
+                season_keys = []
+                if f'DJF_{storyline_name}' in classification.get(gwl, {}):
+                    season_keys.append(('DJF', f'DJF_{storyline_name}'))
+                if f'JJA_{storyline_name}' in classification.get(gwl, {}):
+                    season_keys.append(('JJA', f'JJA_{storyline_name}'))
 
-                for model_run_key in model_list:
-                    ua_data = model_data_loaded.get(model_run_key, {}).get('ua')
-                    threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
-
-                    if ua_data is None or threshold_year is None:
+                for season, storyline_key in season_keys:
+                    model_list = classification[gwl].get(storyline_key, [])
+                    if not model_list:
                         continue
-
-                    ua_seasonal = DataProcessor.calculate_seasonal_means(
-                        DataProcessor.assign_season_to_dataarray(ua_data)
-                    )
-                    
-                    hist_ua_season = DataProcessor.filter_by_season(
-                        ua_seasonal.sel(season_year=slice(hist_period[0], hist_period[1])),
-                        'Winter' if season == 'DJF' else 'Summer'
-                    )
-
-                    start_year, end_year = threshold_year - window // 2, threshold_year + (window - 1) // 2
-                    future_ua_season = DataProcessor.filter_by_season(
-                        ua_seasonal.sel(season_year=slice(start_year, end_year)),
-                        'Winter' if season == 'DJF' else 'Summer'
-                    )
-
-                    if hist_ua_season is None or future_ua_season is None or hist_ua_season.season_year.size == 0 or future_ua_season.season_year.size == 0:
-                        continue
-
-                    hist_map = hist_ua_season.mean(dim='season_year', skipna=True)
-                    future_map = future_ua_season.mean(dim='season_year', skipna=True)
-                    
-                    change_map = future_map - hist_map
-                    
-                    model_change_maps.append(change_map)
-                    model_hist_maps.append(hist_map)
                 
-                if model_change_maps:
-                    aligned_changes = [da.reindex_like(model_change_maps[0], method='nearest') for da in model_change_maps]
-                    mmm_change_map = xr.concat(aligned_changes, dim='model').mean(dim='model', skipna=True)
+                    model_change_maps = []
+                    model_hist_maps = [] # Still needed for the fallback case
+
+                    for model_run_key in model_list:
+                        ua_data = model_data_loaded.get(model_run_key, {}).get('ua')
+                        threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
+
+                        if ua_data is None or threshold_year is None:
+                            continue
+
+                        ua_seasonal = DataProcessor.calculate_seasonal_means(
+                            DataProcessor.assign_season_to_dataarray(ua_data)
+                        )
+                        
+                        hist_ua_season = DataProcessor.filter_by_season(
+                            ua_seasonal.sel(season_year=slice(hist_period[0], hist_period[1])),
+                            'Winter' if season == 'DJF' else 'Summer'
+                        )
+
+                        start_year, end_year = threshold_year - window // 2, threshold_year + (window - 1) // 2
+                        future_ua_season = DataProcessor.filter_by_season(
+                            ua_seasonal.sel(season_year=slice(start_year, end_year)),
+                            'Winter' if season == 'DJF' else 'Summer'
+                        )
+
+                        if hist_ua_season is None or future_ua_season is None or hist_ua_season.season_year.size == 0 or future_ua_season.season_year.size == 0:
+                            continue
+
+                        hist_map = hist_ua_season.mean(dim='season_year', skipna=True)
+                        future_map = future_ua_season.mean(dim='season_year', skipna=True)
+                        
+                        change_map = future_map - hist_map
+                        
+                        model_change_maps.append(change_map)
+                        model_hist_maps.append(hist_map)
                     
-                    # --- MODIFIED LOGIC ---
-                    # Use the provided historical MMM if available, otherwise use the old method as a fallback.
-                    if historical_mmm_u850_by_season and season in historical_mmm_u850_by_season:
-                        mmm_hist_map = historical_mmm_u850_by_season[season]
-                        logging.info(f"  -> Using consistent MMM historical baseline for GWL {gwl}°C, {season}, {storyline_name}")
-                    else:
-                        aligned_hists = [da.reindex_like(model_hist_maps[0], method='nearest') for da in model_hist_maps]
-                        mmm_hist_map = xr.concat(aligned_hists, dim='model').mean(dim='model', skipna=True)
-                    # --- END MODIFIED LOGIC ---
-                    
-                    results[gwl][season][storyline_name] = {
-                        'mean_change_map': mmm_change_map.load(),
-                        'historical_mean_map': mmm_hist_map.load()
-                    }
-                    logging.info(f"  -> Calculated change map for GWL {gwl}°C, {season}, {storyline_name} ({len(model_change_maps)} models)")
+                    if model_change_maps:
+                        aligned_changes = [da.reindex_like(model_change_maps[0], method='nearest') for da in model_change_maps]
+                        mmm_change_map = xr.concat(aligned_changes, dim='model').mean(dim='model', skipna=True)
+                        
+                        # --- MODIFIED LOGIC ---
+                        # Use the provided historical MMM if available, otherwise use the old method as a fallback.
+                        if historical_mmm_u850_by_season and season in historical_mmm_u850_by_season:
+                            mmm_hist_map = historical_mmm_u850_by_season[season]
+                            logging.info(f"  -> Using consistent MMM historical baseline for GWL {gwl}°C, {season}, {storyline_name}")
+                        else:
+                            aligned_hists = [da.reindex_like(model_hist_maps[0], method='nearest') for da in model_hist_maps]
+                            mmm_hist_map = xr.concat(aligned_hists, dim='model').mean(dim='model', skipna=True)
+                        # --- END MODIFIED LOGIC ---
+                        
+                        results[gwl][season][storyline_name] = {
+                            'mean_change_map': mmm_change_map.load(),
+                            'historical_mean_map': mmm_hist_map.load()
+                        }
+                        logging.info(f"  -> Calculated change map for GWL {gwl}°C, {season}, {storyline_name} ({len(model_change_maps)} models)")
 
         return results
     

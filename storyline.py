@@ -1972,12 +1972,13 @@ class StorylineAnalyzer:
     @staticmethod
     def analyze_storyline_discharge_extremes(cmip6_results, historical_discharge_da, config, discharge_thresholds):
         """
-        Analyzes the frequency and return period of low-flow discharge events
+        Analyzes the frequency and return period of low-flow AND high-flow discharge events
         for multiple statistical and fixed thresholds, AND calculates the change
         in interannual standard deviation.
         MODIFIED: Now returns individual model return periods AND model counts (X/Y) for each storyline.
+        MODIFIED: Includes high-flow (95th percentile) event analysis.
         """
-        logging.info("Analyzing storyline discharge return periods and standard deviation (with individual models)...")
+        logging.info("Analyzing storyline discharge return periods (low-flow & high-flow) and standard deviation...")
         
         if historical_discharge_da is None or not discharge_thresholds:
             logging.error("Historical discharge data or fixed thresholds are missing. Aborting.")
@@ -2021,26 +2022,39 @@ class StorylineAnalyzer:
             
             moderate_fixed_threshold = discharge_thresholds.get(f'{season_lower}_lowflow_threshold_30')
             extreme_fixed_threshold = discharge_thresholds.get(f'{season_lower}_lowflow_threshold')
-            lnwl_fixed_threshold = discharge_thresholds.get(f'{season_lower}_lowflow_lnwl') # <-- NEU
+            lnwl_fixed_threshold = discharge_thresholds.get(f'{season_lower}_lowflow_lnwl')
+            
+            # --- NEU: High-Flow-Schwellenwert ---
+            high_flow_threshold = hist_seasonal.quantile(0.95).item()
 
             event_definitions = {
-                f'Moderate (-1σ)': {'val': mean - 1 * std},
-                f'Severe (-2σ)': {'val': mean - 2 * std},
-                f'Moderate Low-Flow (<{moderate_fixed_threshold} m³/s)': {'val': moderate_fixed_threshold},
-                f'Extreme Low-Flow (<{extreme_fixed_threshold} m³/s)': {'val': extreme_fixed_threshold},
-                f'Low Navigable (LNWL) (<{lnwl_fixed_threshold} m³/s)': {'val': lnwl_fixed_threshold} # <-- NEU
+                # Low-Flow
+                f'Moderate (-1σ)': {'val': mean - 1 * std, 'type': 'low'},
+                f'Severe (-2σ)': {'val': mean - 2 * std, 'type': 'low'},
+                f'Moderate Low-Flow (<{moderate_fixed_threshold} m³/s)': {'val': moderate_fixed_threshold, 'type': 'low'},
+                f'Extreme Low-Flow (<{extreme_fixed_threshold} m³/s)': {'val': extreme_fixed_threshold, 'type': 'low'},
+                f'Low Navigable (LNWL) (<{lnwl_fixed_threshold} m³/s)': {'val': lnwl_fixed_threshold, 'type': 'low'},
+                # High-Flow
+                f'High-Flow (>95%)': {'val': high_flow_threshold, 'type': 'high'}
             }
             
             season_thresholds = {}
             for name, data in event_definitions.items():
-                if data['val'] is None: continue # <-- NEU: Stellt sicher, dass kein Fehler auftritt, falls ein Threshold fehlt
+                if data['val'] is None or np.isnan(data['val']): continue
                 
-                hist_count = (hist_seasonal < data['val']).sum().item()
+                # --- MODIFIZIERTE LOGIK ---
+                if data['type'] == 'low':
+                    hist_count = (hist_seasonal < data['val']).sum().item()
+                else: # 'high'
+                    hist_count = (hist_seasonal > data['val']).sum().item()
+                # --- ENDE MODIFIKATION ---
+
                 hist_freq = hist_count / total_years if total_years > 0 else 0
                 
                 season_thresholds[name] = {
                     'val': data['val'],
-                    'hist_return_period': 1 / hist_freq if hist_freq > 0 else np.inf
+                    'hist_return_period': 1 / hist_freq if hist_freq > 0 else np.inf,
+                    'type': data['type'] # Wichtig für die Plot-Funktion
                 }
             
             season_thresholds['historical_std_dev'] = hist_std_dev
@@ -2055,9 +2069,6 @@ class StorylineAnalyzer:
             logging.error("Missing CMIP6 data for storyline discharge analysis.")
             return None
 
-        # (Der Rest der Funktion bleibt unverändert, da die Schleifen 
-        # dynamisch über die 'event_definitions' iterieren)
-
         for gwl in config.GLOBAL_WARMING_LEVELS:
             results[gwl] = {}
             for season in ['Winter', 'Summer']:
@@ -2066,7 +2077,6 @@ class StorylineAnalyzer:
                 season_label = 'DJF' if season == 'Winter' else 'JJA'
                 impact_key = f"{season_label}_discharge"
                 
-                # Iteriere über die definierte Reihenfolge
                 for storyline_name in storyline_order:
                     storyline_key = f"{season_label}_{storyline_name}"
                     model_list = storyline_classification.get(gwl, {}).get(storyline_key, [])
@@ -2107,7 +2117,13 @@ class StorylineAnalyzer:
                             ts_slice = discharge_ts.sel(season_year=slice(start_year, end_year))
 
                             if ts_slice.season_year.size > 0:
-                                event_count = (ts_slice < data['val']).sum().item()
+                                # --- MODIFIZIERTE LOGIK ---
+                                if data['type'] == 'low':
+                                    event_count = (ts_slice < data['val']).sum().item()
+                                else: # 'high'
+                                    event_count = (ts_slice > data['val']).sum().item()
+                                # --- ENDE MODIFIKATION ---
+
                                 years_analyzed = ts_slice.season_year.size
                                 
                                 future_freq_model = event_count / years_analyzed if years_analyzed > 0 else 0

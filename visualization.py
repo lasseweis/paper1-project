@@ -2292,29 +2292,42 @@ class Visualizer:
     def plot_storyline_return_period_change(results, config, scenario):
         """
         Creates a comprehensive plot showing the change in return periods for
-        low-flow events and the change in interannual standard deviation.
+        low-flow and high-flow events and the change in interannual standard deviation.
         MODIFIED: Now visualizes individual model members for each storyline using
         boxplots with an overlaid stripplot AND adds n=X/Y annotations.
+        MODIFIED: Dynamically creates columns for low-flow and high-flow events.
         """
         if not results or not config or 'thresholds' not in results:
             logging.warning(f"Cannot plot return period/std dev change for {scenario}: Missing results or thresholds.")
             return
 
-        logging.info(f"Plotting storyline return period and std dev changes for {scenario} (boxplots with stripplot)...")
+        logging.info(f"Plotting storyline return period (low & high flow) and std dev changes for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         seasons_to_plot = ['Winter', 'Summer']
-        event_keys = list(results.get('thresholds', {}).get(seasons_to_plot[0], {}).keys())
-        if 'historical_std_dev' in event_keys: event_keys.remove('historical_std_dev')
+        
+        # --- MODIFIKATION START: Schlüssel aufteilen ---
+        all_event_keys = list(results.get('thresholds', {}).get(seasons_to_plot[0], {}).keys())
+        if 'historical_std_dev' in all_event_keys: all_event_keys.remove('historical_std_dev')
+        
+        # Holen der Typinformationen aus dem ersten Saison-Threshold (Annahme: gleich für beide)
+        thresholds_sample = results['thresholds'][seasons_to_plot[0]]
+        
+        low_flow_keys = sorted([k for k in all_event_keys if thresholds_sample.get(k, {}).get('type', 'low') == 'low'])
+        high_flow_keys = sorted([k for k in all_event_keys if thresholds_sample.get(k, {}).get('type') == 'high'])
+        
+        num_low_flow_cols = len(low_flow_keys)
+        num_high_flow_cols = len(high_flow_keys)
+        num_std_dev_cols = 1
+        num_total_cols = num_low_flow_cols + num_high_flow_cols + num_std_dev_cols
 
-        num_event_cols = len(event_keys)
-        # <<< MODIFIZIERT >>> Verbreitere die Plots ein wenig, um Platz für Text zu schaffen
-        num_total_cols = num_event_cols + 1
-        fig = plt.figure(figsize=(6 * num_total_cols, 12)) # Breite von 5.5 auf 6 erhöht
-        # <<< MODIFIZIERT >>> width_ratios angepasst, um mehr Platz für die Anmerkungen zu geben
-        gs = matplotlib.gridspec.GridSpec(len(seasons_to_plot), num_total_cols, width_ratios=[6] * num_event_cols + [3.5])
+        fig = plt.figure(figsize=(5.5 * num_total_cols, 12))
+        
+        width_ratios = [6] * num_low_flow_cols + [6] * num_high_flow_cols + [3.5]
+        gs = matplotlib.gridspec.GridSpec(len(seasons_to_plot), num_total_cols, width_ratios=width_ratios)
         axs = [[fig.add_subplot(gs[r, c]) for c in range(num_total_cols)] for r in range(len(seasons_to_plot))]
+        # --- MODIFIKATION ENDE ---
         
         plt.style.use('seaborn-v0_8-whitegrid')
 
@@ -2339,11 +2352,13 @@ class Visualizer:
 
         gwl_colors = {f'+{gwls_to_plot[0]}°C': '#ff7f0e', f'+{gwls_to_plot[1]}°C': '#d62728'}
         
-        # --- Datenaufbereitung (bleibt unverändert) ---
+        # --- Datenaufbereitung (mit allen Schlüsseln) ---
         plot_data_list = []
+        all_event_keys_combined = low_flow_keys + high_flow_keys # Alle zu plottenden Schlüssel
+        
         for gwl in gwls_to_plot:
             for season in seasons_to_plot:
-                for event_key in event_keys:
+                for event_key in all_event_keys_combined:
                     for storyline in storyline_order:
                         event_data = results.get(gwl, {}).get(season, {}).get(storyline, {}).get(event_key)
                         if event_data and 'future_return_periods_all_models' in event_data:
@@ -2366,39 +2381,36 @@ class Visualizer:
         max_return_period_for_plot = 1000
         df_plot_clipped = df_plot[df_plot['return_period'] <= max_return_period_for_plot].copy()
         
-        # --- Plot-Schleife für Wiederkehrperioden (mit Boxplot + Stripplot) ---
+        # --- Plot-Schleife (jetzt aufgeteilt) ---
         for row, season in enumerate(seasons_to_plot):
-            for col, event_key in enumerate(event_keys):
-                ax = axs[row][col]
+            current_col_idx = 0
+            
+            # --- Plot Low-Flow Events ---
+            for event_key in low_flow_keys:
+                ax = axs[row][current_col_idx]
                 ax.set_ylim(y_limits)
-
                 data_subset = df_plot_clipped[(df_plot_clipped['season'] == season) & (df_plot_clipped['event'] == event_key)]
                 
                 if not data_subset.empty:
-                    # 1. Zeichne die Boxplots
                     sns.boxplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
                                 order=storyline_order, palette=gwl_colors,
                                 ax=ax, linewidth=1.2, showfliers=False, orient='h',
                                 boxprops={'alpha': 0.85})
-                    
-                    # 2. Lege die einzelnen Punkte darüber
                     sns.stripplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
                                 order=storyline_order, palette=gwl_colors,
                                 ax=ax, dodge=True, jitter=0.15, size=4, 
                                 edgecolor='gray', linewidth=0.5, alpha=0.9, orient='h')
 
-                # Zeichne die historische Baseline als vertikale Linie
                 hist_period = results.get('thresholds', {}).get(season, {}).get(event_key, {}).get('hist_return_period')
                 if hist_period is not None and np.isfinite(hist_period):
                     ax.axvline(x=hist_period, color='skyblue', linestyle='--', linewidth=3, zorder=5)
 
-                # Formatierung
                 ax.invert_yaxis()
                 ax.set_yticks(y_ticks)
                 ax.grid(axis='y', linestyle='none')
                 ax.grid(axis='x', linestyle=':', which='both')
                 
-                if col == 0:
+                if current_col_idx == 0:
                     ax.set_yticklabels(y_tick_labels, fontsize=9)
                     ax.set_ylabel(season, fontsize=14, weight='bold')
                 else:
@@ -2408,39 +2420,79 @@ class Visualizer:
                 if row == 0:
                     ax.set_title(event_key.replace(" Low-Flow", "\nLow-Flow"), fontsize=11, weight='bold')
                 
-                if ax.get_legend() is not None:
-                    ax.get_legend().remove()
+                if ax.get_legend() is not None: ax.get_legend().remove()
                 
-                # <<< --- NEUER CODE-BLOCK START --- >>>
-                # Füge n=X/Y Anmerkungen hinzu
+                # n=X/Y Anmerkungen
                 for i, storyline in enumerate(storyline_order):
-                    y_base = y_ticks[i] # Die Y-Position der Storyline
-                    
-                    # Daten für GWL 1
+                    y_base = y_ticks[i]
                     event_data_1 = results.get(gwls_to_plot[0], {}).get(season, {}).get(storyline, {}).get(event_key)
                     if event_data_1 and 'model_count_X' in event_data_1:
                         X1, Y1 = event_data_1['model_count_X'], event_data_1['model_count_Y']
-                        text_1 = f"n={X1}/{Y1}"
-                        # Platziere den Text rechtsbündig bei 98% der Y-Achsen-Transformation (innerhalb des Plots)
-                        ax.text(0.98, y_base - 0.2, text_1, transform=ax.get_yaxis_transform(), 
+                        ax.text(0.98, y_base - 0.2, f"n={X1}/{Y1}", transform=ax.get_yaxis_transform(), 
                                 horizontalalignment='right', fontsize=7, weight='bold', color=gwl_colors[f'+{gwls_to_plot[0]}°C'],
                                 bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
-
-                    # Daten für GWL 2
                     event_data_2 = results.get(gwls_to_plot[1], {}).get(season, {}).get(storyline, {}).get(event_key)
                     if event_data_2 and 'model_count_X' in event_data_2:
                         X2, Y2 = event_data_2['model_count_X'], event_data_2['model_count_Y']
-                        text_2 = f"n={X2}/{Y2}"
-                        # Platziere den Text rechtsbündig bei 98% der Y-Achsen-Transformation (innerhalb des Plots)
-                        ax.text(0.98, y_base + 0.2, text_2, transform=ax.get_yaxis_transform(), 
+                        ax.text(0.98, y_base + 0.2, f"n={X2}/{Y2}", transform=ax.get_yaxis_transform(), 
                                 horizontalalignment='right', fontsize=7, weight='bold', color=gwl_colors[f'+{gwls_to_plot[1]}°C'],
                                 bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
-                # <<< --- NEUER CODE-BLOCK ENDE --- >>>
+                
+                current_col_idx += 1
 
+            # --- NEU: Plot High-Flow Events ---
+            for event_key in high_flow_keys:
+                ax = axs[row][current_col_idx]
+                ax.set_ylim(y_limits)
+                data_subset = df_plot_clipped[(df_plot_clipped['season'] == season) & (df_plot_clipped['event'] == event_key)]
+                
+                if not data_subset.empty:
+                    sns.boxplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
+                                order=storyline_order, palette=gwl_colors,
+                                ax=ax, linewidth=1.2, showfliers=False, orient='h',
+                                boxprops={'alpha': 0.85})
+                    sns.stripplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
+                                order=storyline_order, palette=gwl_colors,
+                                ax=ax, dodge=True, jitter=0.15, size=4, 
+                                edgecolor='gray', linewidth=0.5, alpha=0.9, orient='h')
 
-        # --- Plot-Schleife für die Standardabweichung (bleibt ein Balkendiagramm) ---
-        for row, season in enumerate(seasons_to_plot):
-            ax_std = axs[row][num_event_cols]
+                hist_period = results.get('thresholds', {}).get(season, {}).get(event_key, {}).get('hist_return_period')
+                if hist_period is not None and np.isfinite(hist_period):
+                    ax.axvline(x=hist_period, color='skyblue', linestyle='--', linewidth=3, zorder=5)
+
+                ax.invert_yaxis()
+                ax.set_yticks(y_ticks)
+                ax.grid(axis='y', linestyle='none')
+                ax.grid(axis='x', linestyle=':', which='both')
+                
+                ax.set_yticklabels([])
+                ax.set_ylabel('')
+
+                if row == 0:
+                    ax.set_title(event_key.replace(" ", "\n"), fontsize=11, weight='bold')
+                
+                if ax.get_legend() is not None: ax.get_legend().remove()
+                
+                # n=X/Y Anmerkungen
+                for i, storyline in enumerate(storyline_order):
+                    y_base = y_ticks[i]
+                    event_data_1 = results.get(gwls_to_plot[0], {}).get(season, {}).get(storyline, {}).get(event_key)
+                    if event_data_1 and 'model_count_X' in event_data_1:
+                        X1, Y1 = event_data_1['model_count_X'], event_data_1['model_count_Y']
+                        ax.text(0.98, y_base - 0.2, f"n={X1}/{Y1}", transform=ax.get_yaxis_transform(), 
+                                horizontalalignment='right', fontsize=7, weight='bold', color=gwl_colors[f'+{gwls_to_plot[0]}°C'],
+                                bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
+                    event_data_2 = results.get(gwls_to_plot[1], {}).get(season, {}).get(storyline, {}).get(event_key)
+                    if event_data_2 and 'model_count_X' in event_data_2:
+                        X2, Y2 = event_data_2['model_count_X'], event_data_2['model_count_Y']
+                        ax.text(0.98, y_base + 0.2, f"n={X2}/{Y2}", transform=ax.get_yaxis_transform(), 
+                                horizontalalignment='right', fontsize=7, weight='bold', color=gwl_colors[f'+{gwls_to_plot[1]}°C'],
+                                bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
+                
+                current_col_idx += 1
+
+            # --- Plot-Schleife für die Standardabweichung ---
+            ax_std = axs[row][current_col_idx] # Letzte Spalte
             ax_std.set_ylim(y_limits)
             
             if row == 0:
@@ -2465,22 +2517,22 @@ class Visualizer:
 
         # --- Finale Formatierung der gesamten Figur ---
         for row_axs in axs:
-            for i, ax in enumerate(row_axs):
-                if i < num_event_cols:
-                    ax.set_xscale('log')
-                    ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
-                    ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
-                    ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 500, 1000])
-                    ax.set_xlim(left=0.8, right=max_return_period_for_plot * 1.5)
-                    # <<< MODIFIZIERT >>> Passe den rechten Rand an, um Platz für den Text zu machen
-                    ax.set_xlim(right=max_return_period_for_plot * 2.5) 
+            # Wende Log-Skala und Ticks auf alle Wiederkehrperioden-Plots an
+            for i in range(num_low_flow_cols + num_high_flow_cols):
+                ax = row_axs[i]
+                ax.set_xscale('log')
+                ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+                ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+                ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 500, 1000])
+                ax.set_xlim(left=0.8, right=max_return_period_for_plot * 2.5) # Platz für Text
 
-
-        for col in range(num_event_cols):
-            axs[-1][col].set_xlabel('Return Period (Years)', fontsize=11)
-        axs[-1][-1].set_xlabel('Std. Dev. (m³/s)', fontsize=11)
+        # X-Achsen-Beschriftungen nur für die untere Zeile
+        for col in range(num_total_cols):
+            if col < (num_low_flow_cols + num_high_flow_cols):
+                axs[-1][col].set_xlabel('Return Period (Years)', fontsize=11)
+            else:
+                axs[-1][col].set_xlabel('Std. Dev. (m³/s)', fontsize=11)
         
-        # Erstelle eine saubere, zentrale Legende
         legend_handles = [
             plt.Line2D([0], [0], color='skyblue', linestyle='--', linewidth=3, label='Historical'),
             mpatches.Patch(color=gwl_colors[f'+{gwls_to_plot[0]}°C'], label=f'Future (+{gwls_to_plot[0]}°C)'),
@@ -2488,16 +2540,16 @@ class Visualizer:
         ]
         fig.legend(handles=legend_handles, loc='lower center', bbox_to_anchor=(0.5, 0.0), ncol=3, fontsize=12)
         
-        fig.suptitle(f"Change in Return Period and Variability of Low-Flow Events for {scenario.upper()}",
+        fig.suptitle(f"Change in Return Period and Variability of Low/High-Flow Events for {scenario.upper()}",
                     fontsize=16, weight='bold')
         
         fig.tight_layout(rect=[0.02, 0.05, 0.98, 0.94], h_pad=2, w_pad=1.5)
         
-        # Der Dateiname bleibt gleich, da diese verbesserte Version die vorherige ersetzt
+        # Der Dateiname wird leicht geändert, um die neue Funktionalität widerzuspiegeln
         filename = os.path.join(config.PLOT_DIR, f"storyline_discharge_return_period_comparison_boxplots_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved return period boxplot with stripplot to {filename}")
+        logging.info(f"Saved return period boxplot (low & high flow) to {filename}")
         
     @staticmethod
     def plot_storyline_wind_change_maps(map_data, config, scenario, filename="storyline_u850_change_maps.png"):

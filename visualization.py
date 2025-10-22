@@ -1999,75 +1999,80 @@ class Visualizer:
         logging.info(f"Saved vertical storyline impacts summary plot to {filename}")
 
     @staticmethod
-    def plot_storyline_impact_barchart_with_discharge(cmip6_results, discharge_data_historical, reanalysis_data, config, scenario, storyline_correlations=None):
+    # --- MODIFIKATION: Argument threshold_data hinzugefügt ---
+    def plot_storyline_impact_barchart_with_discharge(cmip6_results, threshold_data, discharge_data_historical, reanalysis_data, config, scenario, storyline_correlations=None):
         """
-        Creates a 4x2 plot to visualize storyline impacts for Temp, Precip, Discharge, and SPEI.
-        For TAS, PR, and Discharge, it shows boxplots of the model distributions and individual model members as points.
-        For SPEI, it shows the mean as a bar chart as a fallback.
-        MODIFIED: Accepts a scenario parameter for filename and title.
+        Creates a 7x2 plot to visualize storyline impacts for Temp, Precip, SPEI,
+        seasonal Discharge, and lagged monthly Discharge.
+        Uses boxplots with stripplots where model data is available (tas, pr, discharge),
+        and a bar chart fallback for derived metrics (SPEI).
+        MODIFIED: Accepts threshold_data containing percentile and other thresholds.
+        MODIFIED: Draws lines for LNWL, 1% Low-Flow, and 99% High-Flow.
         """
-        logging.info(f"Plotting storyline impacts (Boxplots + Stripplots) for {scenario}...")
+        logging.info(f"Plotting EXTENDED storyline impacts (7x2 grid with percentile thresholds) for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
 
         if not cmip6_results:
             logging.warning(f"Cannot plot impacts for {scenario}: Input data is empty.")
             return
+        # --- MODIFIKATION: Prüfung für threshold_data ---
+        if not threshold_data:
+            logging.warning(f"Cannot plot impacts for {scenario}: Threshold data is missing.")
+            return
 
-        # --- 1. Datenextraktion und -aufbereitung ---
+        # --- 1. Datenextraktion und -aufbereitung (wie zuvor) ---
         all_deltas = cmip6_results.get('all_individual_model_deltas_for_plot', {})
         classification = cmip6_results.get('storyline_classification_2d', {})
-        
-        # Holen der reanalysierten Daten für die SPEI-Baseline
+
         pr_box_monthly_hist = DataProcessor.calculate_spatial_mean(reanalysis_data.get('ERA5_pr_monthly'), config.BOX_LAT_MIN, config.BOX_LAT_MAX, config.BOX_LON_MIN, config.BOX_LON_MAX)
         tas_box_monthly_hist = DataProcessor.calculate_spatial_mean(reanalysis_data.get('ERA5_tas_monthly'), config.BOX_LAT_MIN, config.BOX_LAT_MAX, config.BOX_LON_MIN, config.BOX_LON_MAX)
 
         spei_impacts = {}
         if pr_box_monthly_hist is not None and tas_box_monthly_hist is not None:
-            spei_impacts = StorylineAnalyzer.calculate_storyline_spei_impacts(
-                storyline_impacts=StorylineAnalyzer.calculate_storyline_impacts(cmip6_results),
-                historical_monthly_data={
-                    'pr_box_monthly': pr_box_monthly_hist,
-                    'tas_box_monthly': tas_box_monthly_hist
-                },
-                config=config
-            )
+             temp_storyline_impacts = StorylineAnalyzer.calculate_storyline_impacts(cmip6_results)
+             spei_impacts = StorylineAnalyzer.calculate_storyline_spei_impacts(
+                 storyline_impacts=temp_storyline_impacts,
+                 historical_monthly_data={
+                     'pr_box_monthly': pr_box_monthly_hist,
+                     'tas_box_monthly': tas_box_monthly_hist
+                 },
+                 config=config
+             )
 
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         
         plot_data_list = []
-        impact_keys_to_process = ['tas', 'pr', 'discharge']
+        impact_keys_for_boxplot = [
+            'DJF_tas', 'JJA_tas', 'DJF_pr', 'JJA_pr',
+            'DJF_discharge', 'JJA_discharge',
+            'Mar_discharge', 'Apr_discharge', 'May_discharge',
+            'Sep_discharge', 'Oct_discharge', 'Nov_discharge'
+        ]
 
         for gwl in gwls_to_plot:
             storylines_in_gwl = classification.get(gwl, {})
             for storyline_key, model_list in storylines_in_gwl.items():
                 if not model_list: continue
-                
-                season = storyline_key.split('_')[0]
-                storyline_name = storyline_key.replace(f'{season}_', '')
-
-                for impact_var in impact_keys_to_process:
-                    full_impact_key = f"{season}_{impact_var}"
-                    
+                season_prefix = storyline_key.split('_')[0]
+                storyline_name = storyline_key.replace(f'{season_prefix}_', '')
+                if season_prefix == 'DJF':
+                    relevant_impact_keys = [k for k in impact_keys_for_boxplot if 'DJF' in k or k.startswith('Mar') or k.startswith('Apr') or k.startswith('May')]
+                else: # JJA
+                    relevant_impact_keys = [k for k in impact_keys_for_boxplot if 'JJA' in k or k.startswith('Sep') or k.startswith('Oct') or k.startswith('Nov')]
+                for impact_key in relevant_impact_keys:
+                    if impact_key not in impact_keys_for_boxplot: continue
                     for model_run_key in model_list:
-                        delta_val = all_deltas.get(full_impact_key, {}).get(gwl, {}).get(model_run_key)
+                        delta_val = all_deltas.get(impact_key, {}).get(gwl, {}).get(model_run_key)
                         if delta_val is not None and np.isfinite(delta_val):
                             plot_data_list.append({
-                                'gwl': f'+{gwl}°C',
-                                'storyline': storyline_name,
-                                'impact_key': full_impact_key,
-                                'value': delta_val
+                                'gwl': f'+{gwl}°C', 'storyline': storyline_name,
+                                'impact_key': impact_key, 'value': delta_val
                             })
-
-        if not plot_data_list:
-            logging.warning("No data available to plot after processing individual models.")
-            #return # Nicht abbrechen, SPEI könnte noch funktionieren
-            
         df_plot = pd.DataFrame(plot_data_list)
 
-        # --- 2. Plot-Setup ---
+        # --- 2. Plot-Setup (7x2 Grid, wie zuvor) ---
         plt.style.use('seaborn-v0_8-whitegrid')
-        fig, axs = plt.subplots(4, 2, figsize=(20, 26))
-
+        fig, axs = plt.subplots(7, 2, figsize=(20, 38))
         gwl_colors = {f'+{gwls_to_plot[0]}°C': '#4575b4', f'+{gwls_to_plot[1]}°C': '#d73027'}
         
         plot_grid = {
@@ -2078,31 +2083,27 @@ class Visualizer:
             (2, 0): {'key': 'DJF_spei', 'title': 'e) Winter (DJF) SPEI-4'},
             (2, 1): {'key': 'JJA_spei', 'title': 'f) Summer (JJA) SPEI-4'},
             (3, 0): {'key': 'DJF_discharge', 'title': 'g) Winter (DJF) Discharge'},
-            (3, 1): {'key': 'JJA_discharge', 'title': 'h) Summer (JJA) Discharge'}
+            (3, 1): {'key': 'JJA_discharge', 'title': 'h) Summer (JJA) Discharge'},
+            (4, 0): {'key': 'Mar_discharge', 'title': 'i) March Discharge (lagged)'},
+            (4, 1): {'key': 'Sep_discharge', 'title': 'j) September Discharge (lagged)'},
+            (5, 0): {'key': 'Apr_discharge', 'title': 'k) April Discharge (lagged)'},
+            (5, 1): {'key': 'Oct_discharge', 'title': 'l) October Discharge (lagged)'},
+            (6, 0): {'key': 'May_discharge', 'title': 'm) May Discharge (lagged)'},
+            (6, 1): {'key': 'Nov_discharge', 'title': 'n) November Discharge (lagged)'}
         }
         
         storyline_display_order = [
-            'MMM', 
-            # 'Northward Shift Only', # <-- AUSKOMMENTIERT
-            'Slow Jet & Northward Shift', 
-            'Fast Jet & Northward Shift',
-            # 'Southward Shift Only', # <-- AUSKOMMENTIERT
-            'Slow Jet & Southward Shift', 
-            'Fast Jet & Southward Shift',
-            # 'Slow Jet Only',        # <-- AUSKOMMENTIERT
-            # 'Fast Jet Only',        # <-- AUSKOMMENTIERT
-            # 'Extreme NW',           # <-- AUSKOMMENTIERT
-            # 'Extreme SE'            # <-- AUSKOMMENTIERT
+            'MMM', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
+            'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
         ]
         
-        # --- 3. Plotting-Schleife ---
+        # --- 3. Plotting-Schleife (wie zuvor, mit Anpassungen für Schwellenlinien) ---
         for (row, col), plot_info in plot_grid.items():
             ax = axs[row, col]
             impact_key = plot_info['key']
-            
             is_spei_plot = 'spei' in impact_key
-            
-            # Fallback auf Balkendiagramm für SPEI
+
+            # Fallback für SPEI (wie zuvor)
             if is_spei_plot:
                 df_spei_list = []
                 for gwl_float in gwls_to_plot:
@@ -2110,122 +2111,163 @@ class Visualizer:
                     for storyline_name in storyline_display_order:
                         if storyline_name in impacts:
                             df_spei_list.append({
-                                'gwl': f'+{gwl_float}°C',
-                                'storyline': storyline_name,
+                                'gwl': f'+{gwl_float}°C', 'storyline': storyline_name,
                                 'value': impacts[storyline_name].get('total')
                             })
-                if not df_spei_list: continue
+                if not df_spei_list:
+                    ax.text(0.5, 0.5, "SPEI Data N/A", ha='center', va='center', transform=ax.transAxes)
+                    ax.set_title(plot_info['title'], loc='left', fontsize=14, weight='bold')
+                    continue
                 df_spei = pd.pivot_table(pd.DataFrame(df_spei_list),
                                         index='storyline', columns='gwl', values='value').reindex(storyline_display_order).dropna(how='all')
-                
-                # --- START DER KORREKTUR FÜR EINHEITLICHE FARBEN ---
                 if not df_spei.empty:
                     n_gwls = len(df_spei.columns)
-                    total_bar_width = 0.8
-                    bar_width = total_bar_width / n_gwls
+                    total_bar_width = 0.8; bar_width = total_bar_width / n_gwls
                     x_pos = np.arange(len(df_spei.index))
-
                     for i, gwl_label in enumerate(df_spei.columns):
-                        # Position für jede Balkengruppe berechnen
                         offset = (i - (n_gwls - 1) / 2) * bar_width
                         positions = x_pos + offset
-                        
-                        # Korrekte Farbe aus dem Dictionary holen
-                        color = gwl_colors.get(gwl_label, f'C{i}') # Fallback, falls Schlüssel nicht existiert
-                        
+                        color = gwl_colors.get(gwl_label, f'C{i}')
                         ax.bar(positions, df_spei[gwl_label], width=bar_width, label=gwl_label, color=color)
-                    
-                    # X-Achsen-Ticks und Beschriftungen für die Gruppen setzen
                     ax.set_xticks(x_pos)
-                    # Anpassung der Labels für die reduzierten Storylines
                     xtick_labels_spei = [name.replace(' & ', ' &\n').replace(' (MMM)','') for name in df_spei.index]
                     ax.set_xticklabels(xtick_labels_spei, rotation=45, ha="right", fontsize=11)
                     ax.legend(title="GWL")
-                # --- ENDE DER KORREKTUR ---
 
-            # Boxplots + Stripplots für alle anderen Variablen
+            # Boxplots + Stripplots für tas, pr, discharge (wie zuvor)
             else:
-                if df_plot.empty: continue # Prüfen ob df_plot leer ist
+                if df_plot.empty:
+                    ax.text(0.5, 0.5, "Data N/A", ha='center', va='center', transform=ax.transAxes)
+                    ax.set_title(plot_info['title'], loc='left', fontsize=14, weight='bold')
+                    continue
                 data_subset = df_plot[df_plot['impact_key'] == impact_key]
-                if data_subset.empty: continue
+                if data_subset.empty:
+                    ax.text(0.5, 0.5, "Data N/A", ha='center', va='center', transform=ax.transAxes)
+                    ax.set_title(plot_info['title'], loc='left', fontsize=14, weight='bold')
+                    continue
 
                 sns.boxplot(data=data_subset, x='storyline', y='value', hue='gwl', ax=ax,
                             order=storyline_display_order, palette=gwl_colors,
                             linewidth=1.2, showfliers=False, boxprops={'alpha': 0.7})
-                
                 sns.stripplot(data=data_subset, x='storyline', y='value', hue='gwl', ax=ax,
                             order=storyline_display_order, palette=gwl_colors,
                             dodge=True, jitter=0.15, size=4, edgecolor='gray', linewidth=0.5)
-
                 handles, labels = ax.get_legend_handles_labels()
-                unique_handles = handles[:len(gwls_to_plot)]
-                unique_labels = labels[:len(gwls_to_plot)]
-                ax.legend(unique_handles, unique_labels, title='GWL')
+                unique_handles = []; unique_labels = []; seen_labels = set()
+                for h, l in zip(handles, labels):
+                    if l not in seen_labels and l in gwl_colors:
+                         unique_handles.append(h); unique_labels.append(l); seen_labels.add(l)
+                if unique_handles: ax.legend(unique_handles, unique_labels, title='GWL')
+                else:
+                     if ax.get_legend() is not None: ax.get_legend().remove()
 
-            # --- 4. Formatierung für alle Subplots ---
+            # --- 4. Formatierung (wie zuvor, mit Anpassung für Schwellenlinien) ---
             ax.set_title(plot_info['title'], loc='left', fontsize=14, weight='bold')
             ax.axhline(0, color='black', linestyle='-', linewidth=0.8, zorder=1)
             ax.set_xlabel('')
             
             unit = ''
             if 'tas' in impact_key: unit = '(°C)'
-            elif 'discharge' in impact_key: unit = '(m³/s)'
             elif 'pr' in impact_key: unit = '(%)'
+            elif 'discharge' in impact_key: unit = '(m³/s)'
             elif is_spei_plot: unit = '(Std. Dev.)'
             
             if col == 0: ax.set_ylabel(f'Projected Change {unit}', fontsize=12)
             else: ax.set_ylabel('')
             
-            if not is_spei_plot:
-                if row < 3:
-                    ax.set_xticklabels([])
-                else:
-                    # Anpassung der Labels für die reduzierten Storylines
-                    xtick_labels = [name.replace(' & ', ' &\n').replace(' (MMM)','').replace(' Only', '\n(Only)') for name in storyline_display_order]
-                    ax.set_xticklabels(xtick_labels, rotation=45, ha="right", fontsize=11)
+            if row < 6 or is_spei_plot:
+                ax.set_xticklabels([])
+            else:
+                xtick_labels = [name.replace(' & ', ' &\n').replace(' (MMM)','') for name in storyline_display_order]
+                ax.set_xticklabels(xtick_labels, rotation=45, ha="right", fontsize=11)
             
+            # --- START: MODIFIKATION (Threshold Lines) ---
             if 'discharge' in impact_key:
-                season_lower = 'winter' if 'DJF' in impact_key else 'summer'
-                hist_mean = discharge_data_historical.get(f'{season_lower}_mean')
-                if hist_mean:
-                    thresh30 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold_30')
-                    thresh10 = discharge_data_historical.get(f'{season_lower}_lowflow_threshold')
-                    threshLNWL = discharge_data_historical.get(f'{season_lower}_lowflow_lnwl') # <-- NEU
-                    
-                    if thresh30: ax.axhline(thresh30-hist_mean, color='saddlebrown', linestyle='dotted', linewidth=2.5, zorder=5)
-                    if thresh10: ax.axhline(thresh10-hist_mean, color='black', linestyle=':', linewidth=2.5, zorder=5)
-                    if threshLNWL: ax.axhline(threshLNWL-hist_mean, color='red', linestyle='-.', linewidth=2.5, zorder=5) # <-- NEU
+                # Get the specific thresholds calculated for THIS impact_key (e.g., 'Mar_discharge')
+                key_thresholds = threshold_data.get(impact_key, {})
+                
+                # We need the historical mean *for this specific key* to plot change relative to 0
+                # Retrieve it by recalculating from the historical discharge data passed in
+                hist_mean_specific = np.nan # Default
+                hist_discharge_monthly = DataProcessor.assign_season_to_dataarray(discharge_data_historical.get('monthly_historical_da'))
+                if hist_discharge_monthly is not None:
+                     if impact_key in ['DJF_discharge', 'JJA_discharge']:
+                         season_name = 'Winter' if 'DJF' in impact_key else 'Summer'
+                         hist_ts_mean = DataProcessor.calculate_seasonal_means(hist_discharge_monthly)
+                         if hist_ts_mean is not None:
+                             hist_ts_filtered = DataProcessor.filter_by_season(hist_ts_mean, season_name)
+                             if hist_ts_filtered is not None:
+                                 hist_mean_specific = hist_ts_filtered.mean().item()
+                     else: # Monthly key
+                         month_num = int(impact_key[0:impact_key.find('_')].replace('Mar','3').replace('Apr','4').replace('May','5').replace('Sep','9').replace('Oct','10').replace('Nov','11'))
+                         hist_ts_monthly_filtered = hist_discharge_monthly.where(hist_discharge_monthly.time.dt.month == month_num, drop=True)
+                         if hist_ts_monthly_filtered is not None and hist_ts_monthly_filtered.size > 0:
+                             hist_mean_specific = hist_ts_monthly_filtered.mean().item()
+
+                if not np.isnan(hist_mean_specific):
+                    # LNWL (fixed)
+                    lnwl_event_name = [k for k in key_thresholds if 'LNWL' in k]
+                    if lnwl_event_name:
+                         lnwl_val = key_thresholds[lnwl_event_name[0]].get('val')
+                         if lnwl_val is not None:
+                             ax.axhline(lnwl_val - hist_mean_specific, color='red', linestyle='-.', linewidth=2.5, zorder=5)
+
+                    # Extreme Low-Flow (1%)
+                    low_extreme_event_name = [k for k in key_thresholds if '<1%' in k]
+                    if low_extreme_event_name:
+                         low_extreme_val = key_thresholds[low_extreme_event_name[0]].get('val')
+                         if low_extreme_val is not None:
+                             ax.axhline(low_extreme_val - hist_mean_specific, color='darkviolet', linestyle=(0, (3, 5)), linewidth=2.5, zorder=5) # Dashed-dot
+
+                    # Extreme High-Flow (99%)
+                    high_extreme_event_name = [k for k in key_thresholds if '>99%' in k]
+                    if high_extreme_event_name:
+                         high_extreme_val = key_thresholds[high_extreme_event_name[0]].get('val')
+                         if high_extreme_val is not None:
+                             ax.axhline(high_extreme_val - hist_mean_specific, color='deepskyblue', linestyle=(0, (5, 5)), linewidth=2.5, zorder=5) # Dashed
+            # --- ENDE: MODIFIKATION ---
 
         # --- 5. Finale Formatierung der gesamten Figur ---
-        handles, labels = axs[0, 0].get_legend_handles_labels()
-        unique_labels_map = dict(zip(labels, handles))
+        handles, labels = axs[0, 0].get_legend_handles_labels() # Get GWL labels
+        unique_labels_map = {}
+        for l, h in zip(labels, handles):
+            if l in gwl_colors and l not in unique_labels_map:
+                unique_labels_map[l] = h
         
-        low_flow_10_val = discharge_data_historical.get('winter_lowflow_threshold', 'N/A')
-        low_flow_30_val = discharge_data_historical.get('winter_lowflow_threshold_30', 'N/A')
-        lnwl_val = discharge_data_historical.get('winter_lowflow_lnwl', 'N/A') # <-- NEU
+        # Add threshold lines to legend dynamically based on what was plotted
+        # Need to access one of the threshold dicts to get names and values (use DJF as example)
+        djf_thresholds = threshold_data.get('DJF_discharge', {})
         
-        if low_flow_10_val != 'N/A':
-            unique_labels_map[f'Moderate Low-Flow ({low_flow_30_val} m³/s)'] = plt.Line2D([0], [0], color='saddlebrown', linestyle='dotted', linewidth=2.5)
-            unique_labels_map[f'Extreme Low-Flow ({low_flow_10_val} m³/s)'] = plt.Line2D([0], [0], color='black', linestyle=':', linewidth=2.5)
-        
-        if lnwl_val != 'N/A': # <-- NEU
-            unique_labels_map[f'Low Navigable (LNWL) ({lnwl_val} m³/s)'] = plt.Line2D([0], [0], color='red', linestyle='-.', linewidth=2.5) # <-- NEU
+        lnwl_key = [k for k in djf_thresholds if 'LNWL' in k]
+        if lnwl_key:
+             lnwl_val_str = f"{djf_thresholds[lnwl_key[0]].get('val', '?'):.0f}"
+             unique_labels_map[f'Low Navigable (LNWL, ~{lnwl_val_str} m³/s)'] = plt.Line2D([0], [0], color='red', linestyle='-.', linewidth=2.5)
 
-        fig.legend(unique_labels_map.values(), unique_labels_map.keys(), loc='lower center', bbox_to_anchor=(0.5, 0.08), ncol=2, fontsize=12, frameon=False)
-        
-        if storyline_correlations:
-            pass # Code für Korrelationstabelle kann hier bleiben
+        low_extreme_key = [k for k in djf_thresholds if '<1%' in k]
+        if low_extreme_key:
+             low_val_str = f"{djf_thresholds[low_extreme_key[0]].get('val', '?'):.0f}"
+             unique_labels_map[f'Extreme Low-Flow (<1%, ~{low_val_str} m³/s)'] = plt.Line2D([0], [0], color='darkviolet', linestyle=(0, (3, 5)), linewidth=2.5)
 
+        high_extreme_key = [k for k in djf_thresholds if '>99%' in k]
+        if high_extreme_key:
+             high_val_str = f"{djf_thresholds[high_extreme_key[0]].get('val', '?'):.0f}"
+             unique_labels_map[f'Extreme High-Flow (>99%, ~{high_val_str} m³/s)'] = plt.Line2D([0], [0], color='deepskyblue', linestyle=(0, (5, 5)), linewidth=2.5)
+
+        # Place legend below the plot
+        fig.legend(unique_labels_map.values(), unique_labels_map.keys(), loc='lower center', bbox_to_anchor=(0.5, 0.06), ncol=3, fontsize=12, frameon=False)
+        
         main_title = f"Projected Changes for Jet Stream Storylines ({scenario.upper()})"
         ref_period_text = f"Changes relative to the {config.CMIP6_ANOMALY_REF_START}-{config.CMIP6_ANOMALY_REF_END} reference period"
         fig.suptitle(f"{main_title}\n{ref_period_text}", fontsize=18, weight='bold', y=0.99)
         
-        plt.subplots_adjust(left=0.07, right=0.98, top=0.96, bottom=0.15, hspace=0.3, wspace=0.15)
+        # Adjust layout
+        plt.subplots_adjust(left=0.07, right=0.98, top=0.965, bottom=0.12, hspace=0.45, wspace=0.15)
         
+        # Keep the original filename
         filename = os.path.join(config.PLOT_DIR, f"storyline_impacts_summary_4x2_boxplots_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved 4x2 storyline impacts boxplot summary for {scenario} to {filename}")
+        logging.info(f"Saved EXTENDED 7x2 storyline impacts boxplot summary (with percentile lines) for {scenario} to {filename}")
         
     @staticmethod
     def plot_extreme_discharge_frequency_comparison(frequency_data, config):
@@ -2293,56 +2335,60 @@ class Visualizer:
         """
         Creates a comprehensive plot showing the change in return periods for
         low-flow and high-flow events and the change in interannual standard deviation.
-        MODIFIED: Now visualizes individual model members for each storyline using
+        MODIFIED: Now visualizes 8 "seasons" (DJF, MAM, JJA, SON) using
         boxplots with an overlaid stripplot AND adds n=X/Y annotations.
-        MODIFIED: Dynamically creates columns for low-flow and high-flow events.
+        MODIFIED: X-axis labels are shown on ALL return period subplots.
         """
         if not results or not config or 'thresholds' not in results:
             logging.warning(f"Cannot plot return period/std dev change for {scenario}: Missing results or thresholds.")
             return
 
-        logging.info(f"Plotting storyline return period (low & high flow) and std dev changes for {scenario}...")
+        logging.info(f"Plotting storyline return period (seasonal & lagged) and std dev changes for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
-        seasons_to_plot = ['Winter', 'Summer']
         
-        # --- MODIFIKATION START: Schlüssel aufteilen ---
-        all_event_keys = list(results.get('thresholds', {}).get(seasons_to_plot[0], {}).keys())
+        # Define all 8 impact keys in plot order
+        impact_keys_in_order = [
+            'DJF_discharge', 'Mar_discharge', 'Apr_discharge', 'May_discharge',
+            'JJA_discharge', 'Sep_discharge', 'Oct_discharge', 'Nov_discharge'
+        ]
+        
+        # Filter out keys that have no threshold data
+        impact_keys_to_plot = [k for k in impact_keys_in_order if k in results.get('thresholds', {})]
+        num_rows = len(impact_keys_to_plot)
+        if num_rows == 0:
+            logging.warning(f"No threshold data found for any impact key for {scenario}.")
+            return
+            
+        # Get event keys from the first available impact key
+        sample_thresholds = results['thresholds'][impact_keys_to_plot[0]]
+        all_event_keys = list(sample_thresholds.keys())
         if 'historical_std_dev' in all_event_keys: all_event_keys.remove('historical_std_dev')
         
-        # Holen der Typinformationen aus dem ersten Saison-Threshold (Annahme: gleich für beide)
-        thresholds_sample = results['thresholds'][seasons_to_plot[0]]
-        
-        low_flow_keys = sorted([k for k in all_event_keys if thresholds_sample.get(k, {}).get('type', 'low') == 'low'])
-        high_flow_keys = sorted([k for k in all_event_keys if thresholds_sample.get(k, {}).get('type') == 'high'])
+        low_flow_keys = sorted([k for k in all_event_keys if sample_thresholds.get(k, {}).get('type', 'low') == 'low'])
+        high_flow_keys = sorted([k for k in all_event_keys if sample_thresholds.get(k, {}).get('type') == 'high'])
         
         num_low_flow_cols = len(low_flow_keys)
         num_high_flow_cols = len(high_flow_keys)
         num_std_dev_cols = 1
         num_total_cols = num_low_flow_cols + num_high_flow_cols + num_std_dev_cols
 
-        fig = plt.figure(figsize=(5.5 * num_total_cols, 12))
+        fig = plt.figure(figsize=(5.5 * num_total_cols, 3.5 * num_rows))
         
         width_ratios = [6] * num_low_flow_cols + [6] * num_high_flow_cols + [3.5]
-        gs = matplotlib.gridspec.GridSpec(len(seasons_to_plot), num_total_cols, width_ratios=width_ratios)
-        axs = [[fig.add_subplot(gs[r, c]) for c in range(num_total_cols)] for r in range(len(seasons_to_plot))]
-        # --- MODIFIKATION ENDE ---
+        # Increased hspace slightly for x-labels
+        gs = matplotlib.gridspec.GridSpec(num_rows, num_total_cols, width_ratios=width_ratios, hspace=0.45)
+        axs = [[fig.add_subplot(gs[r, c]) for c in range(num_total_cols)] for r in range(num_rows)]
         
         plt.style.use('seaborn-v0_8-whitegrid')
 
         storyline_order = [
-            'MMM', 
-            # 'Northward Shift Only', # <-- AUSKOMMENTIERT
-            'Slow Jet & Northward Shift', 
+            'MMM',
+            'Slow Jet & Northward Shift',
             'Fast Jet & Northward Shift',
-            # 'Southward Shift Only', # <-- AUSKOMMENTIERT
-            'Slow Jet & Southward Shift', 
+            'Slow Jet & Southward Shift',
             'Fast Jet & Southward Shift',
-            # 'Slow Jet Only',        # <-- AUSKOMMENTIERT
-            # 'Fast Jet Only',        # <-- AUSKOMMENTIERT
-            # 'Extreme NW',           # <-- AUSKOMMENTIERT
-            # 'Extreme SE'            # <-- AUSKOMMENTIERT
         ]
         
         num_storylines = len(storyline_order)
@@ -2352,20 +2398,20 @@ class Visualizer:
 
         gwl_colors = {f'+{gwls_to_plot[0]}°C': '#ff7f0e', f'+{gwls_to_plot[1]}°C': '#d62728'}
         
-        # --- Datenaufbereitung (mit allen Schlüsseln) ---
+        # Data preparation
         plot_data_list = []
-        all_event_keys_combined = low_flow_keys + high_flow_keys # Alle zu plottenden Schlüssel
+        all_event_keys_combined = low_flow_keys + high_flow_keys
         
         for gwl in gwls_to_plot:
-            for season in seasons_to_plot:
+            for impact_key in impact_keys_to_plot:
                 for event_key in all_event_keys_combined:
                     for storyline in storyline_order:
-                        event_data = results.get(gwl, {}).get(season, {}).get(storyline, {}).get(event_key)
+                        event_data = results.get(gwl, {}).get(impact_key, {}).get(storyline, {}).get(event_key)
                         if event_data and 'future_return_periods_all_models' in event_data:
                             for model_period in event_data['future_return_periods_all_models']:
                                 if np.isfinite(model_period):
                                     plot_data_list.append({
-                                        'season': season,
+                                        'impact_key': impact_key,
                                         'event': event_key,
                                         'storyline': storyline,
                                         'gwl': f'+{gwl}°C',
@@ -2381,15 +2427,16 @@ class Visualizer:
         max_return_period_for_plot = 1000
         df_plot_clipped = df_plot[df_plot['return_period'] <= max_return_period_for_plot].copy()
         
-        # --- Plot-Schleife (jetzt aufgeteilt) ---
-        for row, season in enumerate(seasons_to_plot):
+        # Plotting Loop
+        for row, impact_key in enumerate(impact_keys_to_plot):
             current_col_idx = 0
+            impact_key_label = impact_key.split('_')[0]
             
             # --- Plot Low-Flow Events ---
             for event_key in low_flow_keys:
                 ax = axs[row][current_col_idx]
                 ax.set_ylim(y_limits)
-                data_subset = df_plot_clipped[(df_plot_clipped['season'] == season) & (df_plot_clipped['event'] == event_key)]
+                data_subset = df_plot_clipped[(df_plot_clipped['impact_key'] == impact_key) & (df_plot_clipped['event'] == event_key)]
                 
                 if not data_subset.empty:
                     sns.boxplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
@@ -2401,7 +2448,7 @@ class Visualizer:
                                 ax=ax, dodge=True, jitter=0.15, size=4, 
                                 edgecolor='gray', linewidth=0.5, alpha=0.9, orient='h')
 
-                hist_period = results.get('thresholds', {}).get(season, {}).get(event_key, {}).get('hist_return_period')
+                hist_period = results.get('thresholds', {}).get(impact_key, {}).get(event_key, {}).get('hist_return_period')
                 if hist_period is not None and np.isfinite(hist_period):
                     ax.axvline(x=hist_period, color='skyblue', linestyle='--', linewidth=3, zorder=5)
 
@@ -2412,7 +2459,7 @@ class Visualizer:
                 
                 if current_col_idx == 0:
                     ax.set_yticklabels(y_tick_labels, fontsize=9)
-                    ax.set_ylabel(season, fontsize=14, weight='bold')
+                    ax.set_ylabel(impact_key_label, fontsize=14, weight='bold')
                 else:
                     ax.set_yticklabels([])
                     ax.set_ylabel('')
@@ -2422,29 +2469,34 @@ class Visualizer:
                 
                 if ax.get_legend() is not None: ax.get_legend().remove()
                 
-                # n=X/Y Anmerkungen
+                # n=X/Y Anmerkungen (wie zuvor)
                 for i, storyline in enumerate(storyline_order):
                     y_base = y_ticks[i]
-                    event_data_1 = results.get(gwls_to_plot[0], {}).get(season, {}).get(storyline, {}).get(event_key)
+                    event_data_1 = results.get(gwls_to_plot[0], {}).get(impact_key, {}).get(storyline, {}).get(event_key)
                     if event_data_1 and 'model_count_X' in event_data_1:
                         X1, Y1 = event_data_1['model_count_X'], event_data_1['model_count_Y']
-                        ax.text(0.98, y_base - 0.2, f"n={X1}/{Y1}", transform=ax.get_yaxis_transform(), 
+                        ax.text(0.98, y_base - 0.2, f"n={X1}/{Y1}", transform=ax.get_yaxis_transform(),
                                 horizontalalignment='right', fontsize=7, weight='bold', color=gwl_colors[f'+{gwls_to_plot[0]}°C'],
                                 bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
-                    event_data_2 = results.get(gwls_to_plot[1], {}).get(season, {}).get(storyline, {}).get(event_key)
+                    event_data_2 = results.get(gwls_to_plot[1], {}).get(impact_key, {}).get(storyline, {}).get(event_key)
                     if event_data_2 and 'model_count_X' in event_data_2:
                         X2, Y2 = event_data_2['model_count_X'], event_data_2['model_count_Y']
-                        ax.text(0.98, y_base + 0.2, f"n={X2}/{Y2}", transform=ax.get_yaxis_transform(), 
+                        ax.text(0.98, y_base + 0.2, f"n={X2}/{Y2}", transform=ax.get_yaxis_transform(),
                                 horizontalalignment='right', fontsize=7, weight='bold', color=gwl_colors[f'+{gwls_to_plot[1]}°C'],
                                 bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
                 
+                # --- START: MODIFIKATION ---
+                # X-Achsen-Label für ALLE Return-Period-Plots setzen
+                ax.set_xlabel('Return Period (Years)', fontsize=11)
+                # --- ENDE: MODIFIKATION ---
+
                 current_col_idx += 1
 
-            # --- NEU: Plot High-Flow Events ---
+            # --- Plot High-Flow Events ---
             for event_key in high_flow_keys:
                 ax = axs[row][current_col_idx]
                 ax.set_ylim(y_limits)
-                data_subset = df_plot_clipped[(df_plot_clipped['season'] == season) & (df_plot_clipped['event'] == event_key)]
+                data_subset = df_plot_clipped[(df_plot_clipped['impact_key'] == impact_key) & (df_plot_clipped['event'] == event_key)]
                 
                 if not data_subset.empty:
                     sns.boxplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
@@ -2453,10 +2505,10 @@ class Visualizer:
                                 boxprops={'alpha': 0.85})
                     sns.stripplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
                                 order=storyline_order, palette=gwl_colors,
-                                ax=ax, dodge=True, jitter=0.15, size=4, 
+                                ax=ax, dodge=True, jitter=0.15, size=4,
                                 edgecolor='gray', linewidth=0.5, alpha=0.9, orient='h')
 
-                hist_period = results.get('thresholds', {}).get(season, {}).get(event_key, {}).get('hist_return_period')
+                hist_period = results.get('thresholds', {}).get(impact_key, {}).get(event_key, {}).get('hist_return_period')
                 if hist_period is not None and np.isfinite(hist_period):
                     ax.axvline(x=hist_period, color='skyblue', linestyle='--', linewidth=3, zorder=5)
 
@@ -2473,36 +2525,41 @@ class Visualizer:
                 
                 if ax.get_legend() is not None: ax.get_legend().remove()
                 
-                # n=X/Y Anmerkungen
+                # n=X/Y Anmerkungen (wie zuvor)
                 for i, storyline in enumerate(storyline_order):
                     y_base = y_ticks[i]
-                    event_data_1 = results.get(gwls_to_plot[0], {}).get(season, {}).get(storyline, {}).get(event_key)
+                    event_data_1 = results.get(gwls_to_plot[0], {}).get(impact_key, {}).get(storyline, {}).get(event_key)
                     if event_data_1 and 'model_count_X' in event_data_1:
                         X1, Y1 = event_data_1['model_count_X'], event_data_1['model_count_Y']
-                        ax.text(0.98, y_base - 0.2, f"n={X1}/{Y1}", transform=ax.get_yaxis_transform(), 
+                        ax.text(0.98, y_base - 0.2, f"n={X1}/{Y1}", transform=ax.get_yaxis_transform(),
                                 horizontalalignment='right', fontsize=7, weight='bold', color=gwl_colors[f'+{gwls_to_plot[0]}°C'],
                                 bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
-                    event_data_2 = results.get(gwls_to_plot[1], {}).get(season, {}).get(storyline, {}).get(event_key)
+                    event_data_2 = results.get(gwls_to_plot[1], {}).get(impact_key, {}).get(storyline, {}).get(event_key)
                     if event_data_2 and 'model_count_X' in event_data_2:
                         X2, Y2 = event_data_2['model_count_X'], event_data_2['model_count_Y']
-                        ax.text(0.98, y_base + 0.2, f"n={X2}/{Y2}", transform=ax.get_yaxis_transform(), 
+                        ax.text(0.98, y_base + 0.2, f"n={X2}/{Y2}", transform=ax.get_yaxis_transform(),
                                 horizontalalignment='right', fontsize=7, weight='bold', color=gwl_colors[f'+{gwls_to_plot[1]}°C'],
                                 bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
+
+                # --- START: MODIFIKATION ---
+                # X-Achsen-Label für ALLE Return-Period-Plots setzen
+                ax.set_xlabel('Return Period (Years)', fontsize=11)
+                # --- ENDE: MODIFIKATION ---
                 
                 current_col_idx += 1
 
-            # --- Plot-Schleife für die Standardabweichung ---
-            ax_std = axs[row][current_col_idx] # Letzte Spalte
+            # --- Plot Standard Deviation ---
+            ax_std = axs[row][current_col_idx]
             ax_std.set_ylim(y_limits)
             
             if row == 0:
                 ax_std.set_title("Interannual\nVariability (σ)", fontsize=11, weight='bold')
 
-            hist_std_dev = results.get('thresholds', {}).get(season, {}).get('historical_std_dev')
+            hist_std_dev = results.get('thresholds', {}).get(impact_key, {}).get('historical_std_dev')
             if hist_std_dev is not None:
                 bar_height = 0.25
-                future_std_gwl1 = [results.get(gwls_to_plot[0], {}).get(season, {}).get(s, {}).get('future_std_dev', np.nan) for s in storyline_order]
-                future_std_gwl2 = [results.get(gwls_to_plot[1], {}).get(season, {}).get(s, {}).get('future_std_dev', np.nan) for s in storyline_order]
+                future_std_gwl1 = [results.get(gwls_to_plot[0], {}).get(impact_key, {}).get(s, {}).get('future_std_dev', np.nan) for s in storyline_order]
+                future_std_gwl2 = [results.get(gwls_to_plot[1], {}).get(impact_key, {}).get(s, {}).get('future_std_dev', np.nan) for s in storyline_order]
                 
                 ax_std.barh(y_ticks + bar_height/2, future_std_gwl2, height=bar_height, color=gwl_colors[f'+{gwls_to_plot[1]}°C'], edgecolor='black', zorder=10)
                 ax_std.barh(y_ticks - bar_height/2, future_std_gwl1, height=bar_height, color=gwl_colors[f'+{gwls_to_plot[0]}°C'], edgecolor='black', zorder=10)
@@ -2514,42 +2571,47 @@ class Visualizer:
             ax_std.set_yticklabels([])
             ax_std.grid(axis='y', linestyle='none')
             ax_std.grid(axis='x', linestyle=':', which='both')
+            
+            # --- START: MODIFIKATION ---
+            # X-Achsen-Beschriftung auch hier für alle setzen (war schon so, aber zur Sicherheit)
+            ax_std.set_xlabel('Std. Dev. (m³/s)', fontsize=11)
+            # --- ENDE: MODIFIKATION ---
 
         # --- Finale Formatierung der gesamten Figur ---
-        for row_axs in axs:
-            # Wende Log-Skala und Ticks auf alle Wiederkehrperioden-Plots an
-            for i in range(num_low_flow_cols + num_high_flow_cols):
-                ax = row_axs[i]
+        # --- START: MODIFIKATION ---
+        # Wende Log-Skala und Ticks auf ALLE Return-Period-Plots an
+        for r in range(num_rows):
+            for c in range(num_low_flow_cols + num_high_flow_cols):
+                ax = axs[r][c]
                 ax.set_xscale('log')
                 ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
                 ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
                 ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 500, 1000])
-                ax.set_xlim(left=0.8, right=max_return_period_for_plot * 2.5) # Platz für Text
+                ax.set_xlim(left=0.8, right=max_return_period_for_plot * 2.5)
+                # Entferne X-Tick-Labels, außer für die unterste Reihe (optional, hier entfernt für Konsistenz mit Titel)
+                # if r < num_rows - 1:
+                #     ax.set_xticklabels([])
+        # --- ENDE: MODIFIKATION ---
 
-        # X-Achsen-Beschriftungen nur für die untere Zeile
-        for col in range(num_total_cols):
-            if col < (num_low_flow_cols + num_high_flow_cols):
-                axs[-1][col].set_xlabel('Return Period (Years)', fontsize=11)
-            else:
-                axs[-1][col].set_xlabel('Std. Dev. (m³/s)', fontsize=11)
-        
         legend_handles = [
             plt.Line2D([0], [0], color='skyblue', linestyle='--', linewidth=3, label='Historical'),
             mpatches.Patch(color=gwl_colors[f'+{gwls_to_plot[0]}°C'], label=f'Future (+{gwls_to_plot[0]}°C)'),
             mpatches.Patch(color=gwl_colors[f'+{gwls_to_plot[1]}°C'], label=f'Future (+{gwls_to_plot[1]}°C)')
         ]
-        fig.legend(handles=legend_handles, loc='lower center', bbox_to_anchor=(0.5, 0.0), ncol=3, fontsize=12)
+        # Position der Legende leicht nach oben verschoben
+        fig.legend(handles=legend_handles, loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=3, fontsize=12)
         
-        fig.suptitle(f"Change in Return Period and Variability of Low/High-Flow Events for {scenario.upper()}",
+        fig.suptitle(f"Change in Return Period and Variability of Discharge Events for {scenario.upper()}",
                     fontsize=16, weight='bold')
         
-        fig.tight_layout(rect=[0.02, 0.05, 0.98, 0.94], h_pad=2, w_pad=1.5)
+        # Anpassung des Layouts
+        bottom_margin = 0.08 # Etwas mehr Platz für Legende
+        fig.tight_layout(rect=[0.02, bottom_margin, 0.98, 0.95], h_pad=2, w_pad=1.5)
         
-        # Der Dateiname wird leicht geändert, um die neue Funktionalität widerzuspiegeln
         filename = os.path.join(config.PLOT_DIR, f"storyline_discharge_return_period_comparison_boxplots_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved return period boxplot (low & high flow) to {filename}")
+        logging.info(f"Saved return period boxplot (seasonal & lagged, all x-labels) to {filename}")
         
     @staticmethod
     def plot_storyline_wind_change_maps(map_data, config, scenario, filename="storyline_u850_change_maps.png"):

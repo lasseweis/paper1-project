@@ -301,10 +301,32 @@ class StorylineAnalyzer:
             pr_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['pr']))
             tas_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['tas']))
             
+            # --- START: MODIFIKATION (Lagged Discharge Metrics) ---
             if 'discharge' in data and data['discharge'] is not None:
-                discharge_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['discharge']))
+                # This is the monthly data, now with 'month' and 'season_year' coords
+                discharge_monthly_full = DataProcessor.assign_season_to_dataarray(data['discharge'])
+                discharge_seas = DataProcessor.calculate_seasonal_means(discharge_monthly_full)
+                
+                def get_monthly_timeseries(monthly_data, month_num):
+                    """Helper to get a monthly timeseries with a season_year time coord."""
+                    if monthly_data is None: return None
+                    ts = monthly_data.where(monthly_data.time.dt.month == month_num, drop=True)
+                    # Group by 'season_year' to align with seasonal jet indices
+                    ts_grouped = ts.groupby('season_year').mean('time', skipna=True)
+                    return ts_grouped
+
+                # Store monthly timeseries for lagged impacts
+                metric_timeseries[key]['Mar_discharge'] = get_monthly_timeseries(discharge_monthly_full, 3)
+                metric_timeseries[key]['Apr_discharge'] = get_monthly_timeseries(discharge_monthly_full, 4)
+                metric_timeseries[key]['May_discharge'] = get_monthly_timeseries(discharge_monthly_full, 5)
+                metric_timeseries[key]['Sep_discharge'] = get_monthly_timeseries(discharge_monthly_full, 9)
+                metric_timeseries[key]['Oct_discharge'] = get_monthly_timeseries(discharge_monthly_full, 10)
+                metric_timeseries[key]['Nov_discharge'] = get_monthly_timeseries(discharge_monthly_full, 11)
+                
             else:
                 discharge_seas = None
+                discharge_monthly_full = None # Ensure this is defined for the else case
+            # --- ENDE: MODIFIKATION ---
 
             pr_box = DataProcessor.calculate_spatial_mean(pr_seas, *box_coords)
             tas_box = DataProcessor.calculate_spatial_mean(tas_seas, *box_coords)
@@ -317,6 +339,7 @@ class StorylineAnalyzer:
                 metric_timeseries[key][f'{s_label}_pr'] = DataProcessor.filter_by_season(pr_box, season)
                 metric_timeseries[key][f'{s_label}_tas'] = DataProcessor.filter_by_season(tas_box, season)
                 if discharge_seas is not None:
+                    # This line is for the original seasonal discharge
                     metric_timeseries[key][f'{s_label}_discharge'] = DataProcessor.filter_by_season(discharge_seas, season)
 
         # Step 4: Calculate absolute metric values at historical reference and at each GWL
@@ -353,8 +376,11 @@ class StorylineAnalyzer:
                         if hist_val is not None and gwl_val is not None and not np.isnan(hist_val) and not np.isnan(gwl_val):
                             delta = gwl_val - hist_val
                             # For precipitation and discharge, calculate percentage change
+                            # --- MODIFIKATION ---
+                            # Nur Niederschlag in %, Abfluss bleibt absolut
                             if '_pr' in met and abs(hist_val) > 1e-9:
                                 delta = (delta / hist_val) * 100.0
+                            # --- ENDE MODIFIKATION ---
                             all_deltas[met][gwl][key] = delta
 
         mmm_changes = {
@@ -1975,91 +2001,112 @@ class StorylineAnalyzer:
         Analyzes the frequency and return period of low-flow AND high-flow discharge events
         for multiple statistical and fixed thresholds, AND calculates the change
         in interannual standard deviation.
+        MODIFIED: Now processes seasonal (DJF, JJA) and monthly (MAM, SON) impacts.
         MODIFIED: Now returns individual model return periods AND model counts (X/Y) for each storyline.
-        MODIFIED: Includes high-flow (95th percentile) event analysis.
+        MODIFIED: Extreme Low-Flow uses 1st percentile, Extreme High-Flow uses 99th percentile.
         """
-        logging.info("Analyzing storyline discharge return periods (low-flow & high-flow) and standard deviation...")
+        logging.info("Analyzing storyline discharge return periods (seasonal & lagged months, percentile extremes) and standard deviation...")
         
         if historical_discharge_da is None or not discharge_thresholds:
             logging.error("Historical discharge data or fixed thresholds are missing. Aborting.")
             return None
         
         results = {}
-        thresholds = {}
+        thresholds = {} # This will store thresholds calculated for EACH impact key
 
         storyline_order = [
-            'MMM', 
-            # 'Northward Shift Only', # <-- AUSKOMMENTIERT
-            'Slow Jet & Northward Shift', 
+            'MMM',
+            'Slow Jet & Northward Shift',
             'Fast Jet & Northward Shift',
-            # 'Southward Shift Only', # <-- AUSKOMMENTIERT
-            'Slow Jet & Southward Shift', 
+            'Slow Jet & Southward Shift',
             'Fast Jet & Southward Shift',
-            # 'Slow Jet Only',        # <-- AUSKOMMENTIERT
-            # 'Fast Jet Only',        # <-- AUSKOMMENTIERT
-            # 'Extreme NW',           # <-- AUSKOMMENTIERT
-            # 'Extreme SE'            # <-- AUSKOMMENTIERT
         ]
 
-        for season in ['Winter', 'Summer']:
-            season_lower = season.lower()
+        # Define all impact keys and their properties
+        impact_keys_info = {
+            # Seasons
+            'DJF_discharge': {'type': 'season', 'name': 'Winter', 'hist_key': 'winter'},
+            'JJA_discharge': {'type': 'season', 'name': 'Summer', 'hist_key': 'summer'},
+            # Lagged Months for Winter
+            'Mar_discharge': {'type': 'month', 'num': 3, 'name': 'March', 'hist_key': 'winter'},
+            'Apr_discharge': {'type': 'month', 'num': 4, 'name': 'April', 'hist_key': 'winter'},
+            'May_discharge': {'type': 'month', 'num': 5, 'name': 'May', 'hist_key': 'winter'},
+            # Lagged Months for Summer
+            'Sep_discharge': {'type': 'month', 'num': 9, 'name': 'September', 'hist_key': 'summer'},
+            'Oct_discharge': {'type': 'month', 'num': 10, 'name': 'October', 'hist_key': 'summer'},
+            'Nov_discharge': {'type': 'month', 'num': 11, 'name': 'November', 'hist_key': 'summer'}
+        }
+        
+        # Calculate Thresholds per Impact Key
+        da_with_seasons = DataProcessor.assign_season_to_dataarray(historical_discharge_da)
+        
+        for key, info in impact_keys_info.items():
             
-            seasonal_data = DataProcessor.filter_by_season(
-                DataProcessor.assign_season_to_dataarray(historical_discharge_da), season
-            )
-            if seasonal_data is None:
-                logging.error(f"Could not filter historical discharge data for season: {season}")
+            # 1. Get historical timeseries
+            if info['type'] == 'season':
+                hist_data_monthly = DataProcessor.filter_by_season(da_with_seasons, info['name'])
+            else: # 'month'
+                hist_data_monthly = da_with_seasons.where(da_with_seasons.time.dt.month == info['num'], drop=True)
+            
+            if hist_data_monthly is None or hist_data_monthly.time.size == 0:
+                logging.warning(f"No historical discharge data found for {key}")
                 continue
-            
-            hist_seasonal = seasonal_data.groupby('season_year').mean('time')
-            total_years = hist_seasonal.season_year.size
+                
+            hist_timeseries = hist_data_monthly.groupby('season_year').mean('time')
+            total_years = hist_timeseries.season_year.size
             if total_years == 0: continue
 
-            hist_std_dev = hist_seasonal.std().item()
+            hist_std_dev = hist_timeseries.std().item()
+            mean = hist_timeseries.mean().item()
+            std = hist_timeseries.std().item()
             
-            mean = hist_seasonal.mean().item()
-            std = hist_seasonal.std().item()
-            
-            moderate_fixed_threshold = discharge_thresholds.get(f'{season_lower}_lowflow_threshold_30')
-            extreme_fixed_threshold = discharge_thresholds.get(f'{season_lower}_lowflow_threshold')
-            lnwl_fixed_threshold = discharge_thresholds.get(f'{season_lower}_lowflow_lnwl')
-            
-            # --- NEU: High-Flow-Schwellenwert ---
-            high_flow_threshold = hist_seasonal.quantile(0.95).item()
+            # --- START: MODIFIKATION (Percentile Calculation) ---
+            low_extreme_threshold = hist_timeseries.quantile(0.01).item() # 1st percentile
+            high_extreme_threshold = hist_timeseries.quantile(0.99).item() # 99th percentile
+            # --- ENDE: MODIFIKATION ---
 
+            # 2. Get fixed thresholds
+            hist_key_for_fixed = info['hist_key']
+            moderate_fixed_threshold = discharge_thresholds.get(f'{hist_key_for_fixed}_lowflow_threshold_30')
+            # Fixed extreme threshold is no longer used for the event definition itself
+            # extreme_fixed_threshold = discharge_thresholds.get(f'{hist_key_for_fixed}_lowflow_threshold')
+            lnwl_fixed_threshold = discharge_thresholds.get(f'{hist_key_for_fixed}_lowflow_lnwl')
+            
+            # 3. Define Events
             event_definitions = {
-                # Low-Flow
+                # Low-Flow (Statistical)
                 f'Moderate (-1σ)': {'val': mean - 1 * std, 'type': 'low'},
                 f'Severe (-2σ)': {'val': mean - 2 * std, 'type': 'low'},
+                # Low-Flow (Fixed - Moderate & LNWL only)
                 f'Moderate Low-Flow (<{moderate_fixed_threshold} m³/s)': {'val': moderate_fixed_threshold, 'type': 'low'},
-                f'Extreme Low-Flow (<{extreme_fixed_threshold} m³/s)': {'val': extreme_fixed_threshold, 'type': 'low'},
                 f'Low Navigable (LNWL) (<{lnwl_fixed_threshold} m³/s)': {'val': lnwl_fixed_threshold, 'type': 'low'},
-                # High-Flow
-                f'High-Flow (>95%)': {'val': high_flow_threshold, 'type': 'high'}
+                # --- START: MODIFIKATION (Percentile Events) ---
+                f'Extreme Low-Flow (<1%)': {'val': low_extreme_threshold, 'type': 'low'},
+                f'Extreme High-Flow (>99%)': {'val': high_extreme_threshold, 'type': 'high'}
+                # --- ENDE: MODIFIKATION ---
             }
             
-            season_thresholds = {}
+            key_thresholds = {}
             for name, data in event_definitions.items():
                 if data['val'] is None or np.isnan(data['val']): continue
                 
-                # --- MODIFIZIERTE LOGIK ---
                 if data['type'] == 'low':
-                    hist_count = (hist_seasonal < data['val']).sum().item()
+                    hist_count = (hist_timeseries < data['val']).sum().item()
                 else: # 'high'
-                    hist_count = (hist_seasonal > data['val']).sum().item()
-                # --- ENDE MODIFIKATION ---
+                    hist_count = (hist_timeseries > data['val']).sum().item()
 
                 hist_freq = hist_count / total_years if total_years > 0 else 0
                 
-                season_thresholds[name] = {
+                key_thresholds[name] = {
                     'val': data['val'],
                     'hist_return_period': 1 / hist_freq if hist_freq > 0 else np.inf,
-                    'type': data['type'] # Wichtig für die Plot-Funktion
+                    'type': data['type']
                 }
             
-            season_thresholds['historical_std_dev'] = hist_std_dev
-            thresholds[season] = season_thresholds
+            key_thresholds['historical_std_dev'] = hist_std_dev
+            thresholds[key] = key_thresholds # Store thresholds per impact key
 
+        # --- Calculate Future Impacts (Remains largely the same) ---
         storyline_classification = cmip6_results.get('storyline_classification_2d')
         metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
         gwl_years = cmip6_results.get('gwl_threshold_years', {})
@@ -2071,11 +2118,12 @@ class StorylineAnalyzer:
 
         for gwl in config.GLOBAL_WARMING_LEVELS:
             results[gwl] = {}
-            for season in ['Winter', 'Summer']:
-                if season not in thresholds: continue
-                results[gwl][season] = {}
-                season_label = 'DJF' if season == 'Winter' else 'JJA'
-                impact_key = f"{season_label}_discharge"
+            
+            for impact_key, impact_info in impact_keys_info.items():
+                if impact_key not in thresholds: continue
+                
+                results[gwl][impact_key] = {}
+                season_label = 'DJF' if impact_info['hist_key'] == 'winter' else 'JJA'
                 
                 for storyline_name in storyline_order:
                     storyline_key = f"{season_label}_{storyline_name}"
@@ -2084,9 +2132,10 @@ class StorylineAnalyzer:
                     if not model_list:
                         continue
                     
-                    results[gwl][season][storyline_name] = {}
+                    results[gwl][impact_key][storyline_name] = {}
                     Y_total_in_storyline = len(model_list)
                     
+                    # Calculate future std dev (no change here)
                     model_std_devs = []
                     for model_run_key in model_list:
                         threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
@@ -2102,9 +2151,10 @@ class StorylineAnalyzer:
                                 model_std_devs.append(std_dev)
                     
                     if model_std_devs:
-                        results[gwl][season][storyline_name]['future_std_dev'] = np.mean(model_std_devs)
+                        results[gwl][impact_key][storyline_name]['future_std_dev'] = np.mean(model_std_devs)
 
-                    for event_name, data in thresholds[season].items():
+                    # Calculate future return periods (uses the thresholds defined above)
+                    for event_name, data in thresholds[impact_key].items():
                         if event_name == 'historical_std_dev': continue
 
                         model_return_periods = []
@@ -2117,15 +2167,12 @@ class StorylineAnalyzer:
                             ts_slice = discharge_ts.sel(season_year=slice(start_year, end_year))
 
                             if ts_slice.season_year.size > 0:
-                                # --- MODIFIZIERTE LOGIK ---
                                 if data['type'] == 'low':
                                     event_count = (ts_slice < data['val']).sum().item()
                                 else: # 'high'
                                     event_count = (ts_slice > data['val']).sum().item()
-                                # --- ENDE MODIFIKATION ---
 
                                 years_analyzed = ts_slice.season_year.size
-                                
                                 future_freq_model = event_count / years_analyzed if years_analyzed > 0 else 0
                                 future_return_period_model = 1 / future_freq_model if future_freq_model > 0 else np.inf
                                 model_return_periods.append(future_return_period_model)
@@ -2135,7 +2182,7 @@ class StorylineAnalyzer:
                             X_finite_models = len(finite_periods)
                             mean_period = np.mean(finite_periods) if finite_periods else np.inf
                             
-                            results[gwl][season][storyline_name][event_name] = {
+                            results[gwl][impact_key][storyline_name][event_name] = {
                                 'hist_return_period': data['hist_return_period'],
                                 'future_return_periods_all_models': model_return_periods,
                                 'future_return_period_mean': mean_period,

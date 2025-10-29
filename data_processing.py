@@ -756,3 +756,88 @@ class DataProcessor:
                 logging.error(traceback.format_exc())
 
         return all_discharge_data
+    
+    @staticmethod
+    def load_observed_discharge_qobs(filepath_ssp245, filepath_ssp585):
+        """
+        Loads the observed daily discharge data ('QOBS') from the two
+        scenario CSV files.
+
+        It reads both files, extracts 'date' and 'QOBS', combines them,
+        and returns a single clean daily time series.
+
+        Args:
+            filepath_ssp245 (str): Path to the SSP2-4.5 discharge CSV file.
+            filepath_ssp585 (str): Path to the SSP5-8.5 discharge CSV file.
+
+        Returns:
+            xarray.DataArray: A DataArray of daily observed discharge ('QOBS')
+                              with a 'time' dimension, or None on failure.
+        """
+        logging.info("Loading observed 'QOBS' discharge data from CSV files...")
+        
+        all_qobs_dfs = []
+        
+        for filepath in [filepath_ssp245, filepath_ssp585]:
+            if not os.path.exists(filepath):
+                logging.warning(f"Observed discharge file not found: {filepath}. Skipping.")
+                continue
+            
+            try:
+                # Read the CSV with semicolon delimiter, comma decimal, and parse 'date'
+                df = pd.read_csv(
+                    filepath,
+                    sep=';',
+                    decimal=',',
+                    parse_dates=['date'],
+                    na_values=['-0,01', ''], # Handle specific NA values
+                    usecols=['date', 'QOBS'] # Only read necessary columns
+                )
+                
+                # Set 'date' as index
+                df = df.set_index('date')
+                
+                # Convert QOBS to numeric, coercing errors
+                df['QOBS'] = pd.to_numeric(df['QOBS'], errors='coerce')
+                
+                # Drop rows where QOBS is NaN
+                df = df.dropna(subset=['QOBS'])
+                
+                if not df.empty:
+                    all_qobs_dfs.append(df)
+                    
+            except Exception as e:
+                logging.error(f"Error processing 'QOBS' from file {filepath}: {e}")
+                logging.error(traceback.format_exc())
+
+        if not all_qobs_dfs:
+            logging.error("No 'QOBS' data could be loaded from any file.")
+            return None
+
+        # Combine DataFrames from both files
+        combined_df = pd.concat(all_qobs_dfs)
+        
+        # 'QOBS' is observational data and should be identical in both files.
+        # We group by index (date) and take the first value to remove duplicates.
+        if combined_df.index.has_duplicates:
+            logging.info("Duplicate dates found in 'QOBS' data. Consolidating...")
+            combined_df = combined_df.groupby(combined_df.index).first()
+            
+        # Sort by time
+        combined_df = combined_df.sort_index()
+
+        # Convert to xarray DataArray
+        try:
+            da = combined_df['QOBS'].to_xarray()
+            da = da.rename({'date': 'time'}) # Rename index to 'time'
+            da.name = 'discharge_obs'
+            da.attrs['units'] = 'm3/s'
+            da.attrs['long_name'] = 'Observed Danube River Discharge (QOBS)'
+            da.attrs['source'] = 'CP65_4.5-Tabelle_1.csv, CP65_8.5-Tabelle_1.csv'
+            
+            logging.info(f"Successfully loaded 'QOBS' data: {da.time.size} daily steps from {da.time.min().dt.strftime('%Y-%m-%d').item()} to {da.time.max().dt.strftime('%Y-%m-%d').item()}.")
+            return da
+            
+        except Exception as e:
+            logging.error(f"Failed to convert combined 'QOBS' DataFrame to xarray: {e}")
+            return None

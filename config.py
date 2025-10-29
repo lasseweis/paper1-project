@@ -36,8 +36,8 @@ class Config:
     DISCHARGE_FILE = os.path.join(DATA_BASE_PATH, 'danube_discharge_monthly_1893-2021.xlsx')
     
     # Danube CMIP6 Discharge Data Paths ---
-    DISCHARGE_SSP245_FILE = os.path.join(DATA_BASE_PATH, 'CP16_4.5-Tabelle_1.csv')
-    DISCHARGE_SSP585_FILE = os.path.join(DATA_BASE_PATH, 'CP16_8.5-Tabelle_1.csv')
+    DISCHARGE_SSP245_FILE = os.path.join(DATA_BASE_PATH, 'CP65_4.5-Tabelle_1.csv')
+    DISCHARGE_SSP585_FILE = os.path.join(DATA_BASE_PATH, 'CP65_8.5-Tabelle_1.csv')
 
 
     # Plot output directory

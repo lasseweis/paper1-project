@@ -1246,8 +1246,8 @@ class Visualizer:
         ax.axvline(mmm_x, color='dimgrey', linestyle='-', linewidth=1.0, zorder=6)
 
         if inner_radius:
-            inner_ellipse = mpatches.Ellipse(xy=(mmm_x, mmm_y), width=2*inner_radius*std_dev_x, height=2*inner_radius*std_dev_y, angle=0, edgecolor='black', facecolor='grey', alpha=0.2, linewidth=1.0, zorder=5, label='Axial Storyline Zone')
-            ax.add_patch(inner_ellipse)
+            #inner_ellipse = mpatches.Ellipse(xy=(mmm_x, mmm_y), width=2*inner_radius*std_dev_x, height=2*inner_radius*std_dev_y, angle=0, edgecolor='black', facecolor='grey', alpha=0.2, linewidth=1.0, zorder=5, label='Axial Storyline Zone')
+            #ax.add_patch(inner_ellipse)
             t_50 = np.sqrt(chi2.ppf(0.5, 2) / 2)
             outer_ellipse = mpatches.Ellipse(xy=(mmm_x, mmm_y), width=2*t_50*std_dev_x, height=2*t_50*std_dev_y, angle=0, edgecolor='black', facecolor='none', linestyle='--', linewidth=1.5, zorder=5, label='50% Confidence Region')
             ax.add_patch(outer_ellipse)

@@ -124,62 +124,68 @@ class ClimateAnalysis:
             logging.error(f"Error in process_era5_data: {e}")
 
     @staticmethod
-    def process_discharge_data(file_path):
-        """Process discharge data, compute seasonal metrics, means, and low flow thresholds."""
-        logging.info(f"Processing discharge data from {file_path}...")
-        try:
-            data = pd.read_excel(file_path, index_col=None, na_values=['NA'], usecols='A,B,C,H')
-            df = pd.DataFrame({
-                'year': data['year'], 'month': data['month'], 'discharge': data['Wien']
-            }).dropna()
-
-            df['time'] = pd.to_datetime(df[['year', 'month']].assign(day=15))
-            df = df.set_index('time')
-            
-            da_full = df[['discharge']].to_xarray()['discharge']
-            da_with_seasons = DataProcessor.assign_season_to_dataarray(da_full)
-            seasonal_means_ts = DataProcessor.calculate_seasonal_means(da_with_seasons)
-
-            result = {}
-            # --- START DER ÄNDERUNG ---
-            # Füge die rohe monatliche Zeitreihe zum Ergebnis hinzu
-            result['monthly_historical_da'] = da_full
-            # --- ENDE DER ÄNDERUNG ---
-
-            if seasonal_means_ts is not None:
-                for season in ['Winter', 'Summer']:
-                    season_lower = season.lower()
-                    season_ts = DataProcessor.filter_by_season(seasonal_means_ts, season)
-                    if season_ts is not None and season_ts.size > 0:
-                        result[f'{season_lower}_discharge'] = DataProcessor.detrend_data(season_ts)
-                        result[f'{season_lower}_mean'] = season_ts.mean().item()
-                        result[f'{season_lower}_lowflow_threshold'] = 1064
-                        result[f'{season_lower}_lowflow_threshold_30'] = 1417
-                        result[f'{season_lower}_lowflow_lnwl'] = 970  # <-- NEU: LNWL-Schwellenwert
-            
-            high_flow_threshold = df['discharge'].quantile(0.90)
-            low_flow_threshold_overall = df['discharge'].quantile(0.10)
-            df['extreme_flow'] = np.select(
-                [df['discharge'] > high_flow_threshold, df['discharge'] < low_flow_threshold_overall],
-                [1, -1], default=0
-            )
-            da_extreme = df[['extreme_flow']].to_xarray()['extreme_flow']
-            da_extreme_seasons = DataProcessor.assign_season_to_dataarray(da_extreme)
-            seasonal_extreme_ts = DataProcessor.calculate_seasonal_means(da_extreme_seasons)
-            if seasonal_extreme_ts is not None:
-                for season in ['Winter', 'Summer']:
-                    season_data = DataProcessor.filter_by_season(seasonal_extreme_ts, season)
-                    if season_data is not None:
-                        result[f'{season.lower()}_extreme_flow'] = DataProcessor.detrend_data(season_data)
-
-            # <-- GEÄNDERT: Log-Nachricht aktualisiert
-            logging.info(f"Discharge processing complete. Using fixed low-flow thresholds: 1417 m³/s (30th), 1064 m³/s (10th), and 970 m³/s (LNWL).")
-            return result
-
-        except Exception as e:
-            logging.error(f"Error processing discharge data: {e}")
-            logging.error(traceback.format_exc())
+    def process_historical_discharge_data(qobs_monthly_da):
+        """
+        Processes the QOBS monthly data to create the required historical timeseries
+        (detrended seasonal discharge, extreme flow) and adds hard-coded thresholds.
+        REPLACES the old 'process_discharge_data' function.
+        """
+        logging.info("Processing QOBS historical data for analysis...")
+        if qobs_monthly_da is None:
+            logging.error("No QOBS data provided to process_historical_discharge_data.")
             return {}
+
+        result = {}
+        # Store the raw monthly data (wird von analyze_storyline_discharge_extremes verwendet)
+        result['monthly_historical_da'] = qobs_monthly_da
+        
+        # --- Berechne saisonale Mittelwerte ---
+        da_with_seasons = DataProcessor.assign_season_to_dataarray(qobs_monthly_da)
+        seasonal_means_ts = DataProcessor.calculate_seasonal_means(da_with_seasons)
+
+        if seasonal_means_ts is not None:
+            for season in ['Winter', 'Summer']:
+                season_lower = season.lower()
+                season_ts = DataProcessor.filter_by_season(seasonal_means_ts, season)
+                if season_ts is not None and season_ts.size > 0:
+                    # Speichere die detrendeten saisonalen Zeitreihen (für Korrelationen)
+                    result[f'{season_lower}_discharge'] = DataProcessor.detrend_data(season_ts)
+                    result[f'{season_lower}_mean'] = season_ts.mean().item()
+        
+        # --- Berechne "Extreme Flow" (basierend auf Perzentilen der QOBS-Daten) ---
+        # Wir verwenden die monatlichen QOBS-Daten
+        high_flow_threshold = qobs_monthly_da.quantile(0.90).item()
+        low_flow_threshold_overall = qobs_monthly_da.quantile(0.10).item()
+        
+        # Wandle in DataFrame um, um 'extreme_flow' zu berechnen (einfacher)
+        df = qobs_monthly_da.to_dataframe(name='discharge')
+        df['extreme_flow'] = np.select(
+            [df['discharge'] > high_flow_threshold, df['discharge'] < low_flow_threshold_overall],
+            [1, -1], default=0
+        )
+        
+        da_extreme = df[['extreme_flow']].to_xarray()['extreme_flow']
+        da_extreme_seasons = DataProcessor.assign_season_to_dataarray(da_extreme)
+        seasonal_extreme_ts = DataProcessor.calculate_seasonal_means(da_extreme_seasons)
+        
+        if seasonal_extreme_ts is not None:
+            for season in ['Winter', 'Summer']:
+                season_data = DataProcessor.filter_by_season(seasonal_extreme_ts, season)
+                if season_data is not None:
+                    # Speichere die detrendeten extremen Zeitreihen (für Korrelationen)
+                    result[f'{season.lower()}_extreme_flow'] = DataProcessor.detrend_data(season_data)
+
+        # --- Füge die hard-gecodeten Schwellenwerte hinzu ---
+        # Diese sind unabhängig von den QOBS-Daten, da sie fixiert sind.
+        logging.info(f"Adding fixed low-flow thresholds: 1417 (30th), 1064 (10th), 970 (LNWL).")
+        for season in ['winter', 'summer']:
+            # Diese Werte werden für die "Return Period"-Plots (feste Schwellen) 
+            # und die Plot-Linien in den Impact-Plots verwendet.
+            result[f'{season}_lowflow_threshold'] = 1064
+            result[f'{season}_lowflow_threshold_30'] = 1417
+            result[f'{season}_lowflow_lnwl'] = 970
+        
+        return result
 
     @staticmethod
     def load_amo_index(file_path):
@@ -230,6 +236,61 @@ class ClimateAnalysis:
             models_to_include
         )
         return cmip6_discharge
+    
+    @staticmethod
+    def load_historical_qobs_from_csv(config):
+        """
+        Loads the historical QOBS (observations) timeseries from the CMIP6 discharge CSV file.
+        This data is assumed to be daily and is resampled to monthly means.
+        This is used as the basis for historical percentile calculations.
+        """
+        logging.info("Loading and resampling historical QOBS discharge data from CSV...")
+        filepath = config.DISCHARGE_SSP245_FILE # We can use either file, QOBS is the same
+
+        if not os.path.exists(filepath):
+            logging.error(f"Cannot load QOBS data: File not found at {filepath}")
+            return None
+
+        try:
+            df = pd.read_csv(filepath, sep=';', decimal=',', na_values=['-0,01'])
+
+            # First column is the date
+            df = df.rename(columns={df.columns[0]: 'date'})
+            # --- START: KORREKTUR (Explizites Datumsformat) ---
+            # Parse dates, explicitly providing the format found in the CSV
+            df['time'] = pd.to_datetime(df['date'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
+            # --- ENDE: KORREKTUR ---
+            df = df.set_index('time')
+
+            if 'QOBS' not in df.columns:
+                logging.error(f"QOBS column not found in {filepath}")
+                return None
+
+            # Select QOBS and filter for the historical period (1960-2014)
+            # Ihre Anforderung war, die Daten ab 1960 zu verwenden.
+            qobs_series_daily = df['QOBS'].loc['1960-01-01':'2014-12-31'].dropna()
+
+            if qobs_series_daily.empty:
+                logging.error(f"No QOBS data found in the 1960-2014 period in {filepath}")
+                return None
+
+            # Resample daily data to monthly mean ('MS' = Month Start)
+            # Die Analyse in storyline.py erwartet monatliche Daten
+            qobs_series_monthly = qobs_series_daily.resample('MS').mean()
+
+            # Convert to xarray DataArray
+            da = qobs_series_monthly.to_xarray()
+            da.name = 'discharge'
+            da.attrs['units'] = 'm3/s'
+            da.attrs['long_name'] = 'Observed Danube River Discharge (QOBS 1960-2014, resampled to monthly)'
+
+            logging.info(f"Successfully loaded and resampled QOBS historical data from 1960-2014.")
+            return da
+
+        except Exception as e:
+            logging.error(f"Error processing QOBS from {filepath}: {e}")
+            logging.error(traceback.format_exc())
+            return None
 
     @staticmethod
     def run_full_analysis():
@@ -277,7 +338,16 @@ class ClimateAnalysis:
                         datasets_reanalysis[f'{dset_key}_spei4'] = spei4_seasonal # Seasonal means are still stored
                         logging.info(f"    Successfully calculated SPEI-4 for {dset_key}.")
 
-        discharge_data_loaded = ClimateAnalysis.process_discharge_data(Config.DISCHARGE_FILE)
+        # --- START: ÄNDERUNG (Laden der Abflussdaten) ---
+        # 1. Lade QOBS-Daten (1960-2014) aus der .csv-Datei
+        qobs_historical_da = ClimateAnalysis.load_historical_qobs_from_csv(Config())
+        
+        # 2. Verarbeite QOBS-Daten, um historische Zeitreihen zu erstellen UND fixe Schwellenwerte hinzuzufügen
+        # Diese 'discharge_data_loaded' wird für alle historischen Plots (Korrelationen) 
+        # UND für die fixen Schwellenwerte (LNWL) in den Zukunfts-Plots verwendet.
+        discharge_data_loaded = ClimateAnalysis.process_historical_discharge_data(qobs_historical_da)
+        # --- ENDE: ÄNDERUNG ---
+        
         amo_data_loaded = ClimateAnalysis.load_amo_index(Config.AMO_INDEX_FILE)
 
         logging.info("\n--- Calculating Base Reanalysis Jet Indices ---")
@@ -563,12 +633,15 @@ class ClimateAnalysis:
                 return_period_results_for_plot = None # Initialisieren
                 if not os.path.exists(return_period_plot_filename):
                     logging.info(f"Plot '{return_period_plot_filename}' not found. Calculating data and creating plot...")
-                    historical_da = discharge_data_loaded.get('monthly_historical_da')
+                    # --- START: ÄNDERUNG ---
+                    # historical_da = discharge_data_loaded.get('monthly_historical_da') # ALTE ZEILE
+                    historical_da = qobs_historical_da # NEU: Verwende die geladenen QOBS-Daten
+                    # --- ENDE: ÄNDERUNG ---
                     if historical_da is not None:
                         # Ergebnisse speichern
                         return_period_results_for_plot = storyline_analyzer.analyze_storyline_discharge_extremes(
                             cmip6_results=cmip6_results,
-                            historical_discharge_da=historical_da,
+                            historical_discharge_da=historical_da, # <-- HIER QOBS übergeben
                             config=Config(),
                             discharge_thresholds=discharge_data_loaded # Die fixen werden hier noch übergeben
                         )
@@ -578,17 +651,22 @@ class ClimateAnalysis:
                         else:
                             logging.warning(f"Could not calculate return period results for {scenario}.")
                     else:
-                        logging.warning(f"Historical discharge data not available for return period analysis in {scenario}.")
+                        # --- START: ÄNDERUNG ---
+                        logging.warning(f"QOBS historical discharge data not available for return period analysis in {scenario}.")
+                        # --- ENDE: ÄNDERUNG ---
                 else:
                     logging.info(f"Plot '{return_period_plot_filename}' already exists.")
                     # Ergebnisse trotzdem berechnen, wenn Plot existiert, für den nächsten Plot
-                    historical_da = discharge_data_loaded.get('monthly_historical_da')
+                    # --- START: ÄNDERUNG ---
+                    # historical_da = discharge_data_loaded.get('monthly_historical_da') # ALTE ZEILE
+                    historical_da = qobs_historical_da # NEU: Verwende die geladenen QOBS-Daten
+                    # --- ENDE: ÄNDERUNG ---
                     # Nur berechnen, wenn nicht schon geschehen und historische Daten vorhanden sind
                     if historical_da is not None and return_period_results_for_plot is None:
                          logging.info(f"Calculating return period results for {scenario} (needed for impact plot)...")
                          return_period_results_for_plot = storyline_analyzer.analyze_storyline_discharge_extremes(
                              cmip6_results=cmip6_results,
-                             historical_discharge_da=historical_da,
+                             historical_discharge_da=historical_da, # <-- HIER QOBS übergeben
                              config=Config(),
                              discharge_thresholds=discharge_data_loaded
                          )
@@ -608,7 +686,9 @@ class ClimateAnalysis:
                             Visualizer.plot_storyline_impact_barchart_with_discharge(
                                 cmip6_results=cmip6_results,
                                 threshold_data=threshold_data_for_plot, # <-- HIER WIRD ES ÜBERGEBEN
-                                discharge_data_historical=discharge_data_loaded,
+                                # --- START: ÄNDERUNG ---
+                                discharge_data_historical=discharge_data_loaded, # <-- Beibehalten für LNWL etc.
+                                # --- ENDE: ÄNDERUNG ---
                                 reanalysis_data=datasets_reanalysis,
                                 config=Config(),
                                 scenario=scenario,

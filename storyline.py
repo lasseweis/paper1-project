@@ -2004,8 +2004,10 @@ class StorylineAnalyzer:
         MODIFIED: Now processes seasonal (DJF, JJA) and monthly (MAM, SON) impacts.
         MODIFIED: Now returns individual model return periods AND model counts (X/Y) for each storyline.
         MODIFIED: Extreme Low-Flow uses 1st percentile, Extreme High-Flow uses 99th percentile.
+        MODIFIED (User Request): Uses ABSOLUTE 1st/99th percentiles from the full monthly
+        timeseries instead of seasonal/monthly percentiles.
         """
-        logging.info("Analyzing storyline discharge return periods (seasonal & lagged months, percentile extremes) and standard deviation...")
+        logging.info("Analyzing storyline discharge return periods (seasonal & lagged months, ABSOLUTE percentile extremes) and standard deviation...")
         
         if historical_discharge_da is None or not discharge_thresholds:
             logging.error("Historical discharge data or fixed thresholds are missing. Aborting.")
@@ -2037,6 +2039,23 @@ class StorylineAnalyzer:
             'Nov_discharge': {'type': 'month', 'num': 11, 'name': 'November', 'hist_key': 'summer'}
         }
         
+        # --- START: MODIFIKATION (Absolute Percentiles) ---
+        # Berechne die absoluten Schwellenwerte aus der GESAMTEN historischen monatlichen Zeitreihe
+        # Diese werden dann für alle saisonalen/monatlichen Analysen verwendet
+        if historical_discharge_da is None or historical_discharge_da.time.size == 0:
+            logging.error("Historical discharge data is missing. Aborting extreme analysis.")
+            return None
+            
+        logging.info("Calculating absolute 1st/99th percentile thresholds from the *entire* historical monthly discharge timeseries...")
+        
+        # Berechne Perzentile aus den monatlichen Rohdaten
+        absolute_low_extreme_threshold = historical_discharge_da.quantile(0.01).item() # 1st percentile
+        absolute_high_extreme_threshold = historical_discharge_da.quantile(0.99).item() # 99th percentile
+        
+        logging.info(f"  -> Absolute Extreme Low-Flow (<1%) Threshold: {absolute_low_extreme_threshold:.2f} m³/s")
+        logging.info(f"  -> Absolute Extreme High-Flow (>99%) Threshold: {absolute_high_extreme_threshold:.2f} m³/s")
+        # --- ENDE: MODIFIKATION (Absolute Percentiles) ---
+
         # Calculate Thresholds per Impact Key
         da_with_seasons = DataProcessor.assign_season_to_dataarray(historical_discharge_da)
         
@@ -2060,9 +2079,10 @@ class StorylineAnalyzer:
             mean = hist_timeseries.mean().item()
             std = hist_timeseries.std().item()
             
-            # --- START: MODIFIKATION (Percentile Calculation) ---
-            low_extreme_threshold = hist_timeseries.quantile(0.01).item() # 1st percentile
-            high_extreme_threshold = hist_timeseries.quantile(0.99).item() # 99th percentile
+            # --- START: MODIFIKATION (Using Absolute Percentiles) ---
+            # Verwende die global berechneten absoluten Schwellenwerte statt saisonaler
+            low_extreme_threshold = absolute_low_extreme_threshold
+            high_extreme_threshold = absolute_high_extreme_threshold
             # --- ENDE: MODIFIKATION ---
 
             # 2. Get fixed thresholds
@@ -2081,6 +2101,7 @@ class StorylineAnalyzer:
                 f'Moderate Low-Flow (<{moderate_fixed_threshold} m³/s)': {'val': moderate_fixed_threshold, 'type': 'low'},
                 f'Low Navigable (LNWL) (<{lnwl_fixed_threshold} m³/s)': {'val': lnwl_fixed_threshold, 'type': 'low'},
                 # --- START: MODIFIKATION (Percentile Events) ---
+                # Die Namen bleiben gleich, aber die 'val' ist jetzt der absolute Schwellenwert
                 f'Extreme Low-Flow (<1%)': {'val': low_extreme_threshold, 'type': 'low'},
                 f'Extreme High-Flow (>99%)': {'val': high_extreme_threshold, 'type': 'high'}
                 # --- ENDE: MODIFIKATION ---

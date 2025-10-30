@@ -266,9 +266,8 @@ class ClimateAnalysis:
                 logging.error(f"QOBS column not found in {filepath}")
                 return None
 
-            # Select QOBS and filter for the historical period (1960-2014)
-            # Ihre Anforderung war, die Daten ab 1960 zu verwenden.
-            qobs_series_daily = df['QOBS'].loc['1960-01-01':'2014-12-31'].dropna()
+            # Select QOBS and filter for the historical period (1960-2021)
+            qobs_series_daily = df['QOBS'].loc['1960-01-01':'2021-12-31'].dropna()
 
             if qobs_series_daily.empty:
                 logging.error(f"No QOBS data found in the 1960-2014 period in {filepath}")

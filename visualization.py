@@ -2503,11 +2503,21 @@ class Visualizer:
             if row == 0:
                 ax_std.set_title("Interannual\nVariability (σ)", fontsize=11, weight='bold')
 
-            hist_std_dev = results.get('thresholds', {}).get(impact_key, {}).get('historical_std_dev')
-            if hist_std_dev is not None:
+            # --- START MODIFIKATION ---
+            # Finde den richtigen StdDev-Key basierend auf dem 'impact_key' (Monat/Saison)
+            # Wir nehmen 7Q_low als Standard für alle Low-Flow-Plots
+            std_key_to_use = '7Q_low'
+            std_key_future = f'future_std_dev_{std_key_to_use}'
+            # Hole den korrekten hist. Wert aus der (jetzt korrekten) thresholds-Struktur
+            hist_std_dev = results.get('thresholds', {}).get(impact_key, {}).get('historical_std_dev') 
+            # --- ENDE MODIFIKATION ---
+            
+            if hist_std_dev is not None and not np.isnan(hist_std_dev):
                 bar_height = 0.25
-                future_std_gwl1 = [results.get(gwls_to_plot[0], {}).get(impact_key, {}).get(s, {}).get('future_std_dev', np.nan) for s in storyline_order]
-                future_std_gwl2 = [results.get(gwls_to_plot[1], {}).get(impact_key, {}).get(s, {}).get('future_std_dev', np.nan) for s in storyline_order]
+                # --- MODIFIKATION ---
+                future_std_gwl1 = [results.get(gwls_to_plot[0], {}).get(impact_key, {}).get(s, {}).get(std_key_future, np.nan) for s in storyline_order]
+                future_std_gwl2 = [results.get(gwls_to_plot[1], {}).get(impact_key, {}).get(s, {}).get(std_key_future, np.nan) for s in storyline_order]
+                # --- ENDE MODIFIKATION ---
                 
                 ax_std.barh(y_ticks + bar_height/2, future_std_gwl2, height=bar_height, color=gwl_colors[f'+{gwls_to_plot[1]}°C'], edgecolor='black', zorder=10)
                 ax_std.barh(y_ticks - bar_height/2, future_std_gwl1, height=bar_height, color=gwl_colors[f'+{gwls_to_plot[0]}°C'], edgecolor='black', zorder=10)

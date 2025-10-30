@@ -2006,6 +2006,9 @@ class StorylineAnalyzer:
         MODIFIED: Now returns individual model return periods AND model counts (X/Y) for each storyline.
         MODIFIED (User Request): Replaces 1%/99% percentile events with robust
         hydrological EVA (1Q10, 7Q10, 7Q50) based on annual extremes from daily QOBS data.
+        
+        --- KORRIGIERTE VERSION: Weist EVA-Jährlichkeiten (10, 50) direkt zu, anstatt sie
+        falsch aus saisonalen Daten neu zu berechnen, damit die blaue Linie im Plot funktioniert. ---
         """
         logging.info("Analyzing storyline discharge... with NEW EVA (1Q/7Q) and remaining thresholds...")
         
@@ -2117,23 +2120,40 @@ class StorylineAnalyzer:
             for name, data in event_definitions.items():
                 if data['val'] is None or np.isnan(data['val']): continue
                 
-                if data['type'] == 'low':
-                    hist_count = (hist_timeseries < data['val']).sum().item()
-                else: # 'high'
-                    hist_count = (hist_timeseries > data['val']).sum().item()
-
-                hist_freq = hist_count / total_years if total_years > 0 else 0
+                # --- START OF MODIFICATION (hist_return_period logic) ---
+                hist_freq = 0.0
+                hist_period_override = None
                 
+                # Check if it's an EVA event by name and assign its known return period
+                if 'Q10' in name:
+                    hist_period_override = 10.0
+                elif 'Q50' in name:
+                    hist_period_override = 50.0
+
+                if hist_period_override is not None:
+                    hist_freq = 1.0 / hist_period_override
+                else:
+                    # Calculate frequency ONLY for non-EVA events (statistical, fixed)
+                    if data['type'] == 'low':
+                        hist_count = (hist_timeseries < data['val']).sum().item()
+                    else: # 'high'
+                        hist_count = (hist_timeseries > data['val']).sum().item()
+                    
+                    if total_years > 0:
+                        hist_freq = hist_count / total_years
+                # --- END OF MODIFICATION ---
+
                 key_thresholds[name] = {
                     'val': data['val'],
-                    'hist_return_period': 1 / hist_freq if hist_freq > 0 else np.inf,
+                    # Use override if available, else calculate from frequency
+                    'hist_return_period': hist_period_override if hist_period_override is not None else (1 / hist_freq if hist_freq > 0 else np.inf),
                     'type': data['type']
                 }
             
             key_thresholds['historical_std_dev'] = hist_std_dev
             thresholds[key] = key_thresholds # Store thresholds per impact key
 
-        # --- Calculate Future Impacts (Remains largely the same) ---
+        # --- Calculate Future Impacts (Remains the same) ---
         storyline_classification = cmip6_results.get('storyline_classification_2d')
         metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
         gwl_years = cmip6_results.get('gwl_threshold_years', {})

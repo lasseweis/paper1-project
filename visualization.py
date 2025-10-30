@@ -2465,8 +2465,15 @@ class Visualizer:
                     ax.set_yticklabels([])
                     ax.set_ylabel('')
 
+                # --- START MODIFICATION (Titel) ---
                 if row == 0:
-                    ax.set_title(event_key.replace(" ", "\n").replace("Low-Flow\n(", "Low-Flow\n("), fontsize=11, weight='bold')
+                    threshold_val = results.get('thresholds', {}).get(impact_key, {}).get(event_key, {}).get('val')
+                    title_str = event_key.replace(" ", "\n").replace("Low-Flow\n(", "Low-Flow\n(")
+                    if threshold_val is not None and np.isfinite(threshold_val):
+                        # For low flow, the event is '<' the value
+                        title_str += f"\n(< {threshold_val:.0f} m³/s)"
+                    ax.set_title(title_str, fontsize=11, weight='bold')
+                # --- END MODIFICATION ---
                 
                 if ax.get_legend() is not None: ax.get_legend().remove()
                 
@@ -2674,8 +2681,15 @@ class Visualizer:
                     ax.set_yticklabels([])
                     ax.set_ylabel('')
 
+                # --- START MODIFICATION (Titel) ---
                 if row == 0:
-                    ax.set_title(event_key.replace(" ", "\n").replace("High-Flow\n(", "High-Flow\n("), fontsize=11, weight='bold')
+                    threshold_val = results.get('thresholds', {}).get(impact_key, {}).get(event_key, {}).get('val')
+                    title_str = event_key.replace(" ", "\n").replace("High-Flow\n(", "High-Flow\n(")
+                    if threshold_val is not None and np.isfinite(threshold_val):
+                        # For high flow, the event is '>' the value
+                        title_str += f"\n(> {threshold_val:.0f} m³/s)"
+                    ax.set_title(title_str, fontsize=11, weight='bold')
+                # --- END MODIFICATION ---
                 
                 if ax.get_legend() is not None: ax.get_legend().remove()
                 

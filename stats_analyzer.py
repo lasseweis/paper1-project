@@ -268,3 +268,76 @@ class StatsAnalyzer:
         except Exception as e:
             logging.error(f"Error during multiple regression: {e}")
             return None
+        
+    @staticmethod
+    def calculate_eva_thresholds(daily_timeseries, eva_type='low', q_days=[1, 7], return_periods=[10, 50]):
+        """
+        Calculates hydrological extreme value thresholds (e.g., 7Q10) from a daily time series.
+        
+        This method uses quantile interpolation on the empirical distribution of
+        annual extremes (minima for 'low', maxima for 'high').
+
+        Parameters:
+        -----------
+        daily_timeseries : xr.DataArray
+            A 1D DataArray of daily discharge values with a 'time' dimension.
+        eva_type : str, default='low'
+            The type of analysis: 'low' for low-flow (annual minima) or 'high' for high-flow (annual maxima).
+        q_days : list, default=[1, 7]
+            A list of integers for the n-day moving average (e.g., 1 for 1Q, 7 for 7Q).
+        return_periods : list, default=[10, 50]
+            A list of return periods (in years) to calculate (e.g., 10 for Q10, 50 for Q50).
+
+        Returns:
+        --------
+        dict
+            A dictionary containing the calculated discharge thresholds (in m³/s).
+            Example: {'1Q10': 950.5, '7Q10': 1050.0, ...}
+        """
+        if daily_timeseries is None or daily_timeseries.time.size < 365*5:
+            logging.warning("Cannot calculate EVA thresholds: Daily time series is missing or too short.")
+            return {}
+
+        thresholds_m3s = {}
+        
+        for q in q_days:
+            # 1. Calculate n-day moving average
+            if q == 1:
+                moving_avg = daily_timeseries
+            else:
+                # Use min_periods=1 to handle edges, though for annual extremes it's less critical
+                moving_avg = daily_timeseries.rolling(time=q, center=True, min_periods=1).mean()
+            
+            # 2. Extract annual extremes
+            if eva_type == 'low':
+                annual_extremes = moving_avg.groupby('time.year').min('time')
+            else: # 'high'
+                annual_extremes = moving_avg.groupby('time.year').max('time')
+                
+            clean_extremes = annual_extremes.dropna(dim='year').values
+            
+            if len(clean_extremes) < 10: # Need at least 10 years for a somewhat stable estimate
+                logging.warning(f"Skipping {q}Q analysis for {eva_type}: Only {len(clean_extremes)} valid years.")
+                continue
+
+            # 3. Calculate thresholds for each return period using quantile interpolation
+            for T in return_periods:
+                if eva_type == 'low':
+                    # Probability of non-exceedance (P(X <= x))
+                    # For 10-year low flow, we want the value that is fallen below with 1/10 prob.
+                    prob = 1.0 / T
+                    quantile_to_find = prob
+                else: # 'high'
+                    # Probability of exceedance (P(X > x))
+                    # For 10-year high flow, we want the value that is exceeded with 1/10 prob.
+                    prob = 1.0 / T
+                    # np.quantile expects the non-exceedance probability
+                    quantile_to_find = 1.0 - prob
+                
+                # Use linear interpolation on the empirical distribution
+                discharge_val = np.quantile(clean_extremes, quantile_to_find, interpolation='linear')
+                
+                key = f'{q}Q{T}'
+                thresholds_m3s[key] = discharge_val
+                
+        return thresholds_m3s

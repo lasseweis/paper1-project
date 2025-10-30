@@ -2001,16 +2001,17 @@ class StorylineAnalyzer:
         Analyzes the frequency and return period of low-flow AND high-flow discharge events
         for multiple statistical and fixed thresholds, AND calculates the change
         in interannual standard deviation.
+        
         MODIFIED: Now processes seasonal (DJF, JJA) and monthly (MAM, SON) impacts.
         MODIFIED: Now returns individual model return periods AND model counts (X/Y) for each storyline.
-        MODIFIED: Extreme Low-Flow uses 1st percentile, Extreme High-Flow uses 99th percentile.
-        MODIFIED (User Request): Uses ABSOLUTE 1st/99th percentiles from the full monthly
-        timeseries instead of seasonal/monthly percentiles.
+        MODIFIED (User Request): Replaces 1%/99% percentile events with robust
+        hydrological EVA (1Q10, 7Q10, 7Q50) based on annual extremes from daily QOBS data.
         """
-        logging.info("Analyzing storyline discharge return periods (seasonal & lagged months, ABSOLUTE percentile extremes) and standard deviation...")
+        logging.info("Analyzing storyline discharge... with NEW EVA (1Q/7Q) and remaining thresholds...")
         
+        # historical_discharge_da is now the DAILY QOBS data.
         if historical_discharge_da is None or not discharge_thresholds:
-            logging.error("Historical discharge data or fixed thresholds are missing. Aborting.")
+            logging.error("Historical discharge data (daily) or fixed thresholds are missing. Aborting.")
             return None
         
         results = {}
@@ -2023,6 +2024,27 @@ class StorylineAnalyzer:
             'Slow Jet & Southward Shift',
             'Fast Jet & Southward Shift',
         ]
+
+        # --- START: NEW EVA THRESHOLD CALCULATION ---
+        # Calculate the historical annual EVA thresholds from the daily QOBS data ONCE.
+        logging.info("Calculating historical annual EVA thresholds from daily QOBS...")
+        
+        low_flow_thresholds_eva = StatsAnalyzer.calculate_eva_thresholds(
+            historical_discharge_da, # This is the daily data
+            eva_type='low',
+            q_days=[1, 7],
+            return_periods=[10, 50]
+        )
+        logging.info(f"  -> Calculated Low-Flow EVA thresholds (m³/s): {low_flow_thresholds_eva}")
+
+        high_flow_thresholds_eva = StatsAnalyzer.calculate_eva_thresholds(
+            historical_discharge_da,
+            eva_type='high',
+            q_days=[1, 7],
+            return_periods=[10, 50]
+        )
+        logging.info(f"  -> Calculated High-Flow EVA thresholds (m³/s): {high_flow_thresholds_eva}")
+        # --- END: NEW EVA THRESHOLD CALCULATION ---
 
         # Define all impact keys and their properties
         impact_keys_info = {
@@ -2039,33 +2061,19 @@ class StorylineAnalyzer:
             'Nov_discharge': {'type': 'month', 'num': 11, 'name': 'November', 'hist_key': 'summer'}
         }
         
-        # --- START: MODIFIKATION (Absolute Percentiles) ---
-        # Berechne die absoluten Schwellenwerte aus der GESAMTEN historischen monatlichen Zeitreihe
-        # Diese werden dann für alle saisonalen/monatlichen Analysen verwendet
-        if historical_discharge_da is None or historical_discharge_da.time.size == 0:
-            logging.error("Historical discharge data is missing. Aborting extreme analysis.")
-            return None
-            
-        logging.info("Calculating absolute 1st/99th percentile thresholds from the *entire* historical monthly discharge timeseries...")
+        # We need to resample the daily data to monthly for the seasonal analysis
+        da_monthly_with_seasons = DataProcessor.assign_season_to_dataarray(
+            historical_discharge_da.resample(time='MS').mean()
+        )
         
-        # Berechne Perzentile aus den monatlichen Rohdaten
-        absolute_low_extreme_threshold = historical_discharge_da.quantile(0.01).item() # 1st percentile
-        absolute_high_extreme_threshold = historical_discharge_da.quantile(0.99).item() # 99th percentile
-        
-        logging.info(f"  -> Absolute Extreme Low-Flow (<1%) Threshold: {absolute_low_extreme_threshold:.2f} m³/s")
-        logging.info(f"  -> Absolute Extreme High-Flow (>99%) Threshold: {absolute_high_extreme_threshold:.2f} m³/s")
-        # --- ENDE: MODIFIKATION (Absolute Percentiles) ---
-
         # Calculate Thresholds per Impact Key
-        da_with_seasons = DataProcessor.assign_season_to_dataarray(historical_discharge_da)
-        
         for key, info in impact_keys_info.items():
             
-            # 1. Get historical timeseries
+            # 1. Get historical timeseries (MONTHLY/SEASONAL for this part)
             if info['type'] == 'season':
-                hist_data_monthly = DataProcessor.filter_by_season(da_with_seasons, info['name'])
+                hist_data_monthly = DataProcessor.filter_by_season(da_monthly_with_seasons, info['name'])
             else: # 'month'
-                hist_data_monthly = da_with_seasons.where(da_with_seasons.time.dt.month == info['num'], drop=True)
+                hist_data_monthly = da_monthly_with_seasons.where(da_monthly_with_seasons.time.dt.month == info['num'], drop=True)
             
             if hist_data_monthly is None or hist_data_monthly.time.size == 0:
                 logging.warning(f"No historical discharge data found for {key}")
@@ -2078,18 +2086,10 @@ class StorylineAnalyzer:
             hist_std_dev = hist_timeseries.std().item()
             mean = hist_timeseries.mean().item()
             std = hist_timeseries.std().item()
-            
-            # --- START: MODIFIKATION (Using Absolute Percentiles) ---
-            # Verwende die global berechneten absoluten Schwellenwerte statt saisonaler
-            low_extreme_threshold = absolute_low_extreme_threshold
-            high_extreme_threshold = absolute_high_extreme_threshold
-            # --- ENDE: MODIFIKATION ---
 
             # 2. Get fixed thresholds
             hist_key_for_fixed = info['hist_key']
             moderate_fixed_threshold = discharge_thresholds.get(f'{hist_key_for_fixed}_lowflow_threshold_30')
-            # Fixed extreme threshold is no longer used for the event definition itself
-            # extreme_fixed_threshold = discharge_thresholds.get(f'{hist_key_for_fixed}_lowflow_threshold')
             lnwl_fixed_threshold = discharge_thresholds.get(f'{hist_key_for_fixed}_lowflow_lnwl')
             
             # 3. Define Events
@@ -2100,12 +2100,18 @@ class StorylineAnalyzer:
                 # Low-Flow (Fixed - Moderate & LNWL only)
                 f'Moderate Low-Flow (<{moderate_fixed_threshold} m³/s)': {'val': moderate_fixed_threshold, 'type': 'low'},
                 f'Low Navigable (LNWL) (<{lnwl_fixed_threshold} m³/s)': {'val': lnwl_fixed_threshold, 'type': 'low'},
-                # --- START: MODIFIKATION (Percentile Events) ---
-                # Die Namen bleiben gleich, aber die 'val' ist jetzt der absolute Schwellenwert
-                f'Extreme Low-Flow (<1%)': {'val': low_extreme_threshold, 'type': 'low'},
-                f'Extreme High-Flow (>99%)': {'val': high_extreme_threshold, 'type': 'high'}
-                # --- ENDE: MODIFIKATION ---
             }
+            
+            # --- START: MODIFIED BLOCK ---
+            # Add new EVA thresholds (which are annual)
+            for eva_key, eva_val in low_flow_thresholds_eva.items():
+                if not np.isnan(eva_val):
+                    event_definitions[f'Low-Flow ({eva_key})'] = {'val': eva_val, 'type': 'low'}
+            
+            for eva_key, eva_val in high_flow_thresholds_eva.items():
+                if not np.isnan(eva_val):
+                    event_definitions[f'High-Flow ({eva_key})'] = {'val': eva_val, 'type': 'high'}
+            # --- END: MODIFIED BLOCK ---
             
             key_thresholds = {}
             for name, data in event_definitions.items():

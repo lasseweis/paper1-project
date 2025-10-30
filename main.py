@@ -124,22 +124,29 @@ class ClimateAnalysis:
             logging.error(f"Error in process_era5_data: {e}")
 
     @staticmethod
-    def process_historical_discharge_data(qobs_monthly_da):
+    def process_historical_discharge_data(qobs_daily_da):
         """
-        Processes the QOBS monthly data to create the required historical timeseries
+        Processes the QOBS DAILY data to create the required historical timeseries
         (detrended seasonal discharge, extreme flow) and adds hard-coded thresholds.
         REPLACES the old 'process_discharge_data' function.
+        
+        MODIFIED: Accepts daily data, resamples to monthly internally for monthly/seasonal
+        calculations, and includes the original daily data in the result dict.
         """
-        logging.info("Processing QOBS historical data for analysis...")
-        if qobs_monthly_da is None:
+        logging.info("Processing QOBS historical data (daily and monthly) for analysis...")
+        if qobs_daily_da is None:
             logging.error("No QOBS data provided to process_historical_discharge_data.")
             return {}
 
         result = {}
-        # Store the raw monthly data (wird von analyze_storyline_discharge_extremes verwendet)
-        result['monthly_historical_da'] = qobs_monthly_da
+        # --- NEW: Store the original daily data ---
+        result['daily_historical_da'] = qobs_daily_da
         
-        # --- Berechne saisonale Mittelwerte ---
+        # --- NEW: Resample to monthly for all subsequent monthly/seasonal analysis ---
+        qobs_monthly_da = qobs_daily_da.resample(time='MS').mean()
+        result['monthly_historical_da'] = qobs_monthly_da # Store this as well
+
+        # --- Berechne saisonale Mittelwerte (aus monatlichen Daten) ---
         da_with_seasons = DataProcessor.assign_season_to_dataarray(qobs_monthly_da)
         seasonal_means_ts = DataProcessor.calculate_seasonal_means(da_with_seasons)
 
@@ -152,8 +159,7 @@ class ClimateAnalysis:
                     result[f'{season_lower}_discharge'] = DataProcessor.detrend_data(season_ts)
                     result[f'{season_lower}_mean'] = season_ts.mean().item()
         
-        # --- Berechne "Extreme Flow" (basierend auf Perzentilen der QOBS-Daten) ---
-        # Wir verwenden die monatlichen QOBS-Daten
+        # --- Berechne "Extreme Flow" (basierend auf Perzentilen der monatlichen QOBS-Daten) ---
         high_flow_threshold = qobs_monthly_da.quantile(0.90).item()
         low_flow_threshold_overall = qobs_monthly_da.quantile(0.10).item()
         
@@ -175,12 +181,9 @@ class ClimateAnalysis:
                     # Speichere die detrendeten extremen Zeitreihen (für Korrelationen)
                     result[f'{season.lower()}_extreme_flow'] = DataProcessor.detrend_data(season_data)
 
-        # --- Füge die hard-gecodeten Schwellenwerte hinzu ---
-        # Diese sind unabhängig von den QOBS-Daten, da sie fixiert sind.
+        # --- Füge die hard-gecodeten Schwellenwerte hinzu (wie zuvor) ---
         logging.info(f"Adding fixed low-flow thresholds: 1417 (30th), 1064 (10th), 970 (LNWL).")
         for season in ['winter', 'summer']:
-            # Diese Werte werden für die "Return Period"-Plots (feste Schwellen) 
-            # und die Plot-Linien in den Impact-Plots verwendet.
             result[f'{season}_lowflow_threshold'] = 1064
             result[f'{season}_lowflow_threshold_30'] = 1417
             result[f'{season}_lowflow_lnwl'] = 970
@@ -241,10 +244,12 @@ class ClimateAnalysis:
     def load_historical_qobs_from_csv(config):
         """
         Loads the historical QOBS (observations) timeseries from the CMIP6 discharge CSV file.
-        This data is assumed to be daily and is resampled to monthly means.
-        This is used as the basis for historical percentile calculations.
+        This data is assumed to be daily and is returned as a daily xarray DataArray.
+        This is used as the basis for historical percentile and EVA calculations.
+        
+        MODIFIED: Returns daily data, not resampled to monthly.
         """
-        logging.info("Loading and resampling historical QOBS discharge data from CSV...")
+        logging.info("Loading DAILY historical QOBS discharge data from CSV...")
         filepath = config.DISCHARGE_SSP245_FILE # We can use either file, QOBS is the same
 
         if not os.path.exists(filepath):
@@ -270,20 +275,19 @@ class ClimateAnalysis:
             qobs_series_daily = df['QOBS'].loc['1960-01-01':'2021-12-31'].dropna()
 
             if qobs_series_daily.empty:
-                logging.error(f"No QOBS data found in the 1960-2014 period in {filepath}")
+                logging.error(f"No QOBS data found in the 1960-2021 period in {filepath}")
                 return None
 
-            # Resample daily data to monthly mean ('MS' = Month Start)
-            # Die Analyse in storyline.py erwartet monatliche Daten
-            qobs_series_monthly = qobs_series_daily.resample('MS').mean()
-
+            # --- MODIFICATION: DO NOT RESAMPLE TO MONTHLY ---
+            # qobs_series_monthly = qobs_series_daily.resample('MS').mean()
+            
             # Convert to xarray DataArray
-            da = qobs_series_monthly.to_xarray()
+            da = qobs_series_daily.to_xarray()
             da.name = 'discharge'
             da.attrs['units'] = 'm3/s'
-            da.attrs['long_name'] = 'Observed Danube River Discharge (QOBS 1960-2014, resampled to monthly)'
+            da.attrs['long_name'] = 'Observed Danube River Discharge (QOBS 1960-2021, daily)'
 
-            logging.info(f"Successfully loaded and resampled QOBS historical data from 1960-2014.")
+            logging.info(f"Successfully loaded DAILY QOBS historical data from 1960-2021.")
             return da
 
         except Exception as e:
@@ -338,12 +342,13 @@ class ClimateAnalysis:
                         logging.info(f"    Successfully calculated SPEI-4 for {dset_key}.")
 
         # --- START: ÄNDERUNG (Laden der Abflussdaten) ---
-        # 1. Lade QOBS-Daten (1960-2014) aus der .csv-Datei
+        # 1. Lade QOBS-Daten (1960-2021, TÄGLICH) aus der .csv-Datei
         qobs_historical_da = ClimateAnalysis.load_historical_qobs_from_csv(Config())
         
         # 2. Verarbeite QOBS-Daten, um historische Zeitreihen zu erstellen UND fixe Schwellenwerte hinzuzufügen
         # Diese 'discharge_data_loaded' wird für alle historischen Plots (Korrelationen) 
         # UND für die fixen Schwellenwerte (LNWL) in den Zukunfts-Plots verwendet.
+        # WICHTIG: Dieses dict enthält jetzt 'daily_historical_da' UND 'monthly_historical_da'
         discharge_data_loaded = ClimateAnalysis.process_historical_discharge_data(qobs_historical_da)
         # --- ENDE: ÄNDERUNG ---
         
@@ -625,47 +630,57 @@ class ClimateAnalysis:
                     logging.info(f"Plot '{storyline_map_plot_filename}' already exists.")
 
 
-                # --- START: BLOCK MIT ANPASSUNGEN ---
+                # --- START: BLOCK MIT ANPASSUNGEN (NEUE PLOT-AUFRUFE) ---
                 # --- PLOT: Storyline Discharge Return Periods (per scenario) ---
-                return_period_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_discharge_return_period_comparison_boxplots_{scenario}.png")
-                # Variable zum Speichern der Ergebnisse
+                return_period_plot_filename_low = os.path.join(Config.PLOT_DIR, f"storyline_discharge_return_period_LOW_FLOW_{scenario}.png")
+                return_period_plot_filename_high = os.path.join(Config.PLOT_DIR, f"storyline_discharge_return_period_HIGH_FLOW_{scenario}.png")
+                
                 return_period_results_for_plot = None # Initialisieren
-                if not os.path.exists(return_period_plot_filename):
-                    logging.info(f"Plot '{return_period_plot_filename}' not found. Calculating data and creating plot...")
+
+                # Check if EITHER plot is missing
+                if not os.path.exists(return_period_plot_filename_low) or not os.path.exists(return_period_plot_filename_high):
+                    logging.info(f"One or more EVA return period plots for {scenario} not found. Calculating data...")
                     # --- START: ÄNDERUNG ---
                     # historical_da = discharge_data_loaded.get('monthly_historical_da') # ALTE ZEILE
-                    historical_da = qobs_historical_da # NEU: Verwende die geladenen QOBS-Daten
+                    historical_da = discharge_data_loaded.get('daily_historical_da') # NEU: Verwende die TÄGLICHEN QOBS-Daten
                     # --- ENDE: ÄNDERUNG ---
+                    
                     if historical_da is not None:
                         # Ergebnisse speichern
                         return_period_results_for_plot = storyline_analyzer.analyze_storyline_discharge_extremes(
                             cmip6_results=cmip6_results,
-                            historical_discharge_da=historical_da, # <-- HIER QOBS übergeben
+                            historical_discharge_da=historical_da, # <-- HIER TÄGLICHE QOBS übergeben
                             config=Config(),
                             discharge_thresholds=discharge_data_loaded # Die fixen werden hier noch übergeben
                         )
                         if return_period_results_for_plot:
-                            # Hier wird die VISUALISIERUNG für den Return Period Plot aufgerufen
-                            Visualizer.plot_storyline_return_period_change(return_period_results_for_plot, Config(), scenario=scenario)
+                            # Hier wird die VISUALISIERUNG für die NEUEN Plots aufgerufen
+                            if not os.path.exists(return_period_plot_filename_low):
+                                Visualizer.plot_storyline_return_period_LOW_FLOW(return_period_results_for_plot, Config(), scenario=scenario)
+                            else:
+                                logging.info(f"Plot '{return_period_plot_filename_low}' already exists.")
+                                
+                            if not os.path.exists(return_period_plot_filename_high):
+                                Visualizer.plot_storyline_return_period_HIGH_FLOW(return_period_results_for_plot, Config(), scenario=scenario)
+                            else:
+                                logging.info(f"Plot '{return_period_plot_filename_high}' already exists.")
                         else:
                             logging.warning(f"Could not calculate return period results for {scenario}.")
                     else:
-                        # --- START: ÄNDERUNG ---
-                        logging.warning(f"QOBS historical discharge data not available for return period analysis in {scenario}.")
-                        # --- ENDE: ÄNDERUNG ---
+                        logging.warning(f"DAILY QOBS historical discharge data not available for return period analysis in {scenario}.")
                 else:
-                    logging.info(f"Plot '{return_period_plot_filename}' already exists.")
-                    # Ergebnisse trotzdem berechnen, wenn Plot existiert, für den nächsten Plot
+                    logging.info(f"Both EVA return period plots for {scenario} already exist.")
+                    
+                # Ergebnisse trotzdem berechnen, wenn Plot existiert, für den nächsten Plot
+                if return_period_results_for_plot is None: # Nur berechnen, wenn nicht schon geschehen
                     # --- START: ÄNDERUNG ---
-                    # historical_da = discharge_data_loaded.get('monthly_historical_da') # ALTE ZEILE
-                    historical_da = qobs_historical_da # NEU: Verwende die geladenen QOBS-Daten
+                    historical_da = discharge_data_loaded.get('daily_historical_da') # NEU: Verwende die TÄGLICHEN QOBS-Daten
                     # --- ENDE: ÄNDERUNG ---
-                    # Nur berechnen, wenn nicht schon geschehen und historische Daten vorhanden sind
-                    if historical_da is not None and return_period_results_for_plot is None:
+                    if historical_da is not None:
                          logging.info(f"Calculating return period results for {scenario} (needed for impact plot)...")
                          return_period_results_for_plot = storyline_analyzer.analyze_storyline_discharge_extremes(
                              cmip6_results=cmip6_results,
-                             historical_discharge_da=historical_da, # <-- HIER QOBS übergeben
+                             historical_discharge_da=historical_da, # <-- HIER TÄGLICHE QOBS übergeben
                              config=Config(),
                              discharge_thresholds=discharge_data_loaded
                          )
@@ -685,9 +700,7 @@ class ClimateAnalysis:
                             Visualizer.plot_storyline_impact_barchart_with_discharge(
                                 cmip6_results=cmip6_results,
                                 threshold_data=threshold_data_for_plot, # <-- HIER WIRD ES ÜBERGEBEN
-                                # --- START: ÄNDERUNG ---
-                                discharge_data_historical=discharge_data_loaded, # <-- Beibehalten für LNWL etc.
-                                # --- ENDE: ÄNDERUNG ---
+                                discharge_data_historical=discharge_data_loaded,
                                 reanalysis_data=datasets_reanalysis,
                                 config=Config(),
                                 scenario=scenario,

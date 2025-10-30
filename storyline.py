@@ -2086,10 +2086,12 @@ class StorylineAnalyzer:
             ('1Q_low', 1, 10, 'low', 'Low-Flow (1Q10)'),
             ('7Q_low', 7, 10, 'low', 'Low-Flow (7Q10)'),
             ('7Q_low', 7, 50, 'low', 'Low-Flow (7Q50)'),
+            ('7Q_low', 7, 100, 'low', 'Low-Flow (7Q100)'), # <-- NEU HINZUGEFÜGT
             # High Flow
             ('1Q_high', 1, 10, 'high', 'High-Flow (1Q10)'),
             ('7Q_high', 7, 10, 'high', 'High-Flow (7Q10)'),
             ('7Q_high', 7, 50, 'high', 'High-Flow (7Q50)'),
+            ('7Q_high', 7, 100, 'high', 'High-Flow (7Q100)'), # <-- NEU HINZUGEFÜGT
         ]
         # Holen der "fixen" Schwellenwerte
         lnwl_fixed_threshold = discharge_thresholds.get(f'winter_lowflow_lnwl') # Nehmen 'winter' als Referenz

@@ -10,7 +10,7 @@ import pandas as pd
 import xarray as xr
 import logging
 import traceback
-from scipy.stats import linregress
+from scipy.stats import linregress, genextreme
 import statsmodels.api as sm
 
 class StatsAnalyzer:
@@ -274,8 +274,10 @@ class StatsAnalyzer:
         """
         Calculates hydrological extreme value thresholds (e.g., 7Q10) from a daily time series.
         
-        This method uses quantile interpolation on the empirical distribution of
-        annual extremes (minima for 'low', maxima for 'high').
+        MODIFIZIERTE VERSION:
+        Verwendet die Generalized Extreme Value (GEV) Verteilung, um die Schwellenwerte
+        statistisch robust zu fitten und zu extrapolieren (z.B. für Q100).
+        Fällt auf die empirische Quantil-Methode zurück, wenn der GEV-Fit fehlschlägt.
 
         Parameters:
         -----------
@@ -316,28 +318,65 @@ class StatsAnalyzer:
                 
             clean_extremes = annual_extremes.dropna(dim='year').values
             
-            if len(clean_extremes) < 10: # Need at least 10 years for a somewhat stable estimate
-                logging.warning(f"Skipping {q}Q analysis for {eva_type}: Only {len(clean_extremes)} valid years.")
+            if len(clean_extremes) < 20: # GEV-Fit benötigt ausreichend Daten
+                logging.warning(f"Skipping {q}Q analysis for {eva_type}: Only {len(clean_extremes)} valid years. (Need > 20 for robust GEV fit)")
                 continue
 
-            # 3. Calculate thresholds for each return period using quantile interpolation
-            for T in return_periods:
-                if eva_type == 'low':
-                    # Probability of non-exceedance (P(X <= x))
-                    # For 10-year low flow, we want the value that is fallen below with 1/10 prob.
-                    prob = 1.0 / T
-                    quantile_to_find = prob
-                else: # 'high'
-                    # Probability of exceedance (P(X > x))
-                    # For 10-year high flow, we want the value that is exceeded with 1/10 prob.
-                    prob = 1.0 / T
-                    # np.quantile expects the non-exceedance probability
-                    quantile_to_find = 1.0 - prob
+            # --- START: GEV-FIT ---
+            try:
+                # 3. Fit GEV distribution to the annual extremes
+                # Für Niedrigwasser (low flow) invertieren wir die Daten, um die Verteilung
+                # der Minima als Verteilung der Maxima (von -X) anzupassen.
+                data_to_fit = -clean_extremes if eva_type == 'low' else clean_extremes
                 
-                # Use linear interpolation on the empirical distribution
-                discharge_val = np.quantile(clean_extremes, quantile_to_find, interpolation='linear')
+                # Fit the GEV distribution
+                # genextreme.fit(data) returns (shape, loc, scale)
+                params = genextreme.fit(data_to_fit)
                 
-                key = f'{q}Q{T}'
-                thresholds_m3s[key] = discharge_val
+                # 4. Calculate thresholds for each return period using GEV Percent Point Function (ppf)
+                for T in return_periods:
+                    if eva_type == 'low':
+                        # P(X <= x) = 1/T. 
+                        # Da wir mit -X arbeiten: P(-X <= -x) = 1 - 1/T
+                        prob = 1.0 / T
+                        # Wir suchen P(-X >= ppf) = 1/T, was P(-X <= ppf) = 1 - 1/T entspricht
+                        quantile_to_find = 1.0 - prob 
+                        
+                        # Berechne den Wert aus der gefitteten Verteilung
+                        fitted_val = genextreme.ppf(quantile_to_find, *params)
+                        # Invertiere zurück zum ursprünglichen Wert
+                        discharge_val = -fitted_val 
+                        
+                    else: # 'high'
+                        # P(X > x) = 1/T  =>  P(X <= x) = 1 - 1/T
+                        prob = 1.0 / T
+                        quantile_to_find = 1.0 - prob
+                        
+                        # Berechne den Wert aus der gefitteten Verteilung
+                        discharge_val = genextreme.ppf(quantile_to_find, *params)
+                    
+                    key = f'{q}Q{T}'
+                    thresholds_m3s[key] = discharge_val
+                
+                logging.info(f"Successfully calculated GEV thresholds for {q}Q ({eva_type}).")
+
+            except Exception as e:
+                # --- FALLBACK: EMPIRICAL (Quantile) ---
+                logging.warning(f"GEV fit failed for {q}Q ({eva_type}): {e}. Falling back to empirical quantile method.")
+                
+                for T in return_periods:
+                    if eva_type == 'low':
+                        prob = 1.0 / T
+                        quantile_to_find = prob
+                    else: # 'high'
+                        prob = 1.0 / T
+                        quantile_to_find = 1.0 - prob
+                    
+                    # Verwende lineare Interpolation (wie im alten Code)
+                    discharge_val = np.quantile(clean_extremes, quantile_to_find, interpolation='linear')
+                    
+                    key = f'{q}Q{T}'
+                    thresholds_m3s[key] = discharge_val
+            # --- END: GEV-FIT / FALLBACK ---
                 
         return thresholds_m3s

@@ -10,7 +10,7 @@ import pandas as pd
 import xarray as xr
 import logging
 import traceback
-from scipy.stats import linregress, genextreme
+from scipy.stats import linregress
 import statsmodels.api as sm
 import lmoments3 as lm  
 from lmoments3 import distr

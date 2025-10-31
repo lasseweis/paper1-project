@@ -12,6 +12,7 @@ import logging
 import traceback
 from scipy.stats import linregress, genextreme
 import statsmodels.api as sm
+import lmoments3 as lm  
 
 class StatsAnalyzer:
     """A collection of statistical analysis utilities."""
@@ -274,10 +275,10 @@ class StatsAnalyzer:
         """
         Calculates hydrological extreme value thresholds (e.g., 7Q10) from a daily time series.
         
-        MODIFIED VERSION (v3 - Half-Year):
-        - Can filter data for a specific half-year ('winter' or 'summer') BEFORE
-          calculating annual extremes.
-        - Uses GEV fit and falls back to empirical quantile.
+        MODIFIED VERSION (v3.2 - L-Moments, korrigierter Import):
+        - Can filter data for a specific half-year ('winter' or 'summer').
+        - Uses GEV fit based on L-Moments for robust parameter estimation.
+        - Falls back to empirical quantile if L-Moment GEV fit fails.
 
         Parameters:
         -----------
@@ -303,7 +304,7 @@ class StatsAnalyzer:
             logging.warning("Cannot calculate EVA thresholds: Daily time series is missing or too short.")
             return {}
 
-        # --- NEU: Half-Year Filtering ---
+        # --- Half-Year Filtering (wie zuvor) ---
         if half_year_filter:
             months = []
             if half_year_filter == 'winter':
@@ -324,7 +325,7 @@ class StatsAnalyzer:
                 daily_timeseries_filtered = daily_timeseries
         else:
             daily_timeseries_filtered = daily_timeseries
-        # --- ENDE NEU ---
+        # --- Ende Half-Year Filtering ---
 
         thresholds_m3s = {}
         
@@ -333,11 +334,9 @@ class StatsAnalyzer:
             if q == 1:
                 moving_avg_full = daily_timeseries
             else:
-                # FIX 1: Roll auf 'daily_timeseries' (nicht 'daily_timeseries_filtered')
-                # FIX 2: Verwende min_periods=q (oder den Standard), nicht 1
                 moving_avg_full = daily_timeseries.rolling(time=q, center=True, min_periods=q).mean()
             
-            # 2. NOW filter the resulting moving average series for the half-year
+            # 2. Filter the resulting moving average series for the half-year
             if half_year_filter:
                 months = []
                 if half_year_filter == 'winter':
@@ -346,17 +345,15 @@ class StatsAnalyzer:
                     months = [6, 7, 8, 9, 10, 11]
                 
                 if months:
-                    # Weise dem 'moving_avg_full' DataArray Monats-Koordinaten zu
                     if 'month' not in moving_avg_full.coords:
                         moving_avg_full = moving_avg_full.assign_coords(month=("time", moving_avg_full.time.dt.month.data))
-                    
                     moving_avg_filtered = moving_avg_full.where(moving_avg_full.month.isin(months), drop=True)
                 else:
                     moving_avg_filtered = moving_avg_full
             else:
                 moving_avg_filtered = moving_avg_full
 
-            # 3. Extract annual extremes from the CORRECTLY filtered moving average
+            # 3. Extract annual extremes
             if eva_type == 'low':
                 annual_extremes = moving_avg_filtered.groupby('time.year').min('time')
             else: # 'high'
@@ -365,36 +362,37 @@ class StatsAnalyzer:
             clean_extremes = annual_extremes.dropna(dim='year').values
             
             if len(clean_extremes) < 20: 
-                logging.warning(f"Skipping {q}Q analysis for {eva_type} ({half_year_filter}): Only {len(clean_extremes)} valid years. (Need > 20 for robust GEV fit)")
+                logging.warning(f"Skipping {q}Q analysis for {eva_type} ({half_year_filter}): Only {len(clean_extremes)} valid years. (Need > 20 for robust fit)")
                 continue
 
-            # --- START: GEV-FIT ---
+            # --- START: L-MOMENT GEV-FIT ---
             try:
-                # 3. Fit GEV distribution
-                data_to_fit = -clean_extremes if eva_type == 'low' else clean_extremes
-                params = genextreme.fit(data_to_fit)
+                # 3. Fit GEV distribution using L-Moments
+                lmoms = lm.lmom_ratios(clean_extremes, nmom=4)
                 
-                # 4. Calculate thresholds for each return period using GEV ppf
+                # KORREKTUR: Verwende lm.distributions.gev.par_fit
+                params_gev = lm.distributions.gev.par_fit(lmoms)
+                
+                # 4. Berechne Schwellenwerte für jede Jährlichkeit (GEV ppf = quantile function)
                 for T in return_periods:
                     if eva_type == 'low':
                         prob = 1.0 / T
-                        quantile_to_find = 1.0 - prob 
-                        fitted_val = genextreme.ppf(quantile_to_find, *params)
-                        discharge_val = -fitted_val 
-                        
+                        quantile_to_find = prob 
                     else: # 'high'
                         prob = 1.0 / T
                         quantile_to_find = 1.0 - prob
-                        discharge_val = genextreme.ppf(quantile_to_find, *params)
+                    
+                    # KORREKTUR: Verwende lm.distributions.gev.ppf
+                    discharge_val = lm.distributions.gev.ppf(quantile_to_find, **params_gev)
                     
                     key = f'{q}Q{T}'
                     thresholds_m3s[key] = discharge_val
                 
-                logging.info(f"Successfully calculated GEV thresholds for {q}Q ({eva_type}, {half_year_filter}).")
+                logging.info(f"Successfully calculated L-Moment GEV thresholds for {q}Q ({eva_type}, {half_year_filter}).")
 
             except Exception as e:
                 # --- FALLBACK: EMPIRICAL (Quantile) ---
-                logging.warning(f"GEV fit failed for {q}Q ({eva_type}, {half_year_filter}): {e}. Falling back to empirical quantile method.")
+                logging.warning(f"L-Moment GEV fit failed for {q}Q ({eva_type}, {half_year_filter}): {e}. Falling back to empirical quantile method.")
                 
                 for T in return_periods:
                     if eva_type == 'low':
@@ -408,6 +406,6 @@ class StatsAnalyzer:
                     
                     key = f'{q}Q{T}'
                     thresholds_m3s[key] = discharge_val
-            # --- END: GEV-FIT / FALLBACK ---
+            # --- END: L-MOMENT GEV-FIT / FALLBACK ---
                 
         return thresholds_m3s

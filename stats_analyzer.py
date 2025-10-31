@@ -13,6 +13,7 @@ import traceback
 from scipy.stats import linregress, genextreme
 import statsmodels.api as sm
 import lmoments3 as lm  
+from lmoments3 import distr
 
 class StatsAnalyzer:
     """A collection of statistical analysis utilities."""
@@ -275,7 +276,7 @@ class StatsAnalyzer:
         """
         Calculates hydrological extreme value thresholds (e.g., 7Q10) from a daily time series.
         
-        MODIFIED VERSION (v3.2 - L-Moments, korrigierter Import):
+        MODIFIED VERSION (v3.5 - L-Moments, korrekter Import "distr"):
         - Can filter data for a specific half-year ('winter' or 'summer').
         - Uses GEV fit based on L-Moments for robust parameter estimation.
         - Falls back to empirical quantile if L-Moment GEV fit fails.
@@ -370,8 +371,8 @@ class StatsAnalyzer:
                 # 3. Fit GEV distribution using L-Moments
                 lmoms = lm.lmom_ratios(clean_extremes, nmom=4)
                 
-                # KORREKTUR: Verwende lm.distributions.gev.par_fit
-                params_gev = lm.distributions.gev.par_fit(lmoms)
+                # KORREKTUR: Verwende "distr" (importiert als "from lmoments3 import distr")
+                params_gev = distr.gev.par_fit(lmoms)
                 
                 # 4. Berechne Schwellenwerte für jede Jährlichkeit (GEV ppf = quantile function)
                 for T in return_periods:
@@ -382,8 +383,8 @@ class StatsAnalyzer:
                         prob = 1.0 / T
                         quantile_to_find = 1.0 - prob
                     
-                    # KORREKTUR: Verwende lm.distributions.gev.ppf
-                    discharge_val = lm.distributions.gev.ppf(quantile_to_find, **params_gev)
+                    # KORREKTUR: Verwende distr.gev.ppf
+                    discharge_val = distr.gev.ppf(quantile_to_find, **params_gev)
                     
                     key = f'{q}Q{T}'
                     thresholds_m3s[key] = discharge_val

@@ -630,62 +630,38 @@ class ClimateAnalysis:
                     logging.info(f"Plot '{storyline_map_plot_filename}' already exists.")
 
 
-                # --- START: BLOCK MIT ANPASSUNGEN (NEUE PLOT-AUFRUFE) ---
-                # --- PLOT: Storyline Discharge Return Periods (per scenario) ---
-                return_period_plot_filename_low = os.path.join(Config.PLOT_DIR, f"storyline_discharge_return_period_LOW_FLOW_{scenario}.png")
-                return_period_plot_filename_high = os.path.join(Config.PLOT_DIR, f"storyline_discharge_return_period_HIGH_FLOW_{scenario}.png")
+                # --- START: NEUER BLOCK (v3 - Halbjährlich) ---
+                # --- PLOT: Storyline Discharge Return Periods (Half-Year) (per scenario) ---
+                return_period_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_discharge_return_period_HALFYEAR_{scenario}.png")
                 
                 return_period_results_for_plot = None # Initialisieren
 
-                # Check if EITHER plot is missing
-                if not os.path.exists(return_period_plot_filename_low) or not os.path.exists(return_period_plot_filename_high):
-                    logging.info(f"One or more EVA return period plots for {scenario} not found. Calculating data...")
-                    # --- START: ÄNDERUNG ---
-                    # historical_da = discharge_data_loaded.get('monthly_historical_da') # ALTE ZEILE
-                    historical_da = discharge_data_loaded.get('daily_historical_da') # NEU: Verwende die TÄGLICHEN QOBS-Daten
-                    # --- ENDE: ÄNDERUNG ---
-                    
-                    if historical_da is not None:
-                        # Ergebnisse speichern
-                        return_period_results_for_plot = storyline_analyzer.analyze_storyline_discharge_extremes(
-                            cmip6_results=cmip6_results,
-                            historical_discharge_da=historical_da, # <-- HIER TÄGLICHE QOBS übergeben
-                            config=Config(),
-                            discharge_thresholds=discharge_data_loaded # Die fixen werden hier noch übergeben
-                        )
-                        if return_period_results_for_plot:
-                            # Hier wird die VISUALISIERUNG für die NEUEN Plots aufgerufen
-                            if not os.path.exists(return_period_plot_filename_low):
-                                Visualizer.plot_storyline_return_period_LOW_FLOW(return_period_results_for_plot, Config(), scenario=scenario)
-                            else:
-                                logging.info(f"Plot '{return_period_plot_filename_low}' already exists.")
-                                
-                            if not os.path.exists(return_period_plot_filename_high):
-                                Visualizer.plot_storyline_return_period_HIGH_FLOW(return_period_results_for_plot, Config(), scenario=scenario)
-                            else:
-                                logging.info(f"Plot '{return_period_plot_filename_high}' already exists.")
-                        else:
-                            logging.warning(f"Could not calculate return period results for {scenario}.")
-                    else:
-                        logging.warning(f"DAILY QOBS historical discharge data not available for return period analysis in {scenario}.")
+                # Berechne die Daten (wird für diesen Plot UND den nächsten benötigt)
+                historical_da = discharge_data_loaded.get('daily_historical_da') # TÄGLICHE QOBS-Daten
+                
+                if historical_da is not None:
+                    logging.info(f"Calculating half-year EVA return period data for {scenario}...")
+                    return_period_results_for_plot = storyline_analyzer.analyze_storyline_discharge_extremes(
+                        cmip6_results=cmip6_results,
+                        historical_discharge_da=historical_da, # <-- HIER TÄGLICHE QOBS übergeben
+                        config=Config(),
+                        discharge_thresholds=discharge_data_loaded # Die fixen werden hier noch übergeben
+                    )
                 else:
-                    logging.info(f"Both EVA return period plots for {scenario} already exist.")
-                    
-                # Ergebnisse trotzdem berechnen, wenn Plot existiert, für den nächsten Plot
-                if return_period_results_for_plot is None: # Nur berechnen, wenn nicht schon geschehen
-                    # --- START: ÄNDERUNG ---
-                    historical_da = discharge_data_loaded.get('daily_historical_da') # NEU: Verwende die TÄGLICHEN QOBS-Daten
-                    # --- ENDE: ÄNDERUNG ---
-                    if historical_da is not None:
-                         logging.info(f"Calculating return period results for {scenario} (needed for impact plot)...")
-                         return_period_results_for_plot = storyline_analyzer.analyze_storyline_discharge_extremes(
-                             cmip6_results=cmip6_results,
-                             historical_discharge_da=historical_da, # <-- HIER TÄGLICHE QOBS übergeben
-                             config=Config(),
-                             discharge_thresholds=discharge_data_loaded
-                         )
+                    logging.warning(f"DAILY QOBS historical discharge data not available for return period analysis in {scenario}.")
+
+                # Erstelle den neuen Plot, falls er fehlt
+                if not os.path.exists(return_period_plot_filename):
+                    if return_period_results_for_plot:
+                        Visualizer.plot_storyline_return_period_half_year(return_period_results_for_plot, Config(), scenario=scenario)
+                    else:
+                        logging.warning(f"Could not calculate return period results, skipping plot for {scenario}.")
+                else:
+                    logging.info(f"Half-year return period plot '{return_period_plot_filename}' already exists.")
+
 
                 # --- PLOT: Storyline Impacts Bar Chart (per scenario) ---
+                # (Dieser Block bleibt derselbe wie vorher, aber er verwendet die neuen return_period_results)
                 impacts_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_impacts_summary_4x2_boxplots_{scenario}.png")
                 if not os.path.exists(impacts_plot_filename):
                     logging.info(f"Plot '{impacts_plot_filename}' not found, creating...")
@@ -694,7 +670,42 @@ class ClimateAnalysis:
 
                         # threshold_data übergeben
                         # Wir extrahieren nur den 'thresholds'-Teil aus den Return-Period-Ergebnissen
-                        threshold_data_for_plot = return_period_results_for_plot.get('thresholds') if return_period_results_for_plot else None
+                        # WICHTIG: Die Struktur von 'thresholds' ist jetzt anders!
+                        # Die Plot-Funktion `plot_storyline_impact_barchart_with_discharge` erwartet
+                        # die alte Struktur (z.B. results['thresholds']['DJF_discharge']).
+                        # Wir müssen die neue Struktur (`results['thresholds']['winter']`) anpassen.
+                        
+                        threshold_data_for_plot = None
+                        if return_period_results_for_plot and 'thresholds' in return_period_results_for_plot:
+                             # Baue die alte Struktur für die Plot-Funktion nach
+                             threshold_data_for_plot = {}
+                             
+                             # Hole hist. std dev aus der alten QOBS-Analyse
+                             hist_std_dev_djf = discharge_data_loaded.get('winter_discharge_std_dev_placeholder', np.nan) # (Dieser Teil ist komplex, ggf. anpassen)
+                             hist_std_dev_jja = discharge_data_loaded.get('summer_discharge_std_dev_placeholder', np.nan)
+                             
+                             # Map winter/summer thresholds to all relevant keys
+                             winter_events = return_period_results_for_plot['thresholds'].get('winter', {})
+                             summer_events = return_period_results_for_plot['thresholds'].get('summer', {})
+                             
+                             # Wandle event_key (z.B. '7Q10_low') in alten Namen (z.B. 'Low-Flow (7Q10)') um
+                             def map_events_to_old_struct(events_dict):
+                                 old_struct = {}
+                                 for k, v in events_dict.items():
+                                     old_struct[v['name']] = v
+                                 return old_struct
+
+                             winter_events_old_struct = map_events_to_old_struct(winter_events)
+                             summer_events_old_struct = map_events_to_old_struct(summer_events)
+                             
+                             keys_winter = ['DJF_discharge', 'Mar_discharge', 'Apr_discharge', 'May_discharge']
+                             keys_summer = ['JJA_discharge', 'Sep_discharge', 'Oct_discharge', 'Nov_discharge']
+                             
+                             for k in keys_winter:
+                                 threshold_data_for_plot[k] = {**winter_events_old_struct, 'historical_std_dev': hist_std_dev_djf}
+                             for k in keys_summer:
+                                 threshold_data_for_plot[k] = {**summer_events_old_struct, 'historical_std_dev': hist_std_dev_jja}
+
 
                         if threshold_data_for_plot: # Nur plotten, wenn Schwellenwerte vorhanden sind
                             Visualizer.plot_storyline_impact_barchart_with_discharge(
@@ -707,12 +718,12 @@ class ClimateAnalysis:
                                 storyline_correlations=storyline_correlations
                             )
                         else:
-                            logging.warning(f"Skipping impact plot for {scenario} because threshold data could not be calculated.")
+                            logging.warning(f"Skipping impact plot for {scenario} because threshold data could not be calculated or re-mapped.")
                     else:
                         logging.warning(f"Skipping impact plot for {scenario} because cmip6_results are missing.")
                 else:
                     logging.info(f"Plot '{impacts_plot_filename}' already exists.")
-                # --- ENDE: BLOCK MIT ANPASSUNGEN ---
+                # --- ENDE: NEUER BLOCK (v3) ---
 
 
                 # --- PLOT: Model Fidelity and Scatter Plots (per scenario) ---

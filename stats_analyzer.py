@@ -270,25 +270,28 @@ class StatsAnalyzer:
             return None
         
     @staticmethod
-    def calculate_eva_thresholds(daily_timeseries, eva_type='low', q_days=[1, 7], return_periods=[10, 50]):
+    def calculate_eva_thresholds(daily_timeseries, eva_type='low', q_days=[1, 7], return_periods=[10, 50], half_year_filter=None):
         """
         Calculates hydrological extreme value thresholds (e.g., 7Q10) from a daily time series.
         
-        MODIFIZIERTE VERSION:
-        Verwendet die Generalized Extreme Value (GEV) Verteilung, um die Schwellenwerte
-        statistisch robust zu fitten und zu extrapolieren (z.B. für Q100).
-        Fällt auf die empirische Quantil-Methode zurück, wenn der GEV-Fit fehlschlägt.
+        MODIFIED VERSION (v3 - Half-Year):
+        - Can filter data for a specific half-year ('winter' or 'summer') BEFORE
+          calculating annual extremes.
+        - Uses GEV fit and falls back to empirical quantile.
 
         Parameters:
         -----------
         daily_timeseries : xr.DataArray
             A 1D DataArray of daily discharge values with a 'time' dimension.
         eva_type : str, default='low'
-            The type of analysis: 'low' for low-flow (annual minima) or 'high' for high-flow (annual maxima).
+            'low' for minima, 'high' for maxima.
         q_days : list, default=[1, 7]
-            A list of integers for the n-day moving average (e.g., 1 for 1Q, 7 for 7Q).
+            List of n-day moving average windows.
         return_periods : list, default=[10, 50]
-            A list of return periods (in years) to calculate (e.g., 10 for Q10, 50 for Q50).
+            List of return periods (in years) to calculate.
+        half_year_filter : str, optional, default=None
+            If 'winter' (Dec-May) or 'summer' (Jun-Nov), filters the daily
+            data for these months before extracting annual extremes.
 
         Returns:
         --------
@@ -300,17 +303,39 @@ class StatsAnalyzer:
             logging.warning("Cannot calculate EVA thresholds: Daily time series is missing or too short.")
             return {}
 
+        # --- NEU: Half-Year Filtering ---
+        if half_year_filter:
+            months = []
+            if half_year_filter == 'winter':
+                months = [12, 1, 2, 3, 4, 5]
+                logging.info(f"Calculating EVA thresholds for WINTER half-year (Dec-May)...")
+            elif half_year_filter == 'summer':
+                months = [6, 7, 8, 9, 10, 11]
+                logging.info(f"Calculating EVA thresholds for SUMMER half-year (Jun-Nov)...")
+            else:
+                logging.warning(f"Invalid half_year_filter '{half_year_filter}'. Using full year.")
+            
+            if months:
+                daily_timeseries_filtered = daily_timeseries.where(daily_timeseries.time.dt.month.isin(months), drop=True)
+                if daily_timeseries_filtered.time.size == 0:
+                    logging.error(f"No data for half-year filter '{half_year_filter}'.")
+                    return {}
+            else:
+                daily_timeseries_filtered = daily_timeseries
+        else:
+            daily_timeseries_filtered = daily_timeseries
+        # --- ENDE NEU ---
+
         thresholds_m3s = {}
         
         for q in q_days:
-            # 1. Calculate n-day moving average
+            # 1. Calculate n-day moving average on the (potentially filtered) data
             if q == 1:
-                moving_avg = daily_timeseries
+                moving_avg = daily_timeseries_filtered
             else:
-                # Use min_periods=1 to handle edges, though for annual extremes it's less critical
-                moving_avg = daily_timeseries.rolling(time=q, center=True, min_periods=1).mean()
+                moving_avg = daily_timeseries_filtered.rolling(time=q, center=True, min_periods=1).mean()
             
-            # 2. Extract annual extremes
+            # 2. Extract annual extremes *from the filtered half-year data*
             if eva_type == 'low':
                 annual_extremes = moving_avg.groupby('time.year').min('time')
             else: # 'high'
@@ -318,51 +343,37 @@ class StatsAnalyzer:
                 
             clean_extremes = annual_extremes.dropna(dim='year').values
             
-            if len(clean_extremes) < 20: # GEV-Fit benötigt ausreichend Daten
-                logging.warning(f"Skipping {q}Q analysis for {eva_type}: Only {len(clean_extremes)} valid years. (Need > 20 for robust GEV fit)")
+            if len(clean_extremes) < 20: 
+                logging.warning(f"Skipping {q}Q analysis for {eva_type} ({half_year_filter}): Only {len(clean_extremes)} valid years. (Need > 20 for robust GEV fit)")
                 continue
 
             # --- START: GEV-FIT ---
             try:
-                # 3. Fit GEV distribution to the annual extremes
-                # Für Niedrigwasser (low flow) invertieren wir die Daten, um die Verteilung
-                # der Minima als Verteilung der Maxima (von -X) anzupassen.
+                # 3. Fit GEV distribution
                 data_to_fit = -clean_extremes if eva_type == 'low' else clean_extremes
-                
-                # Fit the GEV distribution
-                # genextreme.fit(data) returns (shape, loc, scale)
                 params = genextreme.fit(data_to_fit)
                 
-                # 4. Calculate thresholds for each return period using GEV Percent Point Function (ppf)
+                # 4. Calculate thresholds for each return period using GEV ppf
                 for T in return_periods:
                     if eva_type == 'low':
-                        # P(X <= x) = 1/T. 
-                        # Da wir mit -X arbeiten: P(-X <= -x) = 1 - 1/T
                         prob = 1.0 / T
-                        # Wir suchen P(-X >= ppf) = 1/T, was P(-X <= ppf) = 1 - 1/T entspricht
                         quantile_to_find = 1.0 - prob 
-                        
-                        # Berechne den Wert aus der gefitteten Verteilung
                         fitted_val = genextreme.ppf(quantile_to_find, *params)
-                        # Invertiere zurück zum ursprünglichen Wert
                         discharge_val = -fitted_val 
                         
                     else: # 'high'
-                        # P(X > x) = 1/T  =>  P(X <= x) = 1 - 1/T
                         prob = 1.0 / T
                         quantile_to_find = 1.0 - prob
-                        
-                        # Berechne den Wert aus der gefitteten Verteilung
                         discharge_val = genextreme.ppf(quantile_to_find, *params)
                     
                     key = f'{q}Q{T}'
                     thresholds_m3s[key] = discharge_val
                 
-                logging.info(f"Successfully calculated GEV thresholds for {q}Q ({eva_type}).")
+                logging.info(f"Successfully calculated GEV thresholds for {q}Q ({eva_type}, {half_year_filter}).")
 
             except Exception as e:
                 # --- FALLBACK: EMPIRICAL (Quantile) ---
-                logging.warning(f"GEV fit failed for {q}Q ({eva_type}): {e}. Falling back to empirical quantile method.")
+                logging.warning(f"GEV fit failed for {q}Q ({eva_type}, {half_year_filter}): {e}. Falling back to empirical quantile method.")
                 
                 for T in return_periods:
                     if eva_type == 'low':
@@ -372,7 +383,6 @@ class StatsAnalyzer:
                         prob = 1.0 / T
                         quantile_to_find = 1.0 - prob
                     
-                    # Verwende lineare Interpolation (wie im alten Code)
                     discharge_val = np.quantile(clean_extremes, quantile_to_find, interpolation='linear')
                     
                     key = f'{q}Q{T}'

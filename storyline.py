@@ -301,23 +301,40 @@ class StorylineAnalyzer:
             pr_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['pr']))
             tas_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_season_to_dataarray(data['tas']))
             
-            # --- START: MODIFIKATION (Lagged Discharge Metrics + JÄHRLICHE EVA-METRIKEN) ---
+            # --- START: MODIFIKATION (v3 - Halbjährlich) ---
             if 'discharge' in data and data['discharge'] is not None:
                 
-                # --- A) JÄHRLICHE EVA-METRIKEN (für "Äpfel-mit-Äpfel"-Vergleich) ---
+                # --- A) HALB-JÄHRLICHE EVA-METRIKEN (für "Äpfel-mit-Äpfel"-Vergleich) ---
                 da_daily = data['discharge'] # Dies sind die TÄGLICHEN Daten
                 
                 # WICHTIG: Verwende 'year' als Ziel-Dimension
                 da_daily['year'] = da_daily.time.dt.year
-                
-                # 1-Tag (Tages-Minima/Maxima)
-                metric_timeseries[key]['1Q_low'] = da_daily.groupby('year').min('time')
-                metric_timeseries[key]['1Q_high'] = da_daily.groupby('year').max('time')
-                
-                # 7-Tage (7-Tages-Mittel-Minima/Maxima)
+                da_daily['month'] = da_daily.time.dt.month
+
+                # Definiere Halbjahre
+                winter_months = [12, 1, 2, 3, 4, 5]
+                summer_months = [6, 7, 8, 9, 10, 11]
+
+                da_daily_winter = da_daily.where(da_daily.month.isin(winter_months), drop=True)
+                da_daily_summer = da_daily.where(da_daily.month.isin(summer_months), drop=True)
+
+                # Berechne 7-Tages-Mittel für beide Halbjahre
+                # Wichtig: Rolling muss auf den *vollen* Daten laufen, um Grenzen nicht abzuschneiden
                 da_7day_mean = da_daily.rolling(time=7, center=True, min_periods=1).mean()
-                metric_timeseries[key]['7Q_low'] = da_7day_mean.groupby('year').min('time')
-                metric_timeseries[key]['7Q_high'] = da_7day_mean.groupby('year').max('time')
+                da_7day_mean_winter = da_7day_mean.where(da_7day_mean.month.isin(winter_months), drop=True)
+                da_7day_mean_summer = da_7day_mean.where(da_7day_mean.month.isin(summer_months), drop=True)
+
+                # Speichere halbjährliche Extremwert-Zeitreihen
+                # Winter
+                metric_timeseries[key]['1Q_low_winter'] = da_daily_winter.groupby('year').min('time')
+                metric_timeseries[key]['1Q_high_winter'] = da_daily_winter.groupby('year').max('time')
+                metric_timeseries[key]['7Q_low_winter'] = da_7day_mean_winter.groupby('year').min('time')
+                metric_timeseries[key]['7Q_high_winter'] = da_7day_mean_winter.groupby('year').max('time')
+                # Sommer
+                metric_timeseries[key]['1Q_low_summer'] = da_daily_summer.groupby('year').min('time')
+                metric_timeseries[key]['1Q_high_summer'] = da_daily_summer.groupby('year').max('time')
+                metric_timeseries[key]['7Q_low_summer'] = da_7day_mean_summer.groupby('year').min('time')
+                metric_timeseries[key]['7Q_high_summer'] = da_7day_mean_summer.groupby('year').max('time')
 
                 # --- B) Bestehender Code für MONATLICHE/SAISONALE Mittel (für andere Plots) ---
                 # Resample TÄGLICHE Daten zu MONATLICHEN
@@ -343,7 +360,7 @@ class StorylineAnalyzer:
             else:
                 discharge_seas = None
                 discharge_monthly_full = None # Ensure this is defined for the else case
-            # --- ENDE: MODIFIKATION ---
+            # --- ENDE: MODIFIKATION (v3) ---
 
             pr_box = DataProcessor.calculate_spatial_mean(pr_seas, *box_coords)
             tas_box = DataProcessor.calculate_spatial_mean(tas_seas, *box_coords)
@@ -2059,115 +2076,104 @@ class StorylineAnalyzer:
     @staticmethod
     def analyze_storyline_discharge_extremes(cmip6_results, historical_discharge_da, config, discharge_thresholds):
         """
-        Analysiert die Frequenz und Wiederkehrperiode von hydrologischen Extremen (EVA).
-        
-        MODIFIZIERTE "Äpfel-mit-Äpfel"-Version (v2):
-        1. Berechnet historische EVA-Schwellenwerte (z.B. 7Q10) UND hist. StdAbw der JAHRESMINIMA
-           aus täglichen QOBS-Daten.
-        2. Holt die JÄHRLICHEN Extremwert-Zeitreihen (z.B. '7Q_low') der CMIP6-Modelle
+        Analysiert die Frequenz und Wiederkehrperiode von hydrologischen Extremen (EVA)
+        für HALBJÄHRIGE Perioden (Winter/Sommer).
+
+        NEUE LOGIK (v3 - Halbjährlich):
+        1. Berechnet historische EVA-Schwellenwerte (z.B. 7Q10) für das Winter-Halbjahr (Dez-Mai)
+           und das Sommer-Halbjahr (Jun-Nov) separat.
+        2. Berechnet die historische Jährlichkeit für LNWL für beide Halbjahre.
+        3. Holt die HALBJÄHRLICHEN Extremwert-Zeitreihen (z.B. '7Q_low_winter') der CMIP6-Modelle
            (berechnet in analyze_cmip6_changes_at_gwl).
-        3. Sliced diese JÄHRLICHEN Zeitreihen auf das 30-Jahres-GWL-Fenster.
-        4. Zählt die Frequenz des Unterschreitens der hist. Schwellenwerte in diesem Fenster.
-        5. Berechnet die zukünftige StdAbw der JÄHRLICHEN Minima/Maxima im Fenster.
+        4. Sliced diese auf das 30-Jahres-GWL-Fenster.
+        5. Zählt die Frequenz des Unterschreitens der hist. HALBJAHRES-Schwellenwerte.
+        6. Berechnet die neue zukünftige Jährlichkeit.
         """
-        logging.info("Analyzing storyline discharge... mit NEUER TÄGLICHER 'Äpfel-mit-Äpfel' EVA-Logik (v2)...")
+        logging.info("Analyzing storyline discharge... mit NEUER HALBJÄHRLICHER EVA-Logik (v3)...")
         
         if historical_discharge_da is None:
             logging.error("Historical discharge data (daily) is missing. Aborting.")
             return None
         
-        results = {}
-        thresholds_storage = {} # Speichert die historischen Schwellenwerte und Jährlichkeiten
-
+        results = {'thresholds': {'winter': {}, 'summer': {}}, 'data': {}}
+        
         # --- 1. Definiere die zu analysierenden EVA-Ereignisse ---
-        # Format: (key_in_metrics, q_days, T, eva_type, name)
+        # Format: (event_key, metric_key_base, q_days, T, eva_type, name)
         eva_events_to_analyze = [
             # Low Flow
-            ('1Q_low', 1, 10, 'low', 'Low-Flow (1Q10)'),
-            ('7Q_low', 7, 10, 'low', 'Low-Flow (7Q10)'),
-            ('7Q_low', 7, 50, 'low', 'Low-Flow (7Q50)'),
-            ('7Q_low', 7, 100, 'low', 'Low-Flow (7Q100)'), # <-- NEU HINZUGEFÜGT
+            ('1Q10_low', '1Q_low', 1, 10, 'low', 'Low-Flow (1Q10)'),
+            ('7Q10_low', '7Q_low', 7, 10, 'low', 'Low-Flow (7Q10)'),
+            ('7Q50_low', '7Q_low', 7, 50, 'low', 'Low-Flow (7Q50)'),
+            ('7Q100_low', '7Q_low', 7, 100, 'low', 'Low-Flow (7Q100)'),
             # High Flow
-            ('1Q_high', 1, 10, 'high', 'High-Flow (1Q10)'),
-            ('7Q_high', 7, 10, 'high', 'High-Flow (7Q10)'),
-            ('7Q_high', 7, 50, 'high', 'High-Flow (7Q50)'),
-            ('7Q_high', 7, 100, 'high', 'High-Flow (7Q100)'), # <-- NEU HINZUGEFÜGT
+            ('1Q10_high', '1Q_high', 1, 10, 'high', 'High-Flow (1Q10)'),
+            ('7Q10_high', '7Q_high', 7, 10, 'high', 'High-Flow (7Q10)'),
+            ('7Q50_high', '7Q_high', 7, 50, 'high', 'High-Flow (7Q50)'),
+            ('7Q100_high', '7Q_high', 7, 100, 'high', 'High-Flow (7Q100)'),
         ]
+        
         # Holen der "fixen" Schwellenwerte
-        lnwl_fixed_threshold = discharge_thresholds.get(f'winter_lowflow_lnwl') # Nehmen 'winter' als Referenz
-
-        # Füge fixe Schwellenwerte hinzu (diese werden auf JÄHRLICHE Minima angewendet)
+        lnwl_fixed_threshold = discharge_thresholds.get(f'winter_lowflow_lnwl') # 970 m³/s
         if lnwl_fixed_threshold is not None:
-             # Wir verwenden '1Q_low' (Jahres-Minimum des Tageswerts) als Referenz dafür
-             eva_events_to_analyze.append(('1Q_low', 1, None, 'low', f'Low Navigable (LNWL) (<{lnwl_fixed_threshold:.0f} m³/s)'))
-
-        all_q_days = sorted(list(set([e[1] for e in eva_events_to_analyze])))
-        all_return_periods = sorted(list(set([e[2] for e in eva_events_to_analyze if e[2] is not None])))
+             eva_events_to_analyze.append(('LNWL', '1Q_low', 1, None, 'low', f'Low Navigable (LNWL) (<{lnwl_fixed_threshold:.0f} m³/s)'))
         
-        # --- 2. Berechne historische Schwellenwerte und Standardabweichungen ---
-        logging.info("Calculating historical EVA thresholds and std dev from daily QOBS...")
-        
-        hist_thresholds_low = StatsAnalyzer.calculate_eva_thresholds(
-            historical_discharge_da, eva_type='low', q_days=all_q_days, return_periods=all_return_periods
-        )
-        hist_thresholds_high = StatsAnalyzer.calculate_eva_thresholds(
-            historical_discharge_da, eva_type='high', q_days=all_q_days, return_periods=all_return_periods
-        )
-        
-        hist_std_devs = {}
-        thresholds_storage['events'] = {}
-        
-        # Berechne und speichere hist. StdAbw für alle benötigten Q-Metriken
-        q_metrics_keys = sorted(list(set([e[0] for e in eva_events_to_analyze])))
-        for key in q_metrics_keys:
-            q = int(key.split('Q')[0])
-            eva_type = key.split('_')[-1]
-            moving_avg_hist = historical_discharge_da.rolling(time=q, center=True, min_periods=1).mean() if q > 1 else historical_discharge_da
-            
-            if eva_type == 'low':
-                annual_extremes_hist = moving_avg_hist.groupby('time.year').min('time').dropna(dim='year')
-            else: # 'high'
-                annual_extremes_hist = moving_avg_hist.groupby('time.year').max('time').dropna(dim='year')
-            
-            hist_std_devs[key] = annual_extremes_hist.std().item()
+        q_days_needed = sorted(list(set([e[2] for e in eva_events_to_analyze])))
+        return_periods_needed = sorted(list(set([e[3] for e in eva_events_to_analyze if e[3] is not None])))
 
-        thresholds_storage['std_devs'] = hist_std_devs
-        
-        # Speichere die Schwellenwerte
-        for metric_key, q, T, eva_type, name in eva_events_to_analyze:
-            hist_val = np.nan
-            hist_T_val = T
+        # --- 2. Berechne historische Schwellenwerte und Jährlichkeiten PRO HALBJAHR ---
+        logging.info("Calculating historical EVA thresholds and return periods for each half-year...")
+        for half_year in ['winter', 'summer']:
+            # A) Berechne Schwellenwerte für 1Q/7Q...
+            hist_thresholds_low = StatsAnalyzer.calculate_eva_thresholds(
+                historical_discharge_da, eva_type='low', q_days=q_days_needed, 
+                return_periods=return_periods_needed, half_year_filter=half_year
+            )
+            hist_thresholds_high = StatsAnalyzer.calculate_eva_thresholds(
+                historical_discharge_da, eva_type='high', q_days=q_days_needed, 
+                return_periods=return_periods_needed, half_year_filter=half_year
+            )
             
-            if T is not None: # EVA Event
-                key_T = f'{q}Q{T}'
-                threshold_dict = hist_thresholds_low if eva_type == 'low' else hist_thresholds_high
-                hist_val = threshold_dict.get(key_T)
-            else: # Fixes Event (LNWL)
-                if 'LNWL' in name: hist_val = lnwl_fixed_threshold
+            # B) Berechne historische Jährlichkeit für LNWL
+            hist_T_lnwl = np.inf
+            if lnwl_fixed_threshold is not None:
+                months = [12, 1, 2, 3, 4, 5] if half_year == 'winter' else [6, 7, 8, 9, 10, 11]
+                daily_filtered = historical_discharge_da.where(historical_discharge_da.time.dt.month.isin(months), drop=True)
+                # Verwende 1Q_low (Jahres-Minimum des Tageswerts) als Referenz
+                q_1_low_hist_half_year = daily_filtered.groupby('time.year').min('time').dropna(dim='year')
+                if q_1_low_hist_half_year.year.size > 0:
+                    hist_count = (q_1_low_hist_half_year < lnwl_fixed_threshold).sum().item()
+                    hist_freq = hist_count / q_1_low_hist_half_year.year.size
+                    hist_T_lnwl = 1 / hist_freq if hist_freq > 0 else np.inf
             
-            if hist_val is None or np.isnan(hist_val):
-                logging.warning(f"Konnte historischen Schwellenwert für {name} nicht finden/berechnen. Überspringe.")
-                continue
-            
-            # Berechne historische Jährlichkeit für fixe Events
-            if T is None:
-                # Berechne Frequenz für LNWL (basierend auf 1Q_low)
-                q_1_low_hist = historical_discharge_da.groupby('time.year').min('time').dropna(dim='year')
-                hist_count = (q_1_low_hist < hist_val).sum().item()
-                hist_freq = hist_count / q_1_low_hist.year.size if q_1_low_hist.year.size > 0 else 0
-                hist_T_val = 1 / hist_freq if hist_freq > 0 else np.inf
+            # C) Speichere alle Schwellenwerte und hist. Jährlichkeiten
+            for event_key, metric_key_base, q, T, eva_type, name in eva_events_to_analyze:
+                hist_val_T = np.nan
+                hist_val_Q = np.nan
+                
+                if T is not None: # Standard EVA Event (z.B. 7Q10)
+                    key_T = f'{q}Q{T}'
+                    threshold_dict = hist_thresholds_low if eva_type == 'low' else hist_thresholds_high
+                    hist_val_Q = threshold_dict.get(key_T) # Das ist der Schwellenwert (m³/s)
+                    hist_val_T = T # Das ist die Jährlichkeit (Jahre)
+                else: # Fixes Event (LNWL)
+                    hist_val_Q = lnwl_fixed_threshold
+                    hist_val_T = hist_T_lnwl
+                
+                if hist_val_Q is None or np.isnan(hist_val_Q) or np.isnan(hist_val_T):
+                    logging.warning(f"Konnte hist. Werte für {name} ({half_year}) nicht finden/berechnen. Überspringe.")
+                    continue
+                
+                results['thresholds'][half_year][event_key] = {
+                    'name': name,
+                    'threshold_m3s': float(hist_val_Q),
+                    'hist_return_period': float(hist_val_T),
+                    'type': eva_type,
+                    'metric_key_base': metric_key_base # z.B. '7Q_low'
+                }
 
-            thresholds_storage['events'][name] = {
-                'val': hist_val,
-                'hist_return_period': float(hist_T_val),
-                'type': eva_type,
-                'metric_key': metric_key # WICHTIG: Speichert, welche Metrik zu verwenden ist (z.B. '7Q_low')
-            }
+        logging.info(f"  -> Historical thresholds stored: {json.dumps(results['thresholds'], indent=2, default=str)}")
 
-        logging.info(f"  -> Historical thresholds stored: {json.dumps(thresholds_storage['events'], indent=2, default=str)}")
-        logging.info(f"  -> Historical std devs stored: {hist_std_devs}")
-
-        # --- 3. Analysiere Zukünftige Szenarien ---
+        # --- 3. Analysiere Zukünftige Szenarien (pro Halbjahr) ---
         storyline_classification = cmip6_results.get('storyline_classification_2d')
         metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
         gwl_years = cmip6_results.get('gwl_threshold_years', {})
@@ -2177,135 +2183,67 @@ class StorylineAnalyzer:
             logging.error("Missing CMIP6 data for storyline discharge analysis.")
             return None
 
-        storyline_order = [
-            'MMM',
-            'Slow Jet & Northward Shift',
-            'Fast Jet & Northward Shift',
-            'Slow Jet & Southward Shift',
-            'Fast Jet & Southward Shift',
-        ]
-
-        # Da die EVA-Analyse JÄHRLICH ist, ist sie NICHT nach Monat/Saison getrennt.
-        # Die Plot-Funktionen SIND es aber.
-        # Kompromiss: Wir berechnen die JÄHRLICHEN EVA-Werte und weisen sie
-        # künstlich den 'impact_keys' (DJF_discharge, Mar_discharge etc.) zu,
-        # damit die Plot-Funktionen sie finden.
-        
-        impact_keys_to_populate = [
-            'DJF_discharge', 'JJA_discharge',
-            'Mar_discharge', 'Apr_discharge', 'May_discharge',
-            'Sep_discharge', 'Oct_discharge', 'Nov_discharge'
-        ]
-
         for gwl in config.GLOBAL_WARMING_LEVELS:
-            results[gwl] = {}
-            for key in impact_keys_to_populate:
-                results[gwl][key] = {} # Initialisiere alle Impact-Keys
-
-            all_storyline_keys_for_gwl = storyline_classification.get(gwl, {}).keys()
+            results['data'][gwl] = {'winter': {}, 'summer': {}}
             
-            for storyline_key in all_storyline_keys_for_gwl:
-                model_list = storyline_classification[gwl].get(storyline_key, [])
-                if not model_list: continue
+            for half_year in ['winter', 'summer']:
+                # Bestimme, welche Storyline-Klassifikation zu verwenden ist
+                # Winter-Halbjahr (Dez-Mai) wird von DJF-Storylines dominiert
+                # Sommer-Halbjahr (Jun-Nov) wird von JJA-Storylines dominiert
+                season_label = 'DJF' if half_year == 'winter' else 'JJA'
                 
-                season_label = 'DJF' if 'DJF' in storyline_key else 'JJA'
-                storyline_name = storyline_key.replace(f'{season_label}_', '')
-                if storyline_name not in storyline_order: continue
-
-                storyline_results_storage = {} # Temporärer Speicher
-                Y_total_in_storyline = len(model_list)
+                all_storyline_keys_for_gwl = {k: v for k, v in storyline_classification.get(gwl, {}).items() if k.startswith(season_label)}
                 
-                # A) Zukünftige Wiederkehrperioden
-                for event_name, event_data in thresholds_storage['events'].items():
-                    metric_key_to_use = event_data['metric_key'] # z.B. '7Q_low'
-                    model_return_periods = []
+                for storyline_key, model_list in all_storyline_keys_for_gwl.items():
+                    if not model_list: continue
+                    storyline_name = storyline_key.replace(f'{season_label}_', '')
                     
-                    for model_run_key in model_list:
-                        # Hole JÄHRLICHE Zeitreihe (z.B. '7Q_low')
-                        discharge_ts_annual = metric_timeseries.get(model_run_key, {}).get(metric_key_to_use)
-                        threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
-                        
-                        if discharge_ts_annual is None or threshold_year is None: continue
+                    storyline_results_storage = {} # Temporärer Speicher für diese Storyline
 
-                        # Schneide 30-Jahres-Fenster aus JÄHRLICHER Zeitreihe
-                        start_year = threshold_year - window // 2
-                        end_year = threshold_year + (window - 1) // 2
+                    for event_key, event_data in results['thresholds'][half_year].items():
+                        metric_key_base = event_data['metric_key_base'] # z.B. '7Q_low'
+                        metric_key_to_use = f"{metric_key_base}_{half_year}" # z.B. '7Q_low_winter'
+                        hist_threshold_val = event_data['threshold_m3s']
                         
-                        # Verwende 'year' als Dimension (wie in Schritt 1 erstellt)
-                        ts_slice_annual = discharge_ts_annual.sel(year=slice(start_year, end_year))
-                        ts_slice_annual_clean = ts_slice_annual.dropna(dim='year')
-                        total_future_years = ts_slice_annual_clean.year.size
+                        model_return_periods = []
+                        Y_total_in_storyline = len(model_list)
                         
-                        if total_future_years > 0:
-                            if event_data['type'] == 'low':
-                                future_event_count = (ts_slice_annual_clean < event_data['val']).sum().item()
-                            else:
-                                future_event_count = (ts_slice_annual_clean > event_data['val']).sum().item()
+                        for model_run_key in model_list:
+                            # Hole HALBJÄHRLICHE Zeitreihe (z.B. '7Q_low_winter')
+                            discharge_ts_half_year = metric_timeseries.get(model_run_key, {}).get(metric_key_to_use)
+                            threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
                             
-                            future_freq = future_event_count / total_future_years
-                            future_return_period = 1 / future_freq if future_freq > 0 else np.inf
-                            model_return_periods.append(future_return_period)
-                    
-                    if model_return_periods:
-                        finite_periods = [p for p in model_return_periods if np.isfinite(p)]
-                        X_finite_models = len(finite_periods)
-                        storyline_results_storage[event_name] = {
-                            'hist_return_period': event_data['hist_return_period'],
-                            'future_return_periods_all_models': model_return_periods,
-                            'future_return_period_mean': np.mean(finite_periods) if finite_periods else np.inf,
-                            'model_count_X': X_finite_models,
-                            'model_count_Y': Y_total_in_storyline
-                        }
-                
-                # B) Zukünftige Standardabweichungen
-                for std_key, hist_std_val in thresholds_storage['std_devs'].items():
-                    model_std_devs = []
-                    for model_run_key in model_list:
-                        discharge_ts_annual = metric_timeseries.get(model_run_key, {}).get(std_key)
-                        threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
-                        if discharge_ts_annual is None or threshold_year is None: continue
+                            if discharge_ts_half_year is None or threshold_year is None: continue
+
+                            # Schneide 30-Jahres-Fenster aus HALBJÄHRLICHER Zeitreihe
+                            start_year = threshold_year - window // 2
+                            end_year = threshold_year + (window - 1) // 2
+                            
+                            ts_slice = discharge_ts_half_year.sel(year=slice(start_year, end_year))
+                            ts_slice_clean = ts_slice.dropna(dim='year')
+                            total_future_years = ts_slice_clean.year.size
+                            
+                            if total_future_years > 0:
+                                if event_data['type'] == 'low':
+                                    future_event_count = (ts_slice_clean < hist_threshold_val).sum().item()
+                                else:
+                                    future_event_count = (ts_slice_clean > hist_threshold_val).sum().item()
+                                
+                                future_freq = future_event_count / total_future_years
+                                future_return_period = 1 / future_freq if future_freq > 0 else np.inf
+                                model_return_periods.append(future_return_period)
                         
-                        start_year = threshold_year - window // 2
-                        end_year = threshold_year + (window - 1) // 2
-                        ts_slice_annual = discharge_ts_annual.sel(year=slice(start_year, end_year))
-                        ts_slice_annual_clean = ts_slice_annual.dropna(dim='year')
-
-                        if ts_slice_annual_clean.year.size > 1:
-                            future_std = ts_slice_annual_clean.std().item()
-                            if not np.isnan(future_std):
-                                model_std_devs.append(future_std)
+                        if model_return_periods:
+                            finite_periods = [p for p in model_return_periods if np.isfinite(p)]
+                            X_finite_models = len(finite_periods)
+                            storyline_results_storage[event_key] = {
+                                'future_return_periods_all_models': model_return_periods,
+                                'future_return_period_mean': np.mean(finite_periods) if finite_periods else np.inf,
+                                'model_count_X': X_finite_models,
+                                'model_count_Y': Y_total_in_storyline
+                            }
                     
-                    if model_std_devs:
-                         storyline_results_storage[f'future_std_dev_{std_key}'] = np.mean(model_std_devs)
-
-                # C) Weise die JÄHRLICHEN Ergebnisse den Plot-Strukturen (monatlich/saisonal) zu
-                # Die JJA-Storylines (Sommer) beeinflussen die 'JJA', 'Sep', 'Oct', 'Nov' Plots
-                # Die DJF-Storylines (Winter) beeinflussen die 'DJF', 'Mar', 'Apr', 'May' Plots
-                
-                if season_label == 'DJF':
-                    keys_to_assign = ['DJF_discharge', 'Mar_discharge', 'Apr_discharge', 'May_discharge']
-                else: # JJA
-                    keys_to_assign = ['JJA_discharge', 'Sep_discharge', 'Oct_discharge', 'Nov_discharge']
-                
-                for key in keys_to_assign:
-                    if key in results[gwl]:
-                        results[gwl][key][storyline_name] = storyline_results_storage
-
-        # Am Ende die 'thresholds' (hist. Werte) für die Plot-Funktionen speichern
-        # (indem die Jahres-Werte in die Monats/Saison-Keys kopiert werden)
-        
-        # Erstelle die alte 'thresholds'-Struktur für die Plot-Funktionen
-        thresholds_for_plot = {}
-        for key in impact_keys_to_populate:
-            thresholds_for_plot[key] = {
-                **thresholds_storage['events'], # Nimm alle Event-Definitionen
-                'historical_std_dev': np.nan # Platzhalter
-            }
-            # Ordne die korrekte hist. std. dev. zu
-            # Wir nehmen 7Q_low als Standard für alle Low-Flow-Plots
-            thresholds_for_plot[key]['historical_std_dev'] = hist_std_devs.get('7Q_low', np.nan)
-        
-        results['thresholds'] = thresholds_for_plot # Das ist die Struktur, die die Plot-Funktion erwartet
+                    results['data'][gwl][half_year][storyline_name] = storyline_results_storage
 
         return results
 

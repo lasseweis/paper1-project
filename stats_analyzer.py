@@ -329,17 +329,38 @@ class StatsAnalyzer:
         thresholds_m3s = {}
         
         for q in q_days:
-            # 1. Calculate n-day moving average on the (potentially filtered) data
+            # 1. Calculate n-day moving average on the FULL, UNFILTERED timeseries
             if q == 1:
-                moving_avg = daily_timeseries_filtered
+                moving_avg_full = daily_timeseries
             else:
-                moving_avg = daily_timeseries_filtered.rolling(time=q, center=True, min_periods=1).mean()
+                # FIX 1: Roll auf 'daily_timeseries' (nicht 'daily_timeseries_filtered')
+                # FIX 2: Verwende min_periods=q (oder den Standard), nicht 1
+                moving_avg_full = daily_timeseries.rolling(time=q, center=True, min_periods=q).mean()
             
-            # 2. Extract annual extremes *from the filtered half-year data*
+            # 2. NOW filter the resulting moving average series for the half-year
+            if half_year_filter:
+                months = []
+                if half_year_filter == 'winter':
+                    months = [12, 1, 2, 3, 4, 5]
+                elif half_year_filter == 'summer':
+                    months = [6, 7, 8, 9, 10, 11]
+                
+                if months:
+                    # Weise dem 'moving_avg_full' DataArray Monats-Koordinaten zu
+                    if 'month' not in moving_avg_full.coords:
+                        moving_avg_full = moving_avg_full.assign_coords(month=("time", moving_avg_full.time.dt.month.data))
+                    
+                    moving_avg_filtered = moving_avg_full.where(moving_avg_full.month.isin(months), drop=True)
+                else:
+                    moving_avg_filtered = moving_avg_full
+            else:
+                moving_avg_filtered = moving_avg_full
+
+            # 3. Extract annual extremes from the CORRECTLY filtered moving average
             if eva_type == 'low':
-                annual_extremes = moving_avg.groupby('time.year').min('time')
+                annual_extremes = moving_avg_filtered.groupby('time.year').min('time')
             else: # 'high'
-                annual_extremes = moving_avg.groupby('time.year').max('time')
+                annual_extremes = moving_avg_filtered.groupby('time.year').max('time')
                 
             clean_extremes = annual_extremes.dropna(dim='year').values
             

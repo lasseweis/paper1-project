@@ -276,10 +276,8 @@ class StatsAnalyzer:
         """
         Calculates hydrological extreme value thresholds (e.g., 7Q10) from a daily time series.
         
-        MODIFIED VERSION (v3.5 - L-Moments, korrekter Import "distr"):
-        - Can filter data for a specific half-year ('winter' or 'summer').
-        - Uses GEV fit based on L-Moments for robust parameter estimation.
-        - Falls back to empirical quantile if L-Moment GEV fit fails.
+        MODIFIED VERSION (v3.6 - Nur Quantile):
+        - Verwendet NUR die empirische Quantilmethode (np.quantile), da der GEV-Fit unzuverlässig war.
 
         Parameters:
         -----------
@@ -366,47 +364,29 @@ class StatsAnalyzer:
                 logging.warning(f"Skipping {q}Q analysis for {eva_type} ({half_year_filter}): Only {len(clean_extremes)} valid years. (Need > 20 for robust fit)")
                 continue
 
-            # --- START: L-MOMENT GEV-FIT ---
-            try:
-                # 3. Fit GEV distribution using L-Moments
-                lmoms = lm.lmom_ratios(clean_extremes, nmom=4)
-                
-                # KORREKTUR: Verwende "distr" (importiert als "from lmoments3 import distr")
-                params_gev = distr.gev.par_fit(lmoms)
-                
-                # 4. Berechne Schwellenwerte für jede Jährlichkeit (GEV ppf = quantile function)
-                for T in return_periods:
-                    if eva_type == 'low':
-                        prob = 1.0 / T
-                        quantile_to_find = prob 
-                    else: # 'high'
-                        prob = 1.0 / T
-                        quantile_to_find = 1.0 - prob
-                    
-                    # KORREKTUR: Verwende distr.gev.ppf
-                    discharge_val = distr.gev.ppf(quantile_to_find, **params_gev)
-                    
-                    key = f'{q}Q{T}'
-                    thresholds_m3s[key] = discharge_val
-                
-                logging.info(f"Successfully calculated L-Moment GEV thresholds for {q}Q ({eva_type}, {half_year_filter}).")
+            # --- START: NUR-QUANTIL-METHODE ---
+            # Der GEV-Fit (try-Block) wurde entfernt. Wir verwenden nur die
+            # empirische Quantilmethode (vorher der 'except'-Block).
+            
+            logging.info(f"Calculating EVA thresholds for {q}Q ({eva_type}, {half_year_filter}) using empirical quantile method.")
 
-            except Exception as e:
-                # --- FALLBACK: EMPIRICAL (Quantile) ---
-                logging.warning(f"L-Moment GEV fit failed for {q}Q ({eva_type}, {half_year_filter}): {e}. Falling back to empirical quantile method.")
+            for T in return_periods:
+                if eva_type == 'low':
+                    # Für Niedrigwasser suchen wir das untere Perzentil
+                    # z.B. 10-Jahres-Ereignis (T=10) -> 1/10 = 0.1 Perzentil
+                    prob = 1.0 / T
+                    quantile_to_find = prob
+                else: # 'high'
+                    # Für Hochwasser suchen wir das obere Perzentil
+                    # z.B. 10-Jahres-Ereignis (T=10) -> 1 - 1/10 = 0.9 Perzentil
+                    prob = 1.0 / T
+                    quantile_to_find = 1.0 - prob
                 
-                for T in return_periods:
-                    if eva_type == 'low':
-                        prob = 1.0 / T
-                        quantile_to_find = prob
-                    else: # 'high'
-                        prob = 1.0 / T
-                        quantile_to_find = 1.0 - prob
-                    
-                    discharge_val = np.quantile(clean_extremes, quantile_to_find, interpolation='linear')
-                    
-                    key = f'{q}Q{T}'
-                    thresholds_m3s[key] = discharge_val
-            # --- END: L-MOMENT GEV-FIT / FALLBACK ---
+                # np.quantile ist robust und liefert den Wert direkt aus den Daten.
+                discharge_val = np.quantile(clean_extremes, quantile_to_find, interpolation='linear')
+                
+                key = f'{q}Q{T}'
+                thresholds_m3s[key] = discharge_val
+            # --- ENDE: NUR-QUANTIL-METHODE ---
                 
         return thresholds_m3s

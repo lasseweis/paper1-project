@@ -716,6 +716,43 @@ class ClimateAnalysis:
                 # --- END: MODIFIED BLOCK ---
 
 
+                # --- PLOT: LNWL Monthly Distribution (NEW PLOT v2: Grid Plot) ---
+                lnwl_dist_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_lnwl_monthly_distribution_{scenario}.png")
+                if not os.path.exists(lnwl_dist_plot_filename):
+                    logging.info(f"Plot '{lnwl_dist_plot_filename}' not found. Calculating and creating plot...")
+                    
+                    # Hole den LNWL-Schwellenwert (sollte 970 sein)
+                    lnwl_threshold = discharge_data_loaded.get('winter_lowflow_lnwl') 
+                    # Hole die vollen täglichen QOBS-Daten (geladen am Anfang von run_full_analysis)
+                    hist_qobs_daily = discharge_data_loaded.get('daily_historical_da') 
+
+                    if lnwl_threshold and hist_qobs_daily is not None and cmip6_results:
+                        # Rrufe die neue Analysefunktion auf, die das volle cmip6_results-Dict benötigt
+                        distribution_data = StorylineAnalyzer.analyze_lnwl_monthly_distribution_by_storyline(
+                            cmip6_results=cmip6_results, # Enthält Klassifikation, Modelldaten, GWL-Jahre
+                            qobs_historical_da=hist_qobs_daily,
+                            lnwl_threshold=lnwl_threshold,
+                            hist_period_qobs=(1995, 2014), # Referenzzeitraum für QOBS wie gewünscht
+                            config=Config()
+                        )
+                        
+                        if distribution_data:
+                            # Rufe die neue Plot-Funktion auf
+                            Visualizer.plot_storyline_lnwl_monthly_distribution(
+                                distribution_data=distribution_data,
+                                scenario=scenario,
+                                config=Config(),
+                                lnwl_threshold=lnwl_threshold
+                            )
+                        else:
+                            logging.warning(f"Could not calculate LNWL distribution data for {scenario}.")
+                    else:
+                        logging.warning(f"Skipping LNWL distribution plot: Missing QOBS, CMIP6 results, or LNWL threshold.")
+                else:
+                    logging.info(f"Plot '{lnwl_dist_plot_filename}' already exists. Skipping.")
+                # --- END: NEW PLOT v2 ---
+
+
                 # --- PLOT: Model Fidelity and Scatter Plots (per scenario) ---
                 if beta_obs_slopes:
                     fidelity_plot_filename = os.path.join(Config.PLOT_DIR, f"cmip6_fidelity_vs_future_temporal_slopes_{scenario}.png")

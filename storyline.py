@@ -2608,3 +2608,112 @@ class StorylineAnalyzer:
                         logging.info(f"  -> Precip vs Discharge Corr for GWL +{gwl}°C {season_key}: r={r_val:.2f}")
 
         return correlations
+    
+    @staticmethod
+    def analyze_lnwl_monthly_distribution_by_storyline(cmip6_results, qobs_historical_da, lnwl_threshold, hist_period_qobs, config):
+        """
+        Analysiert die monatliche Verteilung von LNWL-Ereignissen für QOBS (Baseline)
+        im Vergleich zur CMIP6-Zukunft, aufgeschlüsselt nach GWL und Storyline.
+
+        Args:
+            cmip6_results (dict): Das volle Ergebnis-Dictionary der CMIP6-Analyse für ein Szenario.
+            qobs_historical_da (xr.DataArray): Tägliche QOBS-Daten (1960-2021).
+            lnwl_threshold (float): Der Schwellenwert für LNWL (z.B. 970 m³/s).
+            hist_period_qobs (tuple): (start_jahr, end_jahr) für die QOBS-Referenz (z.B. 1995-2014).
+            config (Config): Das Konfigurationsobjekt.
+
+        Returns:
+            dict: {
+                'qobs_baseline': {1: %, ...}, 
+                'storylines': {gwl: {storyline_name: {1: %, ...}}}
+            } 
+            oder None bei Fehler.
+        """
+        logging.info(f"Analysiere monatliche LNWL (<{lnwl_threshold} m³/s) Verteilung (pro Storyline)...")
+        
+        results = {'qobs_baseline': {}, 'storylines': {gwl: {} for gwl in config.GLOBAL_WARMING_LEVELS}}
+        
+        # --- 1. QOBS Baseline (1995-2014) berechnen ---
+        try:
+            hist_start, hist_end = hist_period_qobs
+            qobs_filtered = qobs_historical_da.sel(time=slice(str(hist_start), str(hist_end)))
+            lnwl_days_qobs = qobs_filtered.where(qobs_filtered < lnwl_threshold, drop=True)
+            
+            if lnwl_days_qobs.time.size > 0:
+                total_lnwl_days_qobs = lnwl_days_qobs.time.size
+                monthly_counts_qobs = lnwl_days_qobs.groupby('time.month').count(dim='time')
+                monthly_dist_qobs = (monthly_counts_qobs / total_lnwl_days_qobs * 100).to_series()
+                monthly_dist_qobs = monthly_dist_qobs.reindex(range(1, 13), fill_value=0).to_dict()
+                results['qobs_baseline'] = monthly_dist_qobs
+                logging.info(f"  QOBS Baseline ({hist_start}-{hist_end}): {total_lnwl_days_qobs} LNWL-Tage gefunden und als Referenz gesetzt.")
+            else:
+                logging.warning(f"Keine LNWL-Ereignisse in QOBS für den Zeitraum {hist_period_qobs} gefunden. Baseline wird 0 sein.")
+                results['qobs_baseline'] = {m: 0 for m in range(1, 13)}
+        except Exception as e:
+            logging.error(f"Fehler bei der Analyse der QOBS LNWL-Verteilung: {e}")
+            return None
+
+        # --- 2. CMIP6-Zukunft pro Storyline & GWL analysieren ---
+        try:
+            classification = cmip6_results.get('storyline_classification_2d')
+            model_data = cmip6_results.get('cmip6_model_data_loaded')
+            gwl_years = cmip6_results.get('gwl_threshold_years')
+            window = config.GWL_YEARS_WINDOW
+
+            if not all([classification, model_data, gwl_years]):
+                logging.error("CMIP6-Daten (Klassifikation, Modelldaten oder GWL-Jahre) fehlen für LNWL-Analyse.")
+                return None
+
+            for gwl in config.GLOBAL_WARMING_LEVELS:
+                logging.info(f"  Verarbeite CMIP6 LNWL-Verteilung für GWL +{gwl}°C...")
+                storylines_in_gwl = classification.get(gwl, {})
+                
+                for storyline_key, model_list in storylines_in_gwl.items():
+                    if not model_list:
+                        continue
+                    
+                    # Storyline-Namen normalisieren (z.B. 'DJF_MMM' -> 'MMM')
+                    season_prefix = storyline_key.split('_')[0]
+                    storyline_name = storyline_key.replace(f'{season_prefix}_', '')
+                    
+                    total_storyline_counts = np.zeros(12) # 0-11 für Jan-Dez
+                    total_lnwl_days_storyline = 0
+                    
+                    for model_run_key in model_list:
+                        daily_discharge = model_data.get(model_run_key, {}).get('discharge')
+                        threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
+                        
+                        if daily_discharge is None or threshold_year is None:
+                            continue
+
+                        # Individuelles 30-Jahres-Fenster des Modells
+                        start_year = threshold_year - window // 2
+                        end_year = threshold_year + (window - 1) // 2
+                        future_discharge = daily_discharge.sel(time=slice(str(start_year), str(end_year)))
+                        
+                        lnwl_days_model = future_discharge.where(future_discharge < lnwl_threshold, drop=True)
+                        
+                        if lnwl_days_model.time.size > 0:
+                            total_lnwl_days_storyline += lnwl_days_model.time.size
+                            # Zähle pro Monat für dieses Modell
+                            monthly_counts_model = lnwl_days_model.groupby('time.month').count(dim='time')
+                            
+                            # Addiere zur Gesamt-Storyline-Zählung
+                            for month in monthly_counts_model.month.values:
+                                count = monthly_counts_model.sel(month=month).item()
+                                total_storyline_counts[month-1] += count # month-1 für 0-basierten Index
+                    
+                    # Berechne prozentuale Verteilung für diese Storyline
+                    if total_lnwl_days_storyline > 0:
+                        monthly_dist_storyline = (total_storyline_counts / total_lnwl_days_storyline * 100)
+                        results['storylines'][gwl][storyline_name] = {m+1: pct for m, pct in enumerate(monthly_dist_storyline)}
+                    else:
+                        # Keine LNWL-Ereignisse in dieser Storyline/GWL-Kombination gefunden
+                        results['storylines'][gwl][storyline_name] = {m: 0 for m in range(1, 13)}
+            
+            return results
+
+        except Exception as e:
+            logging.error(f"Fehler bei der Analyse der CMIP6 LNWL-Verteilung nach Storyline: {e}")
+            logging.error(traceback.format_exc())
+            return None

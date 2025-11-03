@@ -24,6 +24,7 @@ import cartopy.feature as cfeature
 from scipy.stats import chi2
 import json
 import seaborn as sns
+import traceback
 
 # Import local modules
 from storyline import StorylineAnalyzer 
@@ -2900,3 +2901,130 @@ class Visualizer:
         filename = os.path.join(Config.PLOT_DIR, f"cmip6_jet_cross_season_relationship_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
+        
+        
+    @staticmethod
+    def plot_storyline_lnwl_monthly_distribution(distribution_data, scenario, config, lnwl_threshold):
+        """
+        Zeichnet ein Grid-Plot (GWL x Storyline) der monatlichen LNWL-Verteilung.
+        Jeder Subplot vergleicht QOBS (Baseline) mit der CMIP6-Storyline-Zukunft.
+        """
+        logging.info(f"Zeichne monatliches LNWL-Verteilungs-Grid für {scenario}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        try:
+            # --- 1. Daten und Plot-Struktur vorbereiten ---
+            qobs_baseline_data = distribution_data.get('qobs_baseline')
+            storyline_data = distribution_data.get('storylines')
+
+            if not qobs_baseline_data or not storyline_data:
+                logging.warning("LNWL-Verteilungsdaten unvollständig. Plot wird übersprungen.")
+                return
+
+            # Plot-Reihenfolge definieren
+            # (Diese muss mit der Reihenfolge in config.py übereinstimmen)
+            storyline_plot_order = [
+                'MMM', 
+                'Slow Jet & Northward Shift', 
+                'Fast Jet & Northward Shift',
+                'Slow Jet & Southward Shift', 
+                'Fast Jet & Southward Shift'
+            ]
+            gwls = config.GLOBAL_WARMING_LEVELS
+            
+            month_order = [7, 8, 9, 10, 11, 12, 1, 2, 3, 4, 5, 6]
+            month_labels = ['Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez', 'Jan', 'Feb', 'Mrz', 'Apr', 'Mai', 'Jun']
+            
+            # QOBS-Daten (Baseline) vorbereiten
+            qobs_hist_period = "1995-2014"
+            df_qobs = pd.DataFrame.from_dict(qobs_baseline_data, orient='index', columns=[f'QOBS ({qobs_hist_period})'])
+            df_qobs = df_qobs.reindex(month_order)
+
+            # --- 2. Plot-Grid erstellen ---
+            nrows = len(gwls)
+            ncols = len(storyline_plot_order)
+            
+            fig, axs = plt.subplots(
+                nrows, ncols, 
+                figsize=(ncols * 5, nrows * 4.5), 
+                sharex=True, sharey=True,
+                squeeze=False # Stellt sicher, dass axs immer ein 2D-Array ist
+            )
+            
+            plt.style.use('seaborn-v0_8-whitegrid')
+            bar_width = 0.4
+            x_pos = np.arange(len(month_labels))
+
+            # --- 3. Durch Subplots iterieren ---
+            for row, gwl in enumerate(gwls):
+                for col, storyline_name in enumerate(storyline_plot_order):
+                    ax = axs[row, col]
+                    
+                    # Zukunftsdaten für diesen Subplot holen
+                    future_data = storyline_data.get(gwl, {}).get(storyline_name)
+                    if future_data is None:
+                        future_data = {m: 0 for m in range(1, 13)} # Fallback
+                    
+                    col_name_future = f"Future ({storyline_name})"
+                    df_future = pd.DataFrame.from_dict(future_data, orient='index', columns=[col_name_future])
+                    df_future = df_future.reindex(month_order)
+                    
+                    # QOBS-Baseline plotten
+                    ax.bar(x_pos - bar_width/2, df_qobs[f'QOBS ({qobs_hist_period})'], bar_width, 
+                           label=f'QOBS ({qobs_hist_period})', color='darkblue', alpha=0.9)
+                    
+                    # Storyline-Zukunft plotten
+                    ax.bar(x_pos + bar_width/2, df_future[col_name_future], bar_width, 
+                           label=col_name_future, color='crimson', alpha=0.9)
+
+                    # --- 4. Formatierung pro Subplot ---
+                    ax.grid(axis='y', linestyle=':', alpha=0.7)
+                    ax.grid(axis='x', linestyle='none')
+                    ax.set_xticks(x_pos)
+                    
+                    # X-Achsen-Beschriftung (nur in der untersten Reihe)
+                    if row == nrows - 1:
+                        ax.set_xticklabels(month_labels, rotation=90, fontsize=10)
+                    
+                    # Spalten-Titel (Storyline-Namen, nur in der obersten Reihe)
+                    if row == 0:
+                        ax.set_title(storyline_name.replace(' & ', ' &\n'), fontsize=12, weight='bold')
+                    
+                    # Reihen-Titel (GWL, nur in der ersten Spalte)
+                    if col == 0:
+                        ax.set_ylabel(f'GWL +{gwl}°C\n(% aller LNWL-Tage)', fontsize=11, weight='bold')
+            
+            # --- 5. Finale Formatierung der Gesamt-Figur ---
+            # Y-Achse für alle Subplots setzen
+            max_y = max(df_qobs.max().max(), max(storyline_data[gwl][sn][m] for gwl in gwls for sn in storyline_plot_order if storyline_data[gwl].get(sn) for m in range(1,13)))
+            axs[0, 0].set_ylim(top=max_y * 1.15) 
+            axs[0, 0].set_xticks(x_pos) # Stellt sicher, dass Ticks gesetzt sind, auch wenn sharex=True
+
+            # Legende
+            handles, labels = axs[0, 0].get_legend_handles_labels()
+            # Wir brauchen nur eine Legende für QOBS vs. Future
+            simple_labels = [f'QOBS ({qobs_hist_period})', f'CMIP6 Zukunft (pro Storyline)']
+            simple_handles = [
+                mpatches.Patch(color='darkblue', label=simple_labels[0]),
+                mpatches.Patch(color='crimson', label=simple_labels[1])
+            ]
+            fig.legend(handles=simple_handles, labels=simple_labels, 
+                       loc='lower center', bbox_to_anchor=(0.5, 0.01), 
+                       ncol=2, fontsize=12, frameon=True)
+            
+            # Haupttitel
+            title = f"Monatliche Verteilung von Niedrigwasser-Ereignissen (Abfluss < {lnwl_threshold:.0f} m³/s) für {scenario.upper()}"
+            fig.suptitle(title, fontsize=16, weight='bold', y=0.99)
+            
+            fig.tight_layout(rect=[0.03, 0.05, 1, 0.95], h_pad=2.0, w_pad=0.5)
+            
+            filename = os.path.join(config.PLOT_DIR, f"storyline_lnwl_monthly_distribution_{scenario}.png")
+            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            logging.info(f"Monatliches LNWL-Grid-Plot gespeichert: {filename}")
+
+        except Exception as e:
+            logging.error(f"Fehler beim Zeichnen des LNWL-Grid-Plots: {e}")
+            logging.error(traceback.format_exc())
+            if 'fig' in locals():
+                plt.close(fig)

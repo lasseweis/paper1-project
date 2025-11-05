@@ -3095,6 +3095,12 @@ class Visualizer:
         - Plot Type: Horizontal Boxplots (Y-axis=Storylines, X-axis=Return Period)
         - Aesthetics: English labels, T_hist in legend, X-axis label on all plots,
                       DYNAMIC X-AXIS scaling per subplot.
+        
+        KORRIGIERTE VERSION (5. Nov 2025):
+        - `sharex=False` im `subplots`-Aufruf hinzugefügt.
+        - Statisches `ax.set_xlim(left=0.8, right=160)` entfernt.
+        - Reihenfolge von `set_xticks` und dem dynamischen `set_xlim`-Block getauscht,
+          um das dynamische Skalieren pro Subplot zu ermöglichen.
         """
         if not results or not config or 'thresholds' not in results or 'data' not in results:
             logging.warning(f"Cannot plot LNWL aggregation comparison for {scenario}: Missing results.")
@@ -3116,13 +3122,16 @@ class Visualizer:
         num_rows = 2 # Winter, Summer
         half_year_order = ['winter', 'summer']
         
+        # --- START KORREKTUR 1 ---
         fig, axs = plt.subplots(
             num_rows, num_cols, 
             figsize=(7 * num_cols, 10), # Wider to accommodate 4 plots
             squeeze=False, 
-            sharey=True  # All share the Y-axis (Storylines)
-            # sharex=False IS NOW THE DEFAULT (REMOVED)
+            sharey=True,  # All share the Y-axis (Storylines)
+            sharex=False  # WICHTIG: Explizit auf False setzen
         )
+        # --- ENDE KORREKTUR 1 ---
+
         plt.style.use('seaborn-v0_8-whitegrid')
 
         # Y-Axis-Setup (Storylines)
@@ -3211,7 +3220,14 @@ class Visualizer:
                 # --- Achsen-Formatierung ---
                 ax.set_xscale('log')
                 
-                # --- NEU: Dynamische X-Achsen-Limits ---
+                # --- START KORREKTUR 2: Reihenfolge getauscht und statisches xlim entfernt ---
+
+                # 1. Setze ERST die Ticks und Formatter
+                ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 150, 200, 500])
+                ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, pos: f'{x:.0f}'))
+                ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+                
+                # 2. Setze DANN die dynamischen X-Achsen-Limits
                 if all_data_for_lims:
                     min_val = np.min(all_data_for_lims)
                     max_val = np.max(all_data_for_lims)
@@ -3224,19 +3240,18 @@ class Visualizer:
                     if (max_val / min_val) < 5:
                          x_max_limit = max(x_max_limit, min_val * 5)
 
-                    ax.set_xlim(left=x_min_limit, right=x_max_limit)
+                    ax.set_xlim(left=x_min_limit, right=x_max_limit) # Erzwingt das Limit
                 else:
                     ax.set_xlim(left=0.8, right=100) # Fallback
 
-                # Setze Ticks, aber lasse Matplotlib entscheiden, welche angezeigt werden
-                ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 150, 200, 500])
-                ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, pos: f'{x:.0f}'))
-                ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+                # 3. Statische Zeile `ax.set_xlim(left=0.8, right=160)` wurde entfernt
                 
+                # --- ENDE KORREKTUR 2 ---
+
                 ax.grid(axis='y', linestyle='none')
                 ax.grid(axis='x', linestyle=':', which='both')
                 
-                # NEU: X-Achsen-Label (AUF JEDEM PLOT)
+                # X-Achsen-Label (AUF JEDEM PLOT)
                 ax.set_xlabel('Return Period (Years)', fontsize=11)
                 ax.xaxis.set_tick_params(labelbottom=True) # Erzwinge Ticks
                 
@@ -3245,7 +3260,7 @@ class Visualizer:
                     season_title = "Winter\n(Dec - May)" if half_year == 'winter' else "Summer\n(Jun - Nov)"
                     ax.set_ylabel(season_title, fontsize=12, weight='bold', labelpad=15)
                 
-                # NEU: Legende (IN JEDEM PLOT)
+                # Legende (IN JEDEM PLOT)
                 gwl_patches = [mpatches.Patch(color=gwl_colors[gwl_label], label=gwl_label) for gwl_label in gwl_colors]
                 all_handles = gwl_patches + legend_handles
                 # Sortiere Handles, um GWL-Patches zuerst zu haben

@@ -2533,6 +2533,13 @@ class Visualizer:
         - X-axis is zoomed to 1-150/160 to resolve low return periods.
         - FIX: Each subplot now has its own title with the correct season-specific threshold.
         - FIX: Layout adjusted to prevent title overlap. (h_pad=5.5, y=0.505)
+        
+        --- USER MODIFICATIONS (Nov 4, 2025) ---
+        - MOD 1: Increased figsize height (to 22) and h_pad (to 8.0) to 
+                 increase vertical spacing between low-flow and high-flow blocks.
+        - MOD 2: Forced X-axis labels and formatter to appear on ALL subplots 
+                 for better readability.
+        --- END USER MODIFICATIONS ---
         """
         if not results or not config or 'thresholds' not in results or 'data' not in results:
             logging.warning(f"Cannot plot return period change by event for {scenario}: Missing results or thresholds.")
@@ -2576,10 +2583,10 @@ class Visualizer:
             logging.warning(f"No valid EVA events found to plot for {scenario}.")
             return
 
-        # Adjust figsize: 5 height per row, 6 width per column
+        # --- MODIFICATION 1: Increased figsize height from 19 to 22 ---
         fig, axs = plt.subplots(
             num_rows, num_cols, 
-            figsize=(6 * num_cols, 19), # Increased height slightly
+            figsize=(6 * num_cols, 22), # Increased height from 19 to 22
             squeeze=False, 
             sharex=True # Share X-axis (Return Period)
         )
@@ -2701,14 +2708,13 @@ class Visualizer:
                     ax.grid(axis='y', linestyle='none')
                     ax.grid(axis='x', linestyle=':', which='both')
                     
-                    # X-labels only on the very bottom row (row == 3)
-                    if row == num_rows - 1:
-                        ax.set_xlabel('Return Period (Years)', fontsize=11)
-                        # Ensure formatter is set for the shared axis
-                        ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, pos: f'{x:.0f}'))
-                    else:
-                        ax.set_xlabel('')
-                        ax.set_xticklabels([])
+                    # --- MODIFICATION 2: Apply X-axis labels to ALL subplots ---
+                    ax.set_xlabel('Return Period (Years)', fontsize=11)
+                    # Ensure formatter is set for the shared axis
+                    ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, pos: f'{x:.0f}'))
+                    # Force tick labels to be visible
+                    ax.tick_params(axis='x', labelbottom=True)
+                    # --- END MODIFICATION 2 ---
                     
                     # Y-Axis (Storylines)
                     ax.set_yticks(y_ticks)
@@ -2765,8 +2771,8 @@ class Visualizer:
         
         # Adjust layout
         # rect top=0.92 leaves space for suptitle and top block title
-        # h_pad=5.5 forces significant space between row 1 and 2
-        fig.tight_layout(rect=[0.05, 0.05, 0.98, 0.92], h_pad=5.5, w_pad=2.0)
+        # --- MODIFICATION 1: Increased h_pad from 5.5 to 8.0 ---
+        fig.tight_layout(rect=[0.05, 0.05, 0.98, 0.92], h_pad=8.0, w_pad=2.0)
         # --- END: MODIFIED BLOCK TITLES & LAYOUT (FIX) ---
         
         # Use the same filename as before, overwriting the old layout
@@ -3075,3 +3081,202 @@ class Visualizer:
             logging.error(traceback.format_exc())
             if 'fig' in locals():
                 plt.close(fig)
+                
+    @staticmethod
+    def plot_storyline_lnwl_aggregation_comparison(results, config, scenario, lnwl_threshold=970.0):
+        """
+        Creates a high-impact 2x4 plot showing the change in return periods for the
+        LNWL threshold (< 970 m³/s) across four different time aggregations
+        (Daily, 7-Day, Monthly, 3-Month).
+        
+        Layout:
+        - Rows: Winter, Summer
+        - Columns: Daily, 7-Day, Monthly, 3-Month Minimums
+        - Plot Type: Horizontal Boxplots (Y-axis=Storylines, X-axis=Return Period)
+        - Aesthetics: English labels, T_hist in legend, X-axis label on all plots,
+                      DYNAMIC X-AXIS scaling per subplot.
+        """
+        if not results or not config or 'thresholds' not in results or 'data' not in results:
+            logging.warning(f"Cannot plot LNWL aggregation comparison for {scenario}: Missing results.")
+            return
+
+        logging.info(f"Plotting LNWL Aggregation Comparison (4-metric, English, Dynamic-Axis) for {scenario}...")
+        Visualizer.ensure_plot_dir_exists()
+        
+        gwls_to_plot = config.GLOBAL_WARMING_LEVELS
+        
+        # --- 1. Define Event and Plot Structure (NOW 4 COLS, ENGLISH) ---
+        event_plot_order = [
+            ('Q_daily_low', 'Daily Minimum'),
+            ('Q_7day_low', '7-Day Minimum'),
+            ('Q_monthly_low', 'Monthly Minimum'),
+            ('Q_3month_low', '3-Month Minimum') # New 4th column
+        ]
+        num_cols = len(event_plot_order) # Should be 4
+        num_rows = 2 # Winter, Summer
+        half_year_order = ['winter', 'summer']
+        
+        fig, axs = plt.subplots(
+            num_rows, num_cols, 
+            figsize=(7 * num_cols, 10), # Wider to accommodate 4 plots
+            squeeze=False, 
+            sharey=True  # All share the Y-axis (Storylines)
+            # sharex=False IS NOW THE DEFAULT (REMOVED)
+        )
+        plt.style.use('seaborn-v0_8-whitegrid')
+
+        # Y-Axis-Setup (Storylines)
+        storyline_order = [
+            'MMM',
+            'Slow Jet & Northward Shift',
+            'Fast Jet & Northward Shift',
+            'Slow Jet & Southward Shift',
+            'Fast Jet & Southward Shift',
+        ]
+        
+        num_storylines = len(storyline_order)
+        y_limits = (num_storylines - 0.5, -0.5) # For inverted Y-axis (MMM top)
+        y_ticks = np.arange(len(storyline_order))
+        y_tick_labels = [s.replace(' & ', ' &\n') for s in storyline_order] # English labels
+
+        gwl_colors = {f'+{gwls_to_plot[0]}°C': '#ff7f0e', f'+{gwls_to_plot[1]}°C': '#d62728'} # Orange/Red
+        
+        # --- 2. Daten für Plotting vorbereiten ---
+        plot_data_list = []
+        for gwl in gwls_to_plot:
+            for half_year in half_year_order:
+                for storyline in storyline_order:
+                    for event_key, _ in event_plot_order:
+                        event_data = results['data'].get(gwl, {}).get(half_year, {}).get(storyline, {}).get(event_key)
+                        if event_data and 'future_return_periods_all_models' in event_data:
+                            for model_period in event_data['future_return_periods_all_models']:
+                                if np.isfinite(model_period):
+                                    plot_data_list.append({
+                                        'half_year': half_year,
+                                        'event': event_key,
+                                        'storyline': storyline,
+                                        'gwl': f'+{gwl}°C',
+                                        'return_period': model_period,
+                                    })
+        
+        if not plot_data_list:
+            logging.warning(f"No finite LNWL aggregation data to plot for {scenario}.")
+            plt.close(fig)
+            return
+
+        df_plot = pd.DataFrame(plot_data_list)
+        
+        # --- 3. Plotting-Schleife ---
+        for row, half_year in enumerate(half_year_order):
+            for col, (event_key, event_title) in enumerate(event_plot_order):
+                ax = axs[row, col]
+                ax.set_ylim(y_limits)
+                ax.invert_yaxis() # Show MMM at the top
+                
+                # --- Titel für Subplots (Spalten-Titel) ---
+                if row == 0: # Nur in der obersten Zeile
+                    ax.set_title(event_title, fontsize=12, weight='bold')
+                
+                # Filter data for this subplot
+                data_subset = df_plot[(df_plot['half_year'] == half_year) & (df_plot['event'] == event_key)]
+                
+                legend_handles = [] # For this specific subplot's legend
+                all_data_for_lims = [] # For dynamic axis scaling
+                
+                if not data_subset.empty:
+                    # Plot Horizontal Boxplots
+                    sns.boxplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
+                                order=storyline_order, palette=gwl_colors,
+                                ax=ax, linewidth=1.2, showfliers=False, orient='h',
+                                boxprops={'alpha': 0.85}, add_legend=False)
+                    sns.stripplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
+                                order=storyline_order, palette=gwl_colors,
+                                ax=ax, dodge=True, jitter=0.15, size=4, 
+                                edgecolor='gray', linewidth=0.5, alpha=0.9, orient='h',
+                                legend=False)
+                    
+                    all_data_for_lims.extend(data_subset['return_period'].dropna().values)
+                else:
+                    ax.text(0.5, 0.5, "Data N/A", ha='center', va='center', transform=ax.transAxes, color='gray')
+
+                # Plot Historical Return Period (T_hist) als vertikale Linie
+                threshold_data = results.get('thresholds', {}).get(half_year, {}).get(event_key, {})
+                hist_period = threshold_data.get('hist_return_period')
+                if hist_period is not None and np.isfinite(hist_period):
+                    hist_label = f'Hist. T = {hist_period:.1f} yrs'
+                    line = ax.axvline(x=hist_period, color='skyblue', linestyle='--', linewidth=3, zorder=5, label=hist_label)
+                    legend_handles.append(line)
+                    all_data_for_lims.append(hist_period)
+
+                # --- Achsen-Formatierung ---
+                ax.set_xscale('log')
+                
+                # --- NEU: Dynamische X-Achsen-Limits ---
+                if all_data_for_lims:
+                    min_val = np.min(all_data_for_lims)
+                    max_val = np.max(all_data_for_lims)
+                    
+                    # Setze dynamische Limits mit Puffer
+                    x_min_limit = max(0.8, min_val * 0.8) # Mindestens 0.8
+                    x_max_limit = max_val * 1.5 # Gib 50% Puffer nach rechts
+                    
+                    # Verhindere, dass die Achse zu klein wird, falls min/max nah beieinander liegen
+                    if (max_val / min_val) < 5:
+                         x_max_limit = max(x_max_limit, min_val * 5)
+
+                    ax.set_xlim(left=x_min_limit, right=x_max_limit)
+                else:
+                    ax.set_xlim(left=0.8, right=100) # Fallback
+
+                # Setze Ticks, aber lasse Matplotlib entscheiden, welche angezeigt werden
+                ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 150, 200, 500])
+                ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, pos: f'{x:.0f}'))
+                ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+                
+                ax.grid(axis='y', linestyle='none')
+                ax.grid(axis='x', linestyle=':', which='both')
+                
+                # NEU: X-Achsen-Label (AUF JEDEM PLOT)
+                ax.set_xlabel('Return Period (Years)', fontsize=11)
+                ax.xaxis.set_tick_params(labelbottom=True) # Erzwinge Ticks
+                
+                # Y-Achsen-Label (nur in der ersten Spalte)
+                if col == 0:
+                    season_title = "Winter\n(Dec - May)" if half_year == 'winter' else "Summer\n(Jun - Nov)"
+                    ax.set_ylabel(season_title, fontsize=12, weight='bold', labelpad=15)
+                
+                # NEU: Legende (IN JEDEM PLOT)
+                gwl_patches = [mpatches.Patch(color=gwl_colors[gwl_label], label=gwl_label) for gwl_label in gwl_colors]
+                all_handles = gwl_patches + legend_handles
+                # Sortiere Handles, um GWL-Patches zuerst zu haben
+                all_handles.sort(key=lambda x: "Hist." in x.get_label()) 
+                ax.legend(handles=all_handles, loc='upper right', fontsize='small', frameon=True, facecolor='white', framealpha=0.8)
+                
+                # n=X/Y Annotationen (Anzahl Modelle)
+                for i, storyline in enumerate(storyline_order):
+                    y_base = y_ticks[i]
+                    for j, gwl in enumerate(gwls_to_plot):
+                        y_offset = -0.2 + (j * 0.4) # Position für GWL bar
+                        gwl_label = f'+{gwl}°C'
+                        event_data_gwl = results['data'].get(gwl, {}).get(half_year, {}).get(storyline, {}).get(event_key)
+                        if event_data_gwl and 'model_count_X' in event_data_gwl:
+                            X, Y = event_data_gwl['model_count_X'], event_data_gwl['model_count_Y']
+                            # Platziere Text rechts auf dem Plot
+                            ax.text(0.98, y_base + y_offset, f"n={X}/{Y}", 
+                                    transform=ax.get_yaxis_transform(),
+                                    horizontalalignment='right', fontsize=7, weight='bold', 
+                                    color=gwl_colors[gwl_label],
+                                    bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
+
+        # --- 4. Finale Formatierung der Gesamt-Figur ---
+        # Keine zentrale Legende mehr nötig
+        
+        fig.suptitle(f"Change in Return Period of Low Navigable Water Level (LNWL < {lnwl_threshold:.0f} m³/s) for {scenario.upper()}",
+                    fontsize=16, weight='bold', y=0.99)
+        
+        fig.tight_layout(rect=[0.05, 0.05, 0.98, 0.93], h_pad=3.0, w_pad=2.5)
+        
+        filename = os.path.join(config.PLOT_DIR, f"storyline_lnwl_aggregation_comparison_{scenario}.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved LNWL aggregation comparison plot (4-metric, English, Dynamic-Axis) to {filename}")

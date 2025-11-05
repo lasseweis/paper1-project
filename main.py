@@ -752,6 +752,45 @@ class ClimateAnalysis:
                     logging.info(f"Plot '{lnwl_dist_plot_filename}' already exists. Skipping.")
                 # --- END: NEW PLOT v2 ---
 
+                
+                # --- START: NEUER PLOT (LNWL Aggregation Comparison) ---
+                lnwl_agg_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_lnwl_aggregation_comparison_{scenario}.png")
+                lnwl_agg_results_for_plot = None # Initialize
+
+                if not os.path.exists(lnwl_agg_plot_filename):
+                    logging.info(f"Plot '{lnwl_agg_plot_filename}' not found. Calculating data...")
+                    
+                    # Hole die TÄGLICHEN QOBS-Daten (am Anfang von run_full_analysis geladen)
+                    historical_da_daily = discharge_data_loaded.get('daily_historical_da') 
+                    
+                    if historical_da_daily is not None and cmip6_results:
+                        # Hole den LNWL-Schwellenwert
+                        lnwl_threshold = discharge_data_loaded.get('winter_lowflow_lnwl', 970.0)
+                        
+                        # Rufe die NEUE Analysefunktion auf
+                        lnwl_agg_results_for_plot = storyline_analyzer.analyze_storyline_lnwl_aggregation_metrics(
+                            cmip6_results=cmip6_results, # Benötigt 'cmip6_model_data_loaded' mit TÄGLICHEN Daten
+                            historical_discharge_da=historical_da_daily,
+                            config=Config(),
+                            lnwl_threshold=lnwl_threshold
+                        )
+                        
+                        if lnwl_agg_results_for_plot:
+                            # Rufe die NEUE Plot-Funktion auf
+                            Visualizer.plot_storyline_lnwl_aggregation_comparison(
+                                lnwl_agg_results_for_plot, 
+                                Config(), 
+                                scenario=scenario,
+                                lnwl_threshold=lnwl_threshold
+                            )
+                        else:
+                            logging.warning(f"Could not calculate LNWL aggregation results, skipping plot for {scenario}.")
+                    else:
+                        logging.warning(f"Skipping LNWL aggregation plot: Missing DAILY QOBS or CMIP6 results.")
+                else:
+                    logging.info(f"Plot '{lnwl_agg_plot_filename}' already exists.")
+                # --- ENDE: NEUER PLOT (LNWL Aggregation Comparison) ---
+
 
                 # --- PLOT: Model Fidelity and Scatter Plots (per scenario) ---
                 if beta_obs_slopes:

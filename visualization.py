@@ -3188,7 +3188,7 @@ class Visualizer:
                     sns.boxplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
                                 order=storyline_order, palette=gwl_colors,
                                 ax=ax, linewidth=1.2, showfliers=False, orient='h',
-                                boxprops={'alpha': 0.85}, add_legend=False)
+                                boxprops={'alpha': 0.85})
                     sns.stripplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
                                 order=storyline_order, palette=gwl_colors,
                                 ax=ax, dodge=True, jitter=0.15, size=4, 

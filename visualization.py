@@ -3103,7 +3103,18 @@ class Visualizer:
         - Updated 'figsize' to be taller (14 instead of 10).
         - Updated logic for x-axis labels to only show on the new bottom row (row == 2).
         - Updated season_title logic to include 'Full Year'.
-        --- END MODIFIED ---
+        
+        --- USER-MODIFIKATION (Nov 6, 2025) v2 ---
+        - sharex=False: X-Achsen werden manuell pro Spalte synchronisiert.
+        - Logik in zwei Durchgängen:
+          1. Plotten und Sammeln der "idealen Zoom-Limits" für jeden Subplot.
+          2. Finden der weitesten Spanne (min/max) pro Spalte und Anwenden auf alle Plots der Spalte.
+        - X-Achsen-Beschriftung: Wird nun auf allen Subplots angezeigt (User-Wunsch).
+        
+        --- USER-MODIFIKATION (Nov 6, 2025) v3 ---
+        - Logik hinzugefügt, um in der "Full Year"-Zeile (row 2) NUR die 'MMM'-Storyline
+          zu plotten, da die anderen Storylines saisonal (DJF/JJA) definiert sind.
+        --- ENDE USER-MODIFIKATION ---
         """
         if not results or not config or 'thresholds' not in results or 'data' not in results:
             logging.warning(f"Cannot plot LNWL aggregation comparison for {scenario}: Missing results.")
@@ -3115,7 +3126,6 @@ class Visualizer:
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         
         # --- 1. Define Event and Plot Structure (NOW 4 COLS, ENGLISH NAMES) ---
-        # *** MODIFIED: event_key and title for 30-Day ***
         event_plot_order = [
             ('Q_daily_low', 'Daily Minimum'),
             ('Q_7day_low', '7-Day Minimum'),
@@ -3124,18 +3134,15 @@ class Visualizer:
         ]
         num_cols = len(event_plot_order) # Should be 4
         
-        # *** MODIFIED: num_rows and half_year_order for Full Year ***
         num_rows = 3 # Winter, Summer, Full Year
         half_year_order = ['winter', 'summer', 'full_year']
-        # *** END MODIFIED ***
         
         fig, axs = plt.subplots(
             num_rows, num_cols, 
-            # *** MODIFIED: figsize height from 10 to 14 ***
             figsize=(7 * num_cols, 14), 
             squeeze=False, 
-            sharey=True,  # All share the Y-axis (Storylines)
-            sharex=False  # Keep dynamic X-axis
+            sharey=True,  # Y-Achse (Storylines) wird geteilt
+            sharex=False  # --- MODIFIKATION v2: Muss False sein für manuelle Steuerung ---
         )
         plt.style.use('seaborn-v0_8-whitegrid')
 
@@ -3158,11 +3165,9 @@ class Visualizer:
         # --- 2. Daten für Plotting vorbereiten ---
         plot_data_list = []
         for gwl in gwls_to_plot:
-            # *** MODIFIED: Add 'full_year' to loop ***
             for half_year in half_year_order:
                 for storyline in storyline_order:
                     for event_key, _ in event_plot_order:
-                        # *** MODIFIED: Use correct full_year key ***
                         event_data = results['data'].get(gwl, {}).get(half_year, {}).get(storyline, {}).get(event_key)
                         if event_data and 'future_return_periods_all_models' in event_data:
                             for model_period in event_data['future_return_periods_all_models']:
@@ -3182,8 +3187,10 @@ class Visualizer:
 
         df_plot = pd.DataFrame(plot_data_list)
         
-        # --- 3. Plotting-Schleife ---
-        # *** MODIFIED: Loop over new half_year_order ***
+        # --- MODIFIKATION v2: Speicher für die X-Achsen-Limits pro Spalte ---
+        column_x_limits = {c: [] for c in range(num_cols)}
+        
+        # --- 3. Plotting-Schleife (Pass 1: Plotten & Limits sammeln) ---
         for row, half_year in enumerate(half_year_order):
             for col, (event_key, event_title) in enumerate(event_plot_order):
                 ax = axs[row, col]
@@ -3198,21 +3205,28 @@ class Visualizer:
                 data_subset = df_plot[(df_plot['half_year'] == half_year) & (df_plot['event'] == event_key)]
                 
                 legend_handles = [] # For this specific subplot's legend
-                all_data_for_lims = [] # For dynamic axis scaling
+                all_data_for_lims = [] # Wichtig: für jeden Plot neu initialisieren
                 
-                if not data_subset.empty:
+                # --- MODIFIKATION v3: Nur MMM für 'full_year' plotten ---
+                if half_year == 'full_year':
+                    plot_data_for_ax = data_subset[data_subset['storyline'] == 'MMM']
+                else:
+                    plot_data_for_ax = data_subset
+                # --- ENDE MODIFIKATION v3 ---
+
+                if not plot_data_for_ax.empty: # <-- Geändert zu plot_data_for_ax
                     # Plot Horizontal Boxplots
-                    sns.boxplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
+                    sns.boxplot(data=plot_data_for_ax, y='storyline', x='return_period', hue='gwl',
                                 order=storyline_order, palette=gwl_colors,
                                 ax=ax, linewidth=1.2, showfliers=False, orient='h',
                                 boxprops={'alpha': 0.85})
-                    sns.stripplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
+                    sns.stripplot(data=plot_data_for_ax, y='storyline', x='return_period', hue='gwl',
                                 order=storyline_order, palette=gwl_colors,
                                 ax=ax, dodge=True, jitter=0.15, size=4, 
                                 edgecolor='gray', linewidth=0.5, alpha=0.9, orient='h',
                                 legend=False)
                     
-                    all_data_for_lims.extend(data_subset['return_period'].dropna().values)
+                    all_data_for_lims.extend(plot_data_for_ax['return_period'].dropna().values) # <-- Geändert
                 else:
                     ax.text(0.5, 0.5, "Data N/A", ha='center', va='center', transform=ax.transAxes, color='gray')
 
@@ -3233,37 +3247,39 @@ class Visualizer:
                 ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, pos: f'{x:.0f}'))
                 ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
                 
-                # Setze dynamische X-Achsen-Limits
+                # --- MODIFIKATION v2: Limits berechnen und speichern, statt sie zu setzen ---
                 if all_data_for_lims:
-                    min_val = np.min(all_data_for_lims); max_val = np.max(all_data_for_lims)
-                    x_min_limit = max(0.8, min_val * 0.8); x_max_limit = max_val * 1.5
-                    if (max_val / min_val) < 5: x_max_limit = max(x_max_limit, min_val * 5)
-                    ax.set_xlim(left=x_min_limit, right=x_max_limit)
+                    min_val = np.min(all_data_for_lims)
+                    max_val = np.max(all_data_for_lims)
+                    x_min_limit = max(0.8, min_val * 0.8) # "Zoom In" Minimum
+                    x_max_limit = max_val * 1.5           # "Zoom In" Maximum
+                    # Diese Logik stellt sicher, dass der "Zoom" nicht zu extrem ist
+                    if (max_val / min_val) < 5: 
+                        x_max_limit = max(x_max_limit, min_val * 5)
+                    
+                    # Speichere die berechneten Limits für die Spalte
+                    column_x_limits[col].append((x_min_limit, x_max_limit))
                 else:
-                    ax.set_xlim(left=0.8, right=100) # Fallback
+                    # Speichere Fallback-Limits
+                    column_x_limits[col].append((0.8, 100))
+                # --- ENDE MODIFIKATION v2 ---
 
                 ax.grid(axis='y', linestyle='none')
                 ax.grid(axis='x', linestyle=':', which='both')
                 
-                # *** MODIFIED: X-axis labels only on the bottom row (row 2) ***
-                if row == num_rows - 1: # num_rows is 3, so row == 2
-                    ax.set_xlabel('Return Period (Years)', fontsize=11)
-                    ax.xaxis.set_tick_params(labelbottom=True)
-                else:
-                    ax.set_xlabel('')
-                    ax.xaxis.set_tick_params(labelbottom=False)
-                # *** END MODIFIED ***
+                # --- MODIFIKATION v2 (User-Wunsch): X-Achsen-Beschriftung auf ALLEN Subplots ---
+                ax.set_xlabel('Return Period (Years)', fontsize=11)
+                ax.xaxis.set_tick_params(labelbottom=True)
+                # --- ENDE MODIFIKATION v2 ---
                 
                 # Y-Achsen-Label (nur in der ersten Spalte)
                 if col == 0:
-                    # *** MODIFIED: Add 'Full Year' title ***
                     if half_year == 'winter':
                         season_title = "Winter Half-Year\n(Dec - May)"
                     elif half_year == 'summer':
                         season_title = "Summer Half-Year\n(Jun - Nov)"
                     else: # 'full_year'
                         season_title = "Full Year\n(Jan - Dec)"
-                    # *** END MODIFIED ***
                     ax.set_ylabel(season_title, fontsize=12, weight='bold', labelpad=15)
                 
                 # Legende (IN JEDEM PLOT)
@@ -3274,11 +3290,16 @@ class Visualizer:
                 
                 # n=X/Y Annotationen (Anzahl Modelle)
                 for i, storyline in enumerate(storyline_order):
+                    
+                    # --- MODIFIKATION v3: Annotationen für 'full_year' auf 'MMM' beschränken ---
+                    if half_year == 'full_year' and storyline != 'MMM':
+                        continue
+                    # --- ENDE MODIFIKATION v3 ---
+
                     y_base = y_ticks[i]
                     for j, gwl in enumerate(gwls_to_plot):
                         y_offset = -0.2 + (j * 0.4) # Position für GWL bar
                         gwl_label = f'+{gwl}°C'
-                        # *** MODIFIED: Use correct half_year key ***
                         event_data_gwl = results['data'].get(gwl, {}).get(half_year, {}).get(storyline, {}).get(event_key)
                         if event_data_gwl and 'model_count_X' in event_data_gwl:
                             X, Y = event_data_gwl['model_count_X'], event_data_gwl['model_count_Y']
@@ -3288,13 +3309,24 @@ class Visualizer:
                                     color=gwl_colors[gwl_label],
                                     bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
 
-        # --- 4. Finale Formatierung der Gesamt-Figur ---
+        # --- 4. Zweiter Durchlauf: Gesammelte X-Limits anwenden (Pass 2) ---
+        logging.info("Applying shared column X-limits based on widest 'zoomed' range...")
+        for col, limits_list in column_x_limits.items():
+            if limits_list: # Stellen sicher, dass die Liste nicht leer ist
+                # Finde das absolute Minimum und Maximum aus allen Limits dieser Spalte
+                final_min_lim = min(l[0] for l in limits_list)
+                final_max_lim = max(l[1] for l in limits_list)
+                
+                # Wende dieses finale Limit auf alle Zeilen in dieser Spalte an
+                for row in range(num_rows):
+                    axs[row, col].set_xlim(left=final_min_lim, right=final_max_lim)
+        # --- ENDE MODIFIKATION v2 ---
+
+        # --- 5. Finale Formatierung der Gesamt-Figur ---
         fig.suptitle(f"Change in Return Period of Low Navigable Water Level (LNWL < {lnwl_threshold:.0f} m³/s) for {scenario.upper()}",
                     fontsize=16, weight='bold', y=0.99)
         
-        # *** MODIFIED: Adjust layout padding for 3 rows ***
         fig.tight_layout(rect=[0.05, 0.05, 0.98, 0.95], h_pad=3.0, w_pad=2.5)
-        # *** END MODIFIED ***
         
         filename = os.path.join(config.PLOT_DIR, f"storyline_lnwl_aggregation_comparison_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')

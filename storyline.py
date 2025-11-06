@@ -2099,7 +2099,6 @@ class StorylineAnalyzer:
         results = {'thresholds': {'winter': {}, 'summer': {}}, 'data': {}}
         
         # --- 1. Definiere die zu analysierenden EVA-Ereignisse ---
-        # (Unverändert)
         eva_events_to_analyze = [
             ('1Q10_low', '1Q_low', 1, 10, 'low', 'Low-Flow (1Q10)'),
             ('7Q10_low', '7Q_low', 7, 10, 'low', 'Low-Flow (7Q10)'),
@@ -2121,7 +2120,6 @@ class StorylineAnalyzer:
         # --- 2. Berechne historische Schwellenwerte (mit GEV) ---
         logging.info("Calculating historical EVA thresholds and return periods for each half-year (using GEV)...")
         for half_year in ['winter', 'summer']:
-            # A) Berechne Schwellenwerte für 1Q/7Q...
             hist_thresholds_low = StatsAnalyzer.calculate_eva_thresholds(
                 historical_discharge_da, eva_type='low', q_days=q_days_needed, 
                 return_periods=return_periods_needed, half_year_filter=half_year
@@ -2131,7 +2129,6 @@ class StorylineAnalyzer:
                 return_periods=return_periods_needed, half_year_filter=half_year
             )
             
-            # B) Berechne historische Jährlichkeit für LNWL (empirisch, da Schwellenwert fix ist)
             hist_T_lnwl = np.inf
             if lnwl_fixed_threshold is not None:
                 months = [12, 1, 2, 3, 4, 5] if half_year == 'winter' else [6, 7, 8, 9, 10, 11]
@@ -2142,17 +2139,16 @@ class StorylineAnalyzer:
                     hist_freq = hist_count / q_1_low_hist_half_year.year.size
                     hist_T_lnwl = 1 / hist_freq if hist_freq > 0 else np.inf
             
-            # C) Speichere alle Schwellenwerte und hist. Jährlichkeiten
             for event_key, metric_key_base, q, T, eva_type, name in eva_events_to_analyze:
                 hist_val_T = np.nan
                 hist_val_Q = np.nan
                 
-                if T is not None: # Standard EVA Event (z.B. 7Q10)
+                if T is not None: 
                     key_T = f'{q}Q{T}'
                     threshold_dict = hist_thresholds_low if eva_type == 'low' else hist_thresholds_high
                     hist_val_Q = threshold_dict.get(key_T) 
                     hist_val_T = T
-                else: # Fixes Event (LNWL)
+                else: 
                     hist_val_Q = lnwl_fixed_threshold
                     hist_val_T = hist_T_lnwl
                 
@@ -2232,9 +2228,8 @@ class StorylineAnalyzer:
                                 pooled_array = np.array(pooled_model_extremes)
                                 logging.info(f"Fitting Pooled GEV for {storyline_name} ({event_key}), GWL {gwl}, N={total_pooled_points}...")
 
-                                # === KORRIGIERTE ZEILE (v4.3) ===
+                                # KORREKTER AUFRUF (v4.3)
                                 params = distr.gev.lmom_fit(pooled_array) 
-                                # === ENDE KORREKTUR ===
                                 dist_future = distr.gev(**params)
                                 
                                 if eva_type == 'low':
@@ -2264,6 +2259,8 @@ class StorylineAnalyzer:
                             logging.warning(f"Skipping Pooled GEV for {storyline_name} ({event_key}): Insufficient data (N={total_pooled_points}).")
 
                         # 3. Ergebnisse speichern
+                        # WICHTIG: Wir speichern den *einzelnen* Wert in der Liste,
+                        # damit der Plot-Code (den wir gleich anpassen) ihn findet.
                         storyline_results_storage[event_key] = {
                             'future_return_periods_all_models': [future_return_period_mean] if np.isfinite(future_return_period_mean) else [],
                             'future_return_period_mean': future_return_period_mean,

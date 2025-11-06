@@ -2522,45 +2522,31 @@ class Visualizer:
         Creates a plot showing the change in return periods, organized with
         Low-Flow and High-Flow sections, each having a Winter and Summer row.
 
-        MODIFIED LAYOUT (v3f - Nature Journal Layout Fix):
-        - Creates a 4-row layout:
-          - Row 0: Winter Low-Flow Events
-          - Row 1: Summer Low-Flow Events
-          - Row 2: Winter High-Flow Events
-          - Row 3: Summer High-Flow Events
-        - Columns are the respective events (e.g., 1Q10, 7Q10, etc.)
-        - Uses horizontal boxplots (Y-axis = Storylines, X-axis = Return Period)
-        - X-axis is zoomed to 1-150/160 to resolve low return periods.
-        - FIX: Each subplot now has its own title with the correct season-specific threshold.
-        - FIX: Layout adjusted to prevent title overlap. (h_pad=5.5, y=0.505)
-        
-        --- USER MODIFICATIONS (Nov 4, 2025) ---
-        - MOD 1: Increased figsize height (to 22) and h_pad (to 8.0) to 
-                 increase vertical spacing between low-flow and high-flow blocks.
-        - MOD 2: Forced X-axis labels and formatter to appear on ALL subplots 
-                 for better readability.
-        --- END USER MODIFICATIONS ---
+        MODIFIED LAYOUT (v4.1 - Pooled GEV Plot):
+        - Creates the same 4-row layout as v3f.
+        - REPLACES Boxplots/Stripplots with ax.scatter() to show the
+          single, robust, pooled GEV result for each storyline.
+        - Uses different markers (o, X) for different GWLs.
+        - MODIFIED: Places annotation (n=X/Y) on the right edge of the plot,
+          aligned with the Y-axis ticks (as requested by user).
         """
         if not results or not config or 'thresholds' not in results or 'data' not in results:
             logging.warning(f"Cannot plot return period change by event for {scenario}: Missing results or thresholds.")
             return
 
-        logging.info(f"Plotting REORGANIZED storyline return period (4-row layout) for {scenario}...")
+        logging.info(f"Plotting POOLED GEV return period (4-row layout, v4.1 Plot) for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         
         # --- 1. Define Event and Plot Structure ---
-        # Get all event keys from thresholds
         all_event_keys = list(results['thresholds']['winter'].keys())
         all_event_keys.extend(list(results['thresholds']['summer'].keys()))
         unique_event_keys = sorted(list(set(all_event_keys)))
 
-        # Separate Low-Flow and High-Flow events
         low_flow_events = sorted([k for k in unique_event_keys if results['thresholds']['winter'].get(k, {}).get('type') == 'low' or results['thresholds']['summer'].get(k, {}).get('type') == 'low'])
         high_flow_events = sorted([k for k in unique_event_keys if results['thresholds']['winter'].get(k, {}).get('type') == 'high' or results['thresholds']['summer'].get(k, {}).get('type') == 'high'])
         
-        # Define logical sort order for columns (move LNWL to end of low-flow)
         event_plot_order_keys_low = ['1Q10_low', '7Q10_low', '7Q50_low', '7Q100_low', 'LNWL']
         event_plot_order_keys_high = ['1Q10_high', '7Q10_high', '7Q50_high', '7Q100_high']
 
@@ -2583,12 +2569,11 @@ class Visualizer:
             logging.warning(f"No valid EVA events found to plot for {scenario}.")
             return
 
-        # --- MODIFICATION 1: Increased figsize height from 19 to 22 ---
         fig, axs = plt.subplots(
             num_rows, num_cols, 
-            figsize=(6 * num_cols, 22), # Increased height from 19 to 22
+            figsize=(6 * num_cols, 22), 
             squeeze=False, 
-            sharex=True # Share X-axis (Return Period)
+            sharex=True 
         )
         plt.style.use('seaborn-v0_8-whitegrid')
 
@@ -2607,27 +2592,31 @@ class Visualizer:
         y_tick_labels = [s.replace(' & ', ' &\n') for s in storyline_order]
 
         gwl_colors = {f'+{gwls_to_plot[0]}°C': '#ff7f0e', f'+{gwls_to_plot[1]}°C': '#d62728'}
+        gwl_markers = {f'+{gwls_to_plot[0]}°C': 'o', f'+{gwls_to_plot[1]}°C': 'X'}
         
-        # --- 2. Prepare Data for Plotting ---
+        # --- 2. Prepare Data for Plotting (v4.0) ---
         max_return_period_for_plot = 150 # Clip data at 150 years to zoom in
         
         plot_data_list = []
         for gwl in gwls_to_plot:
+            gwl_label = f'+{gwl}°C'
             for half_year in ['winter', 'summer']:
                 for storyline in storyline_order:
                     all_events_for_plotting = low_flow_events_ordered + high_flow_events_ordered
                     for event_key in all_events_for_plotting:
+                        # Holt den einzelnen gepoolten Wert
                         event_data = results['data'].get(gwl, {}).get(half_year, {}).get(storyline, {}).get(event_key)
-                        if event_data and 'future_return_periods_all_models' in event_data:
-                            for model_period in event_data['future_return_periods_all_models']:
-                                if np.isfinite(model_period):
-                                    plot_data_list.append({
-                                        'half_year': half_year,
-                                        'event': event_key,
-                                        'storyline': storyline,
-                                        'gwl': f'+{gwl}°C',
-                                        'return_period': model_period,
-                                    })
+                        if event_data and 'future_return_period_mean' in event_data:
+                            period = event_data['future_return_period_mean']
+                            
+                            if np.isfinite(period):
+                                plot_data_list.append({
+                                    'half_year': half_year,
+                                    'event': event_key,
+                                    'storyline': storyline,
+                                    'gwl': gwl_label,
+                                    'return_period': period
+                                })
         
         if not plot_data_list:
             logging.warning(f"No finite return period data to plot for {scenario}.")
@@ -2639,7 +2628,6 @@ class Visualizer:
         
         # --- 3. Plotting Loop (Reorganized) ---
         
-        # Define the blocks to plot
         plot_blocks = [
             {'title': 'Low-Flow Events', 'events': low_flow_events_ordered, 'base_row': 0},
             {'title': 'High-Flow Events', 'events': high_flow_events_ordered, 'base_row': 2}
@@ -2657,38 +2645,39 @@ class Visualizer:
                     ax.set_ylim(y_limits)
                     ax.invert_yaxis() # Show MMM at the top
                     
-                    # --- START: MODIFIED TITLE BLOCK ---
-                    # Get Thresholds for Title
                     threshold_data = results.get('thresholds', {}).get(half_year, {}).get(event_key, {})
                     event_name = threshold_data.get('name', event_key).replace("Low-Flow", "Low Flow").replace("High-Flow", "High Flow")
                     hist_val_q = threshold_data.get('threshold_m3s')
                     op = '<' if threshold_data.get('type') == 'low' else '>'
                     
                     title = f"{event_name}" 
-                    
-                    # Add specific threshold value to title, avoiding redundancy
                     if hist_val_q and "(<" not in event_name and "(>" not in event_name and "m³/s" not in event_name:
                         title += f"\n(Threshold: {op} {hist_val_q:.0f} m³/s)"
-                    
-                    # SET THE TITLE FOR EVERY SUBPLOT (FIX)
                     ax.set_title(title, fontsize=11, weight='bold')
-                    # --- END: MODIFIED TITLE BLOCK ---
 
-                    # Filter data for this subplot
                     data_subset = df_plot_clipped[(df_plot_clipped['half_year'] == half_year) & (df_plot_clipped['event'] == event_key)]
                     
                     if not data_subset.empty:
-                        # Plot Horizontal Boxplots
-                        sns.boxplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
-                                    order=storyline_order, palette=gwl_colors,
-                                    ax=ax, linewidth=1.2, showfliers=False, orient='h',
-                                    boxprops={'alpha': 0.85})
-                        sns.stripplot(data=data_subset, y='storyline', x='return_period', hue='gwl',
-                                    order=storyline_order, palette=gwl_colors,
-                                    ax=ax, dodge=True, jitter=0.15, size=4, 
-                                    edgecolor='gray', linewidth=0.5, alpha=0.9, orient='h')
+                        # --- START: MODIFIED PLOT LOGIC (v4.0) ---
+                        # Zeichne Scatter-Punkte statt Boxplots
+                        for gwl_label, gwl_group in data_subset.groupby('gwl'):
+                            # Map storyline names to y-tick positions
+                            y_values = gwl_group['storyline'].map(dict(zip(storyline_order, y_ticks)))
+                            
+                            ax.scatter(
+                                x=gwl_group['return_period'],
+                                y=y_values,
+                                color=gwl_colors[gwl_label],
+                                marker=gwl_markers[gwl_label],
+                                s=100, # Marker size
+                                label=gwl_label,
+                                edgecolor='black',
+                                linewidth=0.5,
+                                zorder=10
+                            )
+                        # --- END: MODIFIED PLOT LOGIC ---
+                    
                     else:
-                        # Still set title, but grayed out
                         ax.set_title(title, fontsize=11, weight='bold', color='gray') 
                         ax.text(0.5, 0.5, "Data N/A", ha='center', va='center', transform=ax.transAxes, color='gray')
 
@@ -2708,19 +2697,15 @@ class Visualizer:
                     ax.grid(axis='y', linestyle='none')
                     ax.grid(axis='x', linestyle=':', which='both')
                     
-                    # --- MODIFICATION 2: Apply X-axis labels to ALL subplots ---
+                    # MODIFICATION: Apply X-axis labels to ALL subplots
                     ax.set_xlabel('Return Period (Years)', fontsize=11)
-                    # Ensure formatter is set for the shared axis
                     ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, pos: f'{x:.0f}'))
-                    # Force tick labels to be visible
                     ax.tick_params(axis='x', labelbottom=True)
-                    # --- END MODIFICATION 2 ---
                     
                     # Y-Axis (Storylines)
                     ax.set_yticks(y_ticks)
-                    if col == 0: # Y-labels only on the first column
+                    if col == 0: 
                         ax.set_yticklabels(y_tick_labels, fontsize=9)
-                        # Add Row Titles (Half-Year)
                         season_title = "Winter\n(Dec - May)" if half_year == 'winter' else "Summer\n(Jun - Nov)"
                         ax.set_ylabel(season_title, fontsize=11, weight='bold', labelpad=15)
                     else:
@@ -2729,57 +2714,59 @@ class Visualizer:
 
                     if ax.get_legend() is not None: ax.get_legend().remove()
                     
-                    # n=X/Y Annotations
+                    # --- START: MODIFIKATION (v4.1) ---
+                    # Add n=X/Y annotations (Anzahl Modelle) to the right edge
                     for i, storyline in enumerate(storyline_order):
                         y_base = y_ticks[i]
                         for j, gwl in enumerate(gwls_to_plot):
-                            y_offset = -0.2 + (j * 0.4) # Position for GWL bar
                             gwl_label = f'+{gwl}°C'
+                            # Positionierung für die beiden GWL-Punkte (leicht versetzt)
+                            y_offset = -0.2 + (j * 0.4) 
+                            
+                            # Holen der Daten aus dem 'results'-Dict
                             event_data_gwl = results['data'].get(gwl, {}).get(half_year, {}).get(storyline, {}).get(event_key)
+                            
                             if event_data_gwl and 'model_count_X' in event_data_gwl:
+                                # X = valide Modelle, Y = Gesamtmodelle in Storyline
                                 X, Y = event_data_gwl['model_count_X'], event_data_gwl['model_count_Y']
-                                # Place text on the right side
-                                ax.text(0.98, y_base + y_offset, f"n={X}/{Y}", transform=ax.get_yaxis_transform(),
-                                        horizontalalignment='right', fontsize=7, weight='bold', color=gwl_colors[gwl_label],
-                                        bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
+                                text_to_display = f"n={X}/{Y}"
 
+                                ax.text(0.98, y_base + y_offset, text_to_display, 
+                                        transform=ax.get_yaxis_transform(), # An Y-Achse ausrichten
+                                        horizontalalignment='right', fontsize=7, weight='bold', 
+                                        color=gwl_colors[gwl_label],
+                                        bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
+                    # --- ENDE: MODIFIKATION (v4.1) ---
+        
         # Turn off unused axes
         for col in range(num_cols_low, num_cols):
-            axs[0, col].axis('off')
-            axs[1, col].axis('off')
+            axs[0, col].axis('off'); axs[1, col].axis('off')
         for col in range(num_cols_high, num_cols):
-            axs[2, col].axis('off')
-            axs[3, col].axis('off')
+            axs[2, col].axis('off'); axs[3, col].axis('off')
 
         # --- 4. Final Figure Formatting ---
         legend_handles = [
             plt.Line2D([0], [0], color='skyblue', linestyle='--', linewidth=3, label='Historical Return Period'),
-            mpatches.Patch(color=gwl_colors[f'+{gwls_to_plot[0]}°C'], label=f'Future (+{gwls_to_plot[0]}°C)'),
-            mpatches.Patch(color=gwl_colors[f'+{gwls_to_plot[1]}°C'], label=f'Future (+{gwls_to_plot[1]}°C)')
+            plt.Line2D([0], [0], marker=gwl_markers[f'+{gwls_to_plot[0]}°C'], color=gwl_colors[f'+{gwls_to_plot[0]}°C'], 
+                       label=f'Future (+{gwls_to_plot[0]}°C)', linestyle='None', markersize=10, markeredgecolor='black', markeredgewidth=0.5),
+            plt.Line2D([0], [0], marker=gwl_markers[f'+{gwls_to_plot[1]}°C'], color=gwl_colors[f'+{gwls_to_plot[1]}°C'],
+                       label=f'Future (+{gwls_to_plot[1]}°C)', linestyle='None', markersize=10, markeredgecolor='black', markeredgewidth=0.5)
         ]
         fig.legend(handles=legend_handles, loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=3, fontsize=12)
         
-        fig.suptitle(f"Change in Return Period of Discharge Events for {scenario.upper()} (Half-Year Analysis)",
+        fig.suptitle(f"Change in Return Period of Discharge Events for {scenario.upper()} (Half-Year Analysis, Pooled GEV)",
                     fontsize=16, weight='bold', y=0.99)
         
-        # --- START: MODIFIED BLOCK TITLES & LAYOUT (FIX) ---
-        # Add block titles
-        # y=0.94 is just below the suptitle
+        # Block Titles
         fig.text(0.5, 0.94, 'Low-Flow Events', ha='center', va='center', fontsize=14, weight='bold')
-        # y=0.505 is just above the dividing line, in the space created by h_pad
         fig.text(0.5, 0.505, 'High-Flow Events', ha='center', va='center', fontsize=14, weight='bold')
         
-        # Adjust layout
-        # rect top=0.92 leaves space for suptitle and top block title
-        # --- MODIFICATION 1: Increased h_pad from 5.5 to 8.0 ---
         fig.tight_layout(rect=[0.05, 0.05, 0.98, 0.92], h_pad=8.0, w_pad=2.0)
-        # --- END: MODIFIED BLOCK TITLES & LAYOUT (FIX) ---
         
-        # Use the same filename as before, overwriting the old layout
         filename = os.path.join(config.PLOT_DIR, f"storyline_discharge_return_period_BY_EVENT_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved REORGANIZED return period boxplot (4-row layout) to {filename}")
+        logging.info(f"Saved REORGANIZED return period plot (4-row, Pooled GEV Points, v4.1 Plot) to {filename}")
         
     @staticmethod
     def plot_storyline_wind_change_maps(map_data, config, scenario, filename="storyline_u850_change_maps.png"):

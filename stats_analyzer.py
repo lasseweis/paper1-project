@@ -276,13 +276,10 @@ class StatsAnalyzer:
         """
         Calculates hydrological extreme value thresholds (e.g., 7Q10) from a daily time series.
         
-        MODIFIED VERSION (v3.6 - Nur Quantile):
-        - Verwendet NUR die empirische Quantilmethode (np.quantile), da der GEV-Fit unzuverlässig war.
-
-        --- MODIFIED (Nov 5, 2025) ---
-        - The 'if half_year_filter:' check is now more specific ('in ['winter', 'summer']')
-          to allow 'full_year' or None to pass through and use the full dataset.
-        --- END MODIFIED ---
+        MODIFIED VERSION (v4.3 - GEV Fit with Corrected Call):
+        - Prioritizes a GEV-fit using L-moments (lmoments3) for robust extrapolation.
+        - Uses the correct distr.gev.lmom_fit() syntax.
+        - Falls back to the empirical quantile method if the GEV fit fails.
 
         Parameters:
         -----------
@@ -309,9 +306,7 @@ class StatsAnalyzer:
             return {}
 
         # --- Half-Year Filtering ---
-        # *** MODIFIED LINE HERE ***
         if half_year_filter and half_year_filter in ['winter', 'summer']:
-        # *** END MODIFIED LINE ***
             months = []
             if half_year_filter == 'winter':
                 months = [12, 1, 2, 3, 4, 5]
@@ -326,7 +321,6 @@ class StatsAnalyzer:
                     logging.error(f"No data for half-year filter '{half_year_filter}'.")
                     return {}
             else:
-                # This path should not be reached if check is specific
                 daily_timeseries_filtered = daily_timeseries
         else:
             if half_year_filter == 'full_year':
@@ -344,7 +338,6 @@ class StatsAnalyzer:
                 moving_avg_full = daily_timeseries.rolling(time=q, center=True, min_periods=q).mean()
             
             # 2. Filter the resulting moving average series for the half-year
-            # *** MODIFIED BLOCK HERE ***
             if half_year_filter and half_year_filter in ['winter', 'summer']:
                 months = []
                 if half_year_filter == 'winter':
@@ -360,7 +353,6 @@ class StatsAnalyzer:
                     moving_avg_filtered = moving_avg_full
             else:
                 moving_avg_filtered = moving_avg_full
-            # *** END MODIFIED BLOCK ***
 
             # 3. Extract annual extremes
             if eva_type == 'low':
@@ -374,21 +366,47 @@ class StatsAnalyzer:
                 logging.warning(f"Skipping {q}Q analysis for {eva_type} ({half_year_filter}): Only {len(clean_extremes)} valid years. (Need > 20 for robust fit)")
                 continue
 
-            # --- START: NUR-QUANTIL-METHODE ---
-            logging.info(f"Calculating EVA thresholds for {q}Q ({eva_type}, {half_year_filter or 'full_year'}) using empirical quantile method.")
+            # --- START: GEV FIT METHOD (Priority) ---
+            try:
+                logging.info(f"Calculating EVA thresholds for {q}Q ({eva_type}, {half_year_filter or 'full_year'}) using GEV-Fit (L-Moments)...")
+                
+                # Fit GEV distribution using L-moments
+                # === KORRIGIERTE ZEILE (v4.3) ===
+                params = distr.gev.lmom_fit(clean_extremes) 
+                # === ENDE KORREKTUR ===
+                dist_gev = distr.gev(**params) # Renamed to avoid conflict
 
-            for T in return_periods:
-                if eva_type == 'low':
-                    prob = 1.0 / T
-                    quantile_to_find = prob
-                else: # 'high'
-                    prob = 1.0 / T
-                    quantile_to_find = 1.0 - prob
+                for T in return_periods:
+                    if eva_type == 'low':
+                        prob = 1.0 / T
+                        quantile_to_find = prob
+                    else: # 'high'
+                        prob = 1.0 / T
+                        quantile_to_find = 1.0 - prob
+                    
+                    # Calculate threshold from the fitted distribution (Percent Point Function)
+                    discharge_val = dist_gev.ppf(quantile_to_find)
+                    
+                    key = f'{q}Q{T}'
+                    thresholds_m3s[key] = discharge_val
+
+            # --- FALLBACK: QUANTILE METHOD ---
+            except Exception as e_gev:
+                # Loggen den *tatsächlichen* Fehler
+                logging.warning(f"GEV fit failed for {q}Q ({eva_type}, {half_year_filter or 'full_year'}): {e_gev}. FALLING BACK to empirical quantile method.")
                 
-                discharge_val = np.quantile(clean_extremes, quantile_to_find, interpolation='linear')
-                
-                key = f'{q}Q{T}'
-                thresholds_m3s[key] = discharge_val
-            # --- ENDE: NUR-QUANTIL-METHODE ---
+                for T in return_periods:
+                    if eva_type == 'low':
+                        prob = 1.0 / T
+                        quantile_to_find = prob
+                    else: # 'high'
+                        prob = 1.0 / T
+                        quantile_to_find = 1.0 - prob
+                    
+                    discharge_val = np.quantile(clean_extremes, quantile_to_find, interpolation='linear')
+                    
+                    key = f'{q}Q{T}'
+                    thresholds_m3s[key] = discharge_val
+            # --- ENDE: FALLBACK ---
                 
         return thresholds_m3s

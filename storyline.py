@@ -18,6 +18,8 @@ import pandas as pd
 import logging
 import os
 import json
+import lmoments3 as lm
+from lmoments3 import distr
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from scipy.stats import chi2
 
@@ -2079,17 +2081,16 @@ class StorylineAnalyzer:
         Analysiert die Frequenz und Wiederkehrperiode von hydrologischen Extremen (EVA)
         für HALBJÄHRIGE Perioden (Winter/Sommer).
 
-        NEUE LOGIK (v3 - Halbjährlich):
-        1. Berechnet historische EVA-Schwellenwerte (z.B. 7Q10) für das Winter-Halbjahr (Dez-Mai)
-           und das Sommer-Halbjahr (Jun-Nov) separat.
-        2. Berechnet die historische Jährlichkeit für LNWL für beide Halbjahre.
-        3. Holt die HALBJÄHRLICHEN Extremwert-Zeitreihen (z.B. '7Q_low_winter') der CMIP6-Modelle
-           (berechnet in analyze_cmip6_changes_at_gwl).
-        4. Sliced diese auf das 30-Jahres-GWL-Fenster.
-        5. Zählt die Frequenz des Unterschreitens der hist. HALBJAHRES-Schwellenwerte.
-        6. Berechnet die neue zukünftige Jährlichkeit.
+        NEUE LOGIK (v4.3 - Pooled GEV Fit mit korrigiertem Aufruf):
+        1. Verwendet die (mit GEV angepassten) historischen Schwellenwerte aus Schritt 1.
+        2. Poolt die 30-Jahres-Extremwert-Zeitreihen (z.B. '7Q_low_winter') ALLER Modelle
+           INNERHALB einer Storyline zu einem großen Datensatz (z.B. N=150).
+        3. Fittet EINE GEV-Verteilung an diesen gepoolten Datensatz.
+        4. Berechnet die Wahrscheinlichkeit (CDF) des historischen Schwellenwerts in dieser
+           neuen, zukünftigen Verteilung.
+        5. Leitet daraus die neue, robuste Jährlichkeit (T = 1/P) für die Storyline ab.
         """
-        logging.info("Analyzing storyline discharge... mit NEUER HALBJÄHRLICHER EVA-Logik (v3)...")
+        logging.info("Analyzing storyline discharge... mit GEPPOOLTER GEV-Logik (v4.3)...")
         
         if historical_discharge_da is None:
             logging.error("Historical discharge data (daily) is missing. Aborting.")
@@ -2098,30 +2099,27 @@ class StorylineAnalyzer:
         results = {'thresholds': {'winter': {}, 'summer': {}}, 'data': {}}
         
         # --- 1. Definiere die zu analysierenden EVA-Ereignisse ---
-        # Format: (event_key, metric_key_base, q_days, T, eva_type, name)
+        # (Unverändert)
         eva_events_to_analyze = [
-            # Low Flow
             ('1Q10_low', '1Q_low', 1, 10, 'low', 'Low-Flow (1Q10)'),
             ('7Q10_low', '7Q_low', 7, 10, 'low', 'Low-Flow (7Q10)'),
             ('7Q50_low', '7Q_low', 7, 50, 'low', 'Low-Flow (7Q50)'),
             ('7Q100_low', '7Q_low', 7, 100, 'low', 'Low-Flow (7Q100)'),
-            # High Flow
             ('1Q10_high', '1Q_high', 1, 10, 'high', 'High-Flow (1Q10)'),
             ('7Q10_high', '7Q_high', 7, 10, 'high', 'High-Flow (7Q10)'),
             ('7Q50_high', '7Q_high', 7, 50, 'high', 'High-Flow (7Q50)'),
             ('7Q100_high', '7Q_high', 7, 100, 'high', 'High-Flow (7Q100)'),
         ]
         
-        # Holen der "fixen" Schwellenwerte
-        lnwl_fixed_threshold = discharge_thresholds.get(f'winter_lowflow_lnwl') # 970 m³/s
+        lnwl_fixed_threshold = discharge_thresholds.get(f'winter_lowflow_lnwl')
         if lnwl_fixed_threshold is not None:
              eva_events_to_analyze.append(('LNWL', '1Q_low', 1, None, 'low', f'Low Navigable (LNWL) (<{lnwl_fixed_threshold:.0f} m³/s)'))
         
         q_days_needed = sorted(list(set([e[2] for e in eva_events_to_analyze])))
         return_periods_needed = sorted(list(set([e[3] for e in eva_events_to_analyze if e[3] is not None])))
 
-        # --- 2. Berechne historische Schwellenwerte und Jährlichkeiten PRO HALBJAHR ---
-        logging.info("Calculating historical EVA thresholds and return periods for each half-year...")
+        # --- 2. Berechne historische Schwellenwerte (mit GEV) ---
+        logging.info("Calculating historical EVA thresholds and return periods for each half-year (using GEV)...")
         for half_year in ['winter', 'summer']:
             # A) Berechne Schwellenwerte für 1Q/7Q...
             hist_thresholds_low = StatsAnalyzer.calculate_eva_thresholds(
@@ -2133,12 +2131,11 @@ class StorylineAnalyzer:
                 return_periods=return_periods_needed, half_year_filter=half_year
             )
             
-            # B) Berechne historische Jährlichkeit für LNWL
+            # B) Berechne historische Jährlichkeit für LNWL (empirisch, da Schwellenwert fix ist)
             hist_T_lnwl = np.inf
             if lnwl_fixed_threshold is not None:
                 months = [12, 1, 2, 3, 4, 5] if half_year == 'winter' else [6, 7, 8, 9, 10, 11]
                 daily_filtered = historical_discharge_da.where(historical_discharge_da.time.dt.month.isin(months), drop=True)
-                # Verwende 1Q_low (Jahres-Minimum des Tageswerts) als Referenz
                 q_1_low_hist_half_year = daily_filtered.groupby('time.year').min('time').dropna(dim='year')
                 if q_1_low_hist_half_year.year.size > 0:
                     hist_count = (q_1_low_hist_half_year < lnwl_fixed_threshold).sum().item()
@@ -2153,8 +2150,8 @@ class StorylineAnalyzer:
                 if T is not None: # Standard EVA Event (z.B. 7Q10)
                     key_T = f'{q}Q{T}'
                     threshold_dict = hist_thresholds_low if eva_type == 'low' else hist_thresholds_high
-                    hist_val_Q = threshold_dict.get(key_T) # Das ist der Schwellenwert (m³/s)
-                    hist_val_T = T # Das ist die Jährlichkeit (Jahre)
+                    hist_val_Q = threshold_dict.get(key_T) 
+                    hist_val_T = T
                 else: # Fixes Event (LNWL)
                     hist_val_Q = lnwl_fixed_threshold
                     hist_val_T = hist_T_lnwl
@@ -2168,7 +2165,7 @@ class StorylineAnalyzer:
                     'threshold_m3s': float(hist_val_Q),
                     'hist_return_period': float(hist_val_T),
                     'type': eva_type,
-                    'metric_key_base': metric_key_base # z.B. '7Q_low'
+                    'metric_key_base': metric_key_base 
                 }
 
         logging.info(f"  -> Historical thresholds stored: {json.dumps(results['thresholds'], indent=2, default=str)}")
@@ -2187,9 +2184,6 @@ class StorylineAnalyzer:
             results['data'][gwl] = {'winter': {}, 'summer': {}}
             
             for half_year in ['winter', 'summer']:
-                # Bestimme, welche Storyline-Klassifikation zu verwenden ist
-                # Winter-Halbjahr (Dez-Mai) wird von DJF-Storylines dominiert
-                # Sommer-Halbjahr (Jun-Nov) wird von JJA-Storylines dominiert
                 season_label = 'DJF' if half_year == 'winter' else 'JJA'
                 
                 all_storyline_keys_for_gwl = {k: v for k, v in storyline_classification.get(gwl, {}).items() if k.startswith(season_label)}
@@ -2198,51 +2192,88 @@ class StorylineAnalyzer:
                     if not model_list: continue
                     storyline_name = storyline_key.replace(f'{season_label}_', '')
                     
-                    storyline_results_storage = {} # Temporärer Speicher für diese Storyline
+                    storyline_results_storage = {} 
 
                     for event_key, event_data in results['thresholds'][half_year].items():
-                        metric_key_base = event_data['metric_key_base'] # z.B. '7Q_low'
-                        metric_key_to_use = f"{metric_key_base}_{half_year}" # z.B. '7Q_low_winter'
+                        
+                        # --- START: MODIFIKATION (Pooled GEV) ---
+                        
+                        metric_key_to_use = f"{event_data['metric_key_base']}_{half_year}" 
                         hist_threshold_val = event_data['threshold_m3s']
+                        eva_type = event_data['type']
                         
-                        model_return_periods = []
-                        Y_total_in_storyline = len(model_list)
+                        pooled_model_extremes = []
+                        Y_total_models = len(model_list)
+                        X_valid_models = 0
                         
+                        # 1. Daten poolen
                         for model_run_key in model_list:
-                            # Hole HALBJÄHRLICHE Zeitreihe (z.B. '7Q_low_winter')
                             discharge_ts_half_year = metric_timeseries.get(model_run_key, {}).get(metric_key_to_use)
                             threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
                             
                             if discharge_ts_half_year is None or threshold_year is None: continue
 
-                            # Schneide 30-Jahres-Fenster aus HALBJÄHRLICHER Zeitreihe
                             start_year = threshold_year - window // 2
                             end_year = threshold_year + (window - 1) // 2
                             
                             ts_slice = discharge_ts_half_year.sel(year=slice(start_year, end_year))
                             ts_slice_clean = ts_slice.dropna(dim='year')
-                            total_future_years = ts_slice_clean.year.size
                             
-                            if total_future_years > 0:
-                                if event_data['type'] == 'low':
-                                    future_event_count = (ts_slice_clean < hist_threshold_val).sum().item()
-                                else:
-                                    future_event_count = (ts_slice_clean > hist_threshold_val).sum().item()
-                                
-                                future_freq = future_event_count / total_future_years
-                                future_return_period = 1 / future_freq if future_freq > 0 else np.inf
-                                model_return_periods.append(future_return_period)
+                            if ts_slice_clean.year.size > 0:
+                                pooled_model_extremes.extend(ts_slice_clean.values)
+                                X_valid_models += 1
                         
-                        if model_return_periods:
-                            finite_periods = [p for p in model_return_periods if np.isfinite(p)]
-                            X_finite_models = len(finite_periods)
-                            storyline_results_storage[event_key] = {
-                                'future_return_periods_all_models': model_return_periods,
-                                'future_return_period_mean': np.mean(finite_periods) if finite_periods else np.inf,
-                                'model_count_X': X_finite_models,
-                                'model_count_Y': Y_total_in_storyline
-                            }
-                    
+                        # 2. Gepooolte GEV-Analyse
+                        future_return_period_mean = np.inf
+                        total_pooled_points = len(pooled_model_extremes)
+                        
+                        if total_pooled_points > 30: # Brauchen genug Daten für einen robusten Fit
+                            try:
+                                pooled_array = np.array(pooled_model_extremes)
+                                logging.info(f"Fitting Pooled GEV for {storyline_name} ({event_key}), GWL {gwl}, N={total_pooled_points}...")
+
+                                # === KORRIGIERTE ZEILE (v4.3) ===
+                                params = distr.gev.lmom_fit(pooled_array) 
+                                # === ENDE KORREKTUR ===
+                                dist_future = distr.gev(**params)
+                                
+                                if eva_type == 'low':
+                                    prob_exceed = dist_future.cdf(hist_threshold_val)
+                                else: # 'high'
+                                    prob_exceed = 1.0 - dist_future.cdf(hist_threshold_val)
+                                
+                                if prob_exceed > 1e-9: # Verhindert Division durch Null
+                                    future_return_period_mean = 1.0 / prob_exceed
+                                else:
+                                    future_return_period_mean = np.inf # Extrem selten
+                            
+                            except Exception as e_gev:
+                                logging.warning(f"Pooled GEV fit failed for {storyline_name} ({event_key}): {e_gev}. FALLING BACK to empirical pooled frequency.")
+                                # Fallback: Empirische Frequenz auf gepoolten Daten
+                                if total_pooled_points > 0:
+                                    if eva_type == 'low':
+                                        future_event_count = (pooled_array < hist_threshold_val).sum()
+                                    else:
+                                        future_event_count = (pooled_array > hist_threshold_val).sum()
+                                    
+                                    future_freq = future_event_count / total_pooled_points
+                                    if future_freq > 0:
+                                        future_return_period_mean = 1.0 / future_freq
+                        
+                        else:
+                            logging.warning(f"Skipping Pooled GEV for {storyline_name} ({event_key}): Insufficient data (N={total_pooled_points}).")
+
+                        # 3. Ergebnisse speichern
+                        storyline_results_storage[event_key] = {
+                            'future_return_periods_all_models': [future_return_period_mean] if np.isfinite(future_return_period_mean) else [],
+                            'future_return_period_mean': future_return_period_mean,
+                            'model_count_X': X_valid_models, 
+                            'model_count_Y': Y_total_models, 
+                            'pooled_data_points_N': total_pooled_points
+                        }
+                        
+                        # --- ENDE: MODIFIKATION (Pooled GEV) ---
+
                     results['data'][gwl][half_year][storyline_name] = storyline_results_storage
 
         return results

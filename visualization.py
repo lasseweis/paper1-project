@@ -3085,53 +3085,58 @@ class Visualizer:
     @staticmethod
     def plot_storyline_lnwl_aggregation_comparison(results, config, scenario, lnwl_threshold=970.0):
         """
-        Creates a high-impact 2x4 plot showing the change in return periods for the
-        LNWL threshold (< 970 m³/s) across four different time aggregations
-        (Daily, 7-Day, Monthly, 3-Month).
+        Creates a high-impact 3x4 plot (added Full Year row) showing the change in 
+        return periods for the LNWL threshold (< 970 m³/s) across four different 
+        time aggregations (Daily, 7-Day, 30-Day, 3-Month).
         
         Layout:
-        - Rows: Winter, Summer
-        - Columns: Daily, 7-Day, Monthly, 3-Month Minimums
+        - Rows: Winter, Summer, Full Year (NEW)
+        - Columns: Daily, 7-Day, 30-Day (MODIFIED), 3-Month Minimums
         - Plot Type: Horizontal Boxplots (Y-axis=Storylines, X-axis=Return Period)
         - Aesthetics: English labels, T_hist in legend, X-axis label on all plots,
                       DYNAMIC X-AXIS scaling per subplot.
         
-        KORRIGIERTE VERSION (5. Nov 2025):
-        - `sharex=False` im `subplots`-Aufruf hinzugefügt.
-        - Statisches `ax.set_xlim(left=0.8, right=160)` entfernt.
-        - Reihenfolge von `set_xticks` und dem dynamischen `set_xlim`-Block getauscht,
-          um das dynamische Skalieren pro Subplot zu ermöglichen.
+        --- MODIFIED (Nov 5, 2025) ---
+        - Changed 'Q_monthly_low' to 'Q_30day_low' and title to '30-Day Minimum'.
+        - Changed grid to 3 rows (num_rows=3) to include 'full_year'.
+        - Updated 'half_year_order' list to include 'full_year'.
+        - Updated 'figsize' to be taller (14 instead of 10).
+        - Updated logic for x-axis labels to only show on the new bottom row (row == 2).
+        - Updated season_title logic to include 'Full Year'.
+        --- END MODIFIED ---
         """
         if not results or not config or 'thresholds' not in results or 'data' not in results:
             logging.warning(f"Cannot plot LNWL aggregation comparison for {scenario}: Missing results.")
             return
 
-        logging.info(f"Plotting LNWL Aggregation Comparison (4-metric, English, Dynamic-Axis) for {scenario}...")
+        logging.info(f"Plotting LNWL Aggregation Comparison (3x4 grid, 30-Day) for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         
-        # --- 1. Define Event and Plot Structure (NOW 4 COLS, ENGLISH) ---
+        # --- 1. Define Event and Plot Structure (NOW 4 COLS, ENGLISH NAMES) ---
+        # *** MODIFIED: event_key and title for 30-Day ***
         event_plot_order = [
             ('Q_daily_low', 'Daily Minimum'),
             ('Q_7day_low', '7-Day Minimum'),
-            ('Q_monthly_low', 'Monthly Minimum'),
-            ('Q_3month_low', '3-Month Minimum') # New 4th column
+            ('Q_30day_low', '30-Day Minimum'),     # <-- MODIFIED
+            ('Q_3month_low', '3-Month Minimum')
         ]
         num_cols = len(event_plot_order) # Should be 4
-        num_rows = 2 # Winter, Summer
-        half_year_order = ['winter', 'summer']
         
-        # --- START KORREKTUR 1 ---
+        # *** MODIFIED: num_rows and half_year_order for Full Year ***
+        num_rows = 3 # Winter, Summer, Full Year
+        half_year_order = ['winter', 'summer', 'full_year']
+        # *** END MODIFIED ***
+        
         fig, axs = plt.subplots(
             num_rows, num_cols, 
-            figsize=(7 * num_cols, 10), # Wider to accommodate 4 plots
+            # *** MODIFIED: figsize height from 10 to 14 ***
+            figsize=(7 * num_cols, 14), 
             squeeze=False, 
             sharey=True,  # All share the Y-axis (Storylines)
-            sharex=False  # WICHTIG: Explizit auf False setzen
+            sharex=False  # Keep dynamic X-axis
         )
-        # --- ENDE KORREKTUR 1 ---
-
         plt.style.use('seaborn-v0_8-whitegrid')
 
         # Y-Axis-Setup (Storylines)
@@ -3153,9 +3158,11 @@ class Visualizer:
         # --- 2. Daten für Plotting vorbereiten ---
         plot_data_list = []
         for gwl in gwls_to_plot:
+            # *** MODIFIED: Add 'full_year' to loop ***
             for half_year in half_year_order:
                 for storyline in storyline_order:
                     for event_key, _ in event_plot_order:
+                        # *** MODIFIED: Use correct full_year key ***
                         event_data = results['data'].get(gwl, {}).get(half_year, {}).get(storyline, {}).get(event_key)
                         if event_data and 'future_return_periods_all_models' in event_data:
                             for model_period in event_data['future_return_periods_all_models']:
@@ -3176,6 +3183,7 @@ class Visualizer:
         df_plot = pd.DataFrame(plot_data_list)
         
         # --- 3. Plotting-Schleife ---
+        # *** MODIFIED: Loop over new half_year_order ***
         for row, half_year in enumerate(half_year_order):
             for col, (event_key, event_title) in enumerate(event_plot_order):
                 ax = axs[row, col]
@@ -3220,50 +3228,47 @@ class Visualizer:
                 # --- Achsen-Formatierung ---
                 ax.set_xscale('log')
                 
-                # --- START KORREKTUR 2: Reihenfolge getauscht und statisches xlim entfernt ---
-
-                # 1. Setze ERST die Ticks und Formatter
+                # Setze Ticks und Formatter
                 ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 150, 200, 500])
                 ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, pos: f'{x:.0f}'))
                 ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
                 
-                # 2. Setze DANN die dynamischen X-Achsen-Limits
+                # Setze dynamische X-Achsen-Limits
                 if all_data_for_lims:
-                    min_val = np.min(all_data_for_lims)
-                    max_val = np.max(all_data_for_lims)
-                    
-                    # Setze dynamische Limits mit Puffer
-                    x_min_limit = max(0.8, min_val * 0.8) # Mindestens 0.8
-                    x_max_limit = max_val * 1.5 # Gib 50% Puffer nach rechts
-                    
-                    # Verhindere, dass die Achse zu klein wird, falls min/max nah beieinander liegen
-                    if (max_val / min_val) < 5:
-                         x_max_limit = max(x_max_limit, min_val * 5)
-
-                    ax.set_xlim(left=x_min_limit, right=x_max_limit) # Erzwingt das Limit
+                    min_val = np.min(all_data_for_lims); max_val = np.max(all_data_for_lims)
+                    x_min_limit = max(0.8, min_val * 0.8); x_max_limit = max_val * 1.5
+                    if (max_val / min_val) < 5: x_max_limit = max(x_max_limit, min_val * 5)
+                    ax.set_xlim(left=x_min_limit, right=x_max_limit)
                 else:
                     ax.set_xlim(left=0.8, right=100) # Fallback
-
-                # 3. Statische Zeile `ax.set_xlim(left=0.8, right=160)` wurde entfernt
-                
-                # --- ENDE KORREKTUR 2 ---
 
                 ax.grid(axis='y', linestyle='none')
                 ax.grid(axis='x', linestyle=':', which='both')
                 
-                # X-Achsen-Label (AUF JEDEM PLOT)
-                ax.set_xlabel('Return Period (Years)', fontsize=11)
-                ax.xaxis.set_tick_params(labelbottom=True) # Erzwinge Ticks
+                # *** MODIFIED: X-axis labels only on the bottom row (row 2) ***
+                if row == num_rows - 1: # num_rows is 3, so row == 2
+                    ax.set_xlabel('Return Period (Years)', fontsize=11)
+                    ax.xaxis.set_tick_params(labelbottom=True)
+                else:
+                    ax.set_xlabel('')
+                    ax.xaxis.set_tick_params(labelbottom=False)
+                # *** END MODIFIED ***
                 
                 # Y-Achsen-Label (nur in der ersten Spalte)
                 if col == 0:
-                    season_title = "Winter\n(Dec - May)" if half_year == 'winter' else "Summer\n(Jun - Nov)"
+                    # *** MODIFIED: Add 'Full Year' title ***
+                    if half_year == 'winter':
+                        season_title = "Winter Half-Year\n(Dec - May)"
+                    elif half_year == 'summer':
+                        season_title = "Summer Half-Year\n(Jun - Nov)"
+                    else: # 'full_year'
+                        season_title = "Full Year\n(Jan - Dec)"
+                    # *** END MODIFIED ***
                     ax.set_ylabel(season_title, fontsize=12, weight='bold', labelpad=15)
                 
                 # Legende (IN JEDEM PLOT)
                 gwl_patches = [mpatches.Patch(color=gwl_colors[gwl_label], label=gwl_label) for gwl_label in gwl_colors]
                 all_handles = gwl_patches + legend_handles
-                # Sortiere Handles, um GWL-Patches zuerst zu haben
                 all_handles.sort(key=lambda x: "Hist." in x.get_label()) 
                 ax.legend(handles=all_handles, loc='upper right', fontsize='small', frameon=True, facecolor='white', framealpha=0.8)
                 
@@ -3273,10 +3278,10 @@ class Visualizer:
                     for j, gwl in enumerate(gwls_to_plot):
                         y_offset = -0.2 + (j * 0.4) # Position für GWL bar
                         gwl_label = f'+{gwl}°C'
+                        # *** MODIFIED: Use correct half_year key ***
                         event_data_gwl = results['data'].get(gwl, {}).get(half_year, {}).get(storyline, {}).get(event_key)
                         if event_data_gwl and 'model_count_X' in event_data_gwl:
                             X, Y = event_data_gwl['model_count_X'], event_data_gwl['model_count_Y']
-                            # Platziere Text rechts auf dem Plot
                             ax.text(0.98, y_base + y_offset, f"n={X}/{Y}", 
                                     transform=ax.get_yaxis_transform(),
                                     horizontalalignment='right', fontsize=7, weight='bold', 
@@ -3284,14 +3289,14 @@ class Visualizer:
                                     bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
 
         # --- 4. Finale Formatierung der Gesamt-Figur ---
-        # Keine zentrale Legende mehr nötig
-        
         fig.suptitle(f"Change in Return Period of Low Navigable Water Level (LNWL < {lnwl_threshold:.0f} m³/s) for {scenario.upper()}",
                     fontsize=16, weight='bold', y=0.99)
         
-        fig.tight_layout(rect=[0.05, 0.05, 0.98, 0.93], h_pad=3.0, w_pad=2.5)
+        # *** MODIFIED: Adjust layout padding for 3 rows ***
+        fig.tight_layout(rect=[0.05, 0.05, 0.98, 0.95], h_pad=3.0, w_pad=2.5)
+        # *** END MODIFIED ***
         
         filename = os.path.join(config.PLOT_DIR, f"storyline_lnwl_aggregation_comparison_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved LNWL aggregation comparison plot (4-metric, English, Dynamic-Axis) to {filename}")
+        logging.info(f"Saved LNWL aggregation comparison plot (3x4 grid, 30-Day, FullYear) to {filename}")

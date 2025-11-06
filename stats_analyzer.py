@@ -279,6 +279,11 @@ class StatsAnalyzer:
         MODIFIED VERSION (v3.6 - Nur Quantile):
         - Verwendet NUR die empirische Quantilmethode (np.quantile), da der GEV-Fit unzuverlässig war.
 
+        --- MODIFIED (Nov 5, 2025) ---
+        - The 'if half_year_filter:' check is now more specific ('in ['winter', 'summer']')
+          to allow 'full_year' or None to pass through and use the full dataset.
+        --- END MODIFIED ---
+
         Parameters:
         -----------
         daily_timeseries : xr.DataArray
@@ -303,8 +308,10 @@ class StatsAnalyzer:
             logging.warning("Cannot calculate EVA thresholds: Daily time series is missing or too short.")
             return {}
 
-        # --- Half-Year Filtering (wie zuvor) ---
-        if half_year_filter:
+        # --- Half-Year Filtering ---
+        # *** MODIFIED LINE HERE ***
+        if half_year_filter and half_year_filter in ['winter', 'summer']:
+        # *** END MODIFIED LINE ***
             months = []
             if half_year_filter == 'winter':
                 months = [12, 1, 2, 3, 4, 5]
@@ -312,8 +319,6 @@ class StatsAnalyzer:
             elif half_year_filter == 'summer':
                 months = [6, 7, 8, 9, 10, 11]
                 logging.info(f"Calculating EVA thresholds for SUMMER half-year (Jun-Nov)...")
-            else:
-                logging.warning(f"Invalid half_year_filter '{half_year_filter}'. Using full year.")
             
             if months:
                 daily_timeseries_filtered = daily_timeseries.where(daily_timeseries.time.dt.month.isin(months), drop=True)
@@ -321,8 +326,11 @@ class StatsAnalyzer:
                     logging.error(f"No data for half-year filter '{half_year_filter}'.")
                     return {}
             else:
+                # This path should not be reached if check is specific
                 daily_timeseries_filtered = daily_timeseries
         else:
+            if half_year_filter == 'full_year':
+                logging.info("Calculating EVA thresholds for FULL YEAR...")
             daily_timeseries_filtered = daily_timeseries
         # --- Ende Half-Year Filtering ---
 
@@ -336,7 +344,8 @@ class StatsAnalyzer:
                 moving_avg_full = daily_timeseries.rolling(time=q, center=True, min_periods=q).mean()
             
             # 2. Filter the resulting moving average series for the half-year
-            if half_year_filter:
+            # *** MODIFIED BLOCK HERE ***
+            if half_year_filter and half_year_filter in ['winter', 'summer']:
                 months = []
                 if half_year_filter == 'winter':
                     months = [12, 1, 2, 3, 4, 5]
@@ -351,6 +360,7 @@ class StatsAnalyzer:
                     moving_avg_filtered = moving_avg_full
             else:
                 moving_avg_filtered = moving_avg_full
+            # *** END MODIFIED BLOCK ***
 
             # 3. Extract annual extremes
             if eva_type == 'low':
@@ -365,24 +375,16 @@ class StatsAnalyzer:
                 continue
 
             # --- START: NUR-QUANTIL-METHODE ---
-            # Der GEV-Fit (try-Block) wurde entfernt. Wir verwenden nur die
-            # empirische Quantilmethode (vorher der 'except'-Block).
-            
-            logging.info(f"Calculating EVA thresholds for {q}Q ({eva_type}, {half_year_filter}) using empirical quantile method.")
+            logging.info(f"Calculating EVA thresholds for {q}Q ({eva_type}, {half_year_filter or 'full_year'}) using empirical quantile method.")
 
             for T in return_periods:
                 if eva_type == 'low':
-                    # Für Niedrigwasser suchen wir das untere Perzentil
-                    # z.B. 10-Jahres-Ereignis (T=10) -> 1/10 = 0.1 Perzentil
                     prob = 1.0 / T
                     quantile_to_find = prob
                 else: # 'high'
-                    # Für Hochwasser suchen wir das obere Perzentil
-                    # z.B. 10-Jahres-Ereignis (T=10) -> 1 - 1/10 = 0.9 Perzentil
                     prob = 1.0 / T
                     quantile_to_find = 1.0 - prob
                 
-                # np.quantile ist robust und liefert den Wert direkt aus den Daten.
                 discharge_val = np.quantile(clean_extremes, quantile_to_find, interpolation='linear')
                 
                 key = f'{q}Q{T}'

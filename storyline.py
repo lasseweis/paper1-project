@@ -2721,41 +2721,57 @@ class StorylineAnalyzer:
     @staticmethod
     def _get_annual_minima_for_metrics(daily_da, half_year_filter):
         """
-        Helper: Calculates annual minima for daily, 7-day, monthly, and 3-month
-        metrics from a daily timeseries for a specific half-year.
+        Helper: Calculates annual minima for daily, 7-day, 30-day (replaces monthly),
+        and 3-month metrics from a daily timeseries for a specific half-year or full-year.
+        
+        --- MODIFIED (Nov 5, 2025) ---
+        1. Changed 'Q_monthly_low' to 'Q_30day_low' using a 30-day rolling mean
+           for consistency with 7-day and 90-day logic.
+        2. Added logic for half_year_filter='full_year' (or None) to skip 
+           monthly filtering and analyze the full year.
+        --- END MODIFIED ---
         """
         if daily_da is None or daily_da.time.size < 365:
             return {}
 
-        months = [12, 1, 2, 3, 4, 5] if half_year_filter == 'winter' else [6, 7, 8, 9, 10, 11]
+        # Define months for filtering, or None for full year
+        if half_year_filter == 'winter':
+            months = [12, 1, 2, 3, 4, 5]
+        elif half_year_filter == 'summer':
+            months = [6, 7, 8, 9, 10, 11]
+        else: # 'full_year' or None
+            months = None
+
+        # Helper function to filter by month if 'months' is specified
+        def filter_by_months(data_array):
+            if months:
+                return data_array.where(data_array.time.dt.month.isin(months), drop=True)
+            return data_array
+
+        if 'year' not in daily_da.coords:
+            daily_da['year'] = daily_da.time.dt.year
         
         # 1. Daily Metric
-        daily_filtered = daily_da.where(daily_da.time.dt.month.isin(months), drop=True)
-        if 'year' not in daily_filtered.coords:
-            daily_filtered['year'] = daily_filtered.time.dt.year
+        daily_filtered = filter_by_months(daily_da)
         q_daily_min = daily_filtered.groupby('year').min('time', skipna=True).dropna(dim='year')
 
         # 2. 7-Day Metric
-        # Rolling must be done on full data to avoid edge effects
         da_7day_mean = daily_da.rolling(time=7, center=True, min_periods=7).mean()
-        # Filter AFTER rolling
-        da_7day_mean_filtered = da_7day_mean.where(da_7day_mean.time.dt.month.isin(months), drop=True)
+        da_7day_mean_filtered = filter_by_months(da_7day_mean)
         if 'year' not in da_7day_mean_filtered.coords:
             da_7day_mean_filtered['year'] = da_7day_mean_filtered.time.dt.year
         q_7day_min = da_7day_mean_filtered.groupby('year').min('time', skipna=True).dropna(dim='year')
 
-        # 3. Monthly Metric
-        monthly_mean = daily_da.resample(time='MS').mean()
-        monthly_filtered = monthly_mean.where(monthly_mean.time.dt.month.isin(months), drop=True)
-        if 'year' not in monthly_filtered.coords:
-            monthly_filtered['year'] = monthly_filtered.time.dt.year
-        # The annual minimum of the MONTHLY mean values
-        q_monthly_min = monthly_filtered.groupby('year').min('time', skipna=True).dropna(dim='year')
+        # 3. 30-Day Metric (replaces Monthly)
+        da_30day_mean = daily_da.rolling(time=30, center=True, min_periods=30).mean()
+        da_30day_mean_filtered = filter_by_months(da_30day_mean)
+        if 'year' not in da_30day_mean_filtered.coords:
+            da_30day_mean_filtered['year'] = da_30day_mean_filtered.time.dt.year
+        q_30day_min = da_30day_mean_filtered.groupby('year').min('time', skipna=True).dropna(dim='year')
         
         # 4. 3-Month Metric (approx. 90 days)
         da_3month_mean = daily_da.rolling(time=90, center=True, min_periods=90).mean()
-        # Filter AFTER rolling
-        da_3month_mean_filtered = da_3month_mean.where(da_3month_mean.time.dt.month.isin(months), drop=True)
+        da_3month_mean_filtered = filter_by_months(da_3month_mean)
         if 'year' not in da_3month_mean_filtered.coords:
             da_3month_mean_filtered['year'] = da_3month_mean_filtered.time.dt.year
         q_3month_min = da_3month_mean_filtered.groupby('year').min('time', skipna=True).dropna(dim='year')
@@ -2763,16 +2779,24 @@ class StorylineAnalyzer:
         return {
             'Q_daily_low': q_daily_min,
             'Q_7day_low': q_7day_min,
-            'Q_monthly_low': q_monthly_min,
-            'Q_3month_low': q_3month_min  # New metric added
+            'Q_30day_low': q_30day_min,   # Key changed from 'Q_monthly_low'
+            'Q_3month_low': q_3month_min
         }
 
     @staticmethod
     def analyze_storyline_lnwl_aggregation_metrics(cmip6_results, historical_discharge_da, config, lnwl_threshold=970.0):
         """
         Analyzes the return period of the LNWL threshold (970 m³/s) for 
-        four different temporal aggregations (daily, 7-day, monthly, 3-month).
+        four different temporal aggregations (daily, 7-day, 30-day, 3-month).
         Uses English names for the output.
+        
+        --- MODIFIED (Nov 5, 2025) ---
+        1. Changed 'Monthly Minimum' to '30-Day Minimum' (using 'Q_30day_low' key).
+        2. Added 'full_year' to the analysis loops (historical and future)
+           to generate data for the new "Full Year" plot row.
+        3. Set 'season_label' to 'DJF' for the 'full_year' case to use the
+           DJF-based storylines for the full-year analysis row.
+        --- END MODIFIED ---
         """
         logging.info(f"Analyzing LNWL Aggregation Metrics (Threshold: {lnwl_threshold} m³/s)...")
         
@@ -2780,19 +2804,22 @@ class StorylineAnalyzer:
             logging.error("Historical discharge data (daily) is missing for LNWL aggregation. Aborting.")
             return None
         
-        results = {'thresholds': {'winter': {}, 'summer': {}}, 'data': {}}
+        # *** MODIFIED: Added 'full_year' to results dict ***
+        results = {'thresholds': {'winter': {}, 'summer': {}, 'full_year': {}}, 'data': {}}
         
         # --- 1. Define the events to analyze (NOW 4 METRICS, ENGLISH NAMES) ---
+        # *** MODIFIED: Changed Q_monthly_low to Q_30day_low ***
         events_to_analyze = [
             ('Q_daily_low', 'Q_daily_low', 'Daily Minimum < LNWL'),
             ('Q_7day_low', 'Q_7day_low', '7-Day Minimum < LNWL'),
-            ('Q_monthly_low', 'Q_monthly_low', 'Monthly Minimum < LNWL'),
+            ('Q_30day_low', 'Q_30day_low', '30-Day Minimum < LNWL'), # <-- MODIFIED
             ('Q_3month_low', 'Q_3month_low', '3-Month Minimum < LNWL'), 
         ]
         
-        # --- 2. Calculate historical return periods PER HALF-YEAR ---
-        logging.info("Calculating historical LNWL return periods for all aggregations...")
-        for half_year in ['winter', 'summer']:
+        # --- 2. Calculate historical return periods PER HALF-YEAR + FULL YEAR ---
+        logging.info("Calculating historical LNWL return periods for all aggregations (Winter, Summer, Full Year)...")
+        # *** MODIFIED: Added 'full_year' to loop ***
+        for half_year in ['winter', 'summer', 'full_year']:
             
             # Calculate annual minima for all 4 metrics
             hist_annual_minima = StorylineAnalyzer._get_annual_minima_for_metrics(
@@ -2818,7 +2845,7 @@ class StorylineAnalyzer:
 
         logging.info(f"  -> Historical LNWL aggregation thresholds stored: {json.dumps(results['thresholds'], indent=2, default=str)}")
 
-        # --- 3. Analyze Future Scenarios (per half-year) ---
+        # --- 3. Analyze Future Scenarios (per half-year + full year) ---
         storyline_classification = cmip6_results.get('storyline_classification_2d')
         model_data_loaded = cmip6_results.get('cmip6_model_data_loaded') # DAILY CMIP6 data
         gwl_years = cmip6_results.get('gwl_threshold_years')
@@ -2829,10 +2856,20 @@ class StorylineAnalyzer:
             return None
 
         for gwl in config.GLOBAL_WARMING_LEVELS:
-            results['data'][gwl] = {'winter': {}, 'summer': {}}
+            # *** MODIFIED: Added 'full_year' to results dict ***
+            results['data'][gwl] = {'winter': {}, 'summer': {}, 'full_year': {}}
             
-            for half_year in ['winter', 'summer']:
-                season_label = 'DJF' if half_year == 'winter' else 'JJA'
+            # *** MODIFIED: Added 'full_year' to loop ***
+            for half_year in ['winter', 'summer', 'full_year']:
+                
+                # *** MODIFIED: Handle 'full_year' by using DJF storylines ***
+                # We use DJF storylines as the default for the 'full_year' analysis row
+                if half_year == 'summer':
+                    season_label = 'JJA'
+                else: 
+                    season_label = 'DJF' # Use DJF for 'winter' and 'full_year'
+                # *** END MODIFIED ***
+
                 all_storyline_keys_for_gwl = {k: v for k, v in storyline_classification.get(gwl, {}).items() if k.startswith(season_label)}
                 
                 for storyline_key, model_list in all_storyline_keys_for_gwl.items():
@@ -2862,6 +2899,7 @@ class StorylineAnalyzer:
                                 continue
 
                             # Calculate annual minima for this 30-year window
+                            # *** MODIFIED: Pass correct half_year filter ***
                             future_annual_minima = StorylineAnalyzer._get_annual_minima_for_metrics(
                                 ts_slice_daily, half_year
                             )

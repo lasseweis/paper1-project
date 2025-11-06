@@ -2533,12 +2533,20 @@ class Visualizer:
         - sharex=False: X-Achsen werden spaltenweise synchronisiert (alle 1Q10-Plots teilen sich eine Achse, etc.)
         - Verwendet eine Zwei-Durchlauf-Logik (ähnlich wie 'plot_storyline_lnwl_aggregation_comparison'),
           um zuerst die "idealen" Zoom-Limits für jede Spalte zu finden und sie dann anzuwenden.
+          
+        --- MODIFIKATION (User-Wunsch, 06.11.2025) v2 ---
+        - Spalten erweitert auf 1Q, 7Q, 30Q (jeweils T=10, 50, 100).
+        - Spaltenreihenfolge angepasst.
+        
+        --- MODIFIKATION (User-Wunsch, 06.11.2025) v3 ---
+        - Titel-Korrektur: "30-Day" wieder zu "30Q" geändert.
+        --- ENDE MODIFIKATION ---
         """
         if not results or not config or 'thresholds' not in results or 'data' not in results:
             logging.warning(f"Cannot plot return period change by event for {scenario}: Missing results or thresholds.")
             return
 
-        logging.info(f"Plotting POOLED GEV return period (4-row, LNWL removed, SPALTEN-ZOOM) for {scenario}...")
+        logging.info(f"Plotting POOLED GEV return period (4-row, 9-col, LNWL removed, SPALTEN-ZOOM) for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
@@ -2551,11 +2559,23 @@ class Visualizer:
         low_flow_events = sorted([k for k in unique_event_keys if results['thresholds']['winter'].get(k, {}).get('type') == 'low' or results['thresholds']['summer'].get(k, {}).get('type') == 'low'])
         high_flow_events = sorted([k for k in unique_event_keys if results['thresholds']['winter'].get(k, {}).get('type') == 'high' or results['thresholds']['summer'].get(k, {}).get('type') == 'high'])
         
-        event_plot_order_keys_low = ['1Q10_low', '7Q10_low', '7Q50_low', '7Q100_low'] 
-        event_plot_order_keys_high = ['1Q10_high', '7Q10_high', '7Q50_high', '7Q100_high']
+        # --- MODIFIZIERTER BLOCK: Spaltenreihenfolge ---
+        event_plot_order_keys_low = [
+            '1Q10_low', '1Q50_low', '1Q100_low', 
+            '7Q10_low', '7Q50_low', '7Q100_low', 
+            '30Q10_low', '30Q50_low', '30Q100_low'
+        ] 
+        event_plot_order_keys_high = [
+            '1Q10_high', '1Q50_high', '1Q100_high', 
+            '7Q10_high', '7Q50_high', '7Q100_high', 
+            '30Q10_high', '30Q50_high', '30Q100_high'
+        ]
+        # --- ENDE MODIFIZIERTER BLOCK ---
 
         def get_ordered_events(base_list, available_keys):
             ordered_list = [key for key in base_list if key in available_keys]
+            # Füge verbleibende Keys hinzu (außer LNWL), die nicht in der Basenliste waren
+            ordered_list.extend([k for k in available_keys if k not in base_list and k != 'LNWL'])
             return ordered_list
 
         low_flow_events_ordered = get_ordered_events(event_plot_order_keys_low, low_flow_events)
@@ -2571,10 +2591,10 @@ class Visualizer:
             logging.warning(f"No valid EVA events found to plot for {scenario}.")
             return
 
-        # --- MODIFIKATION: sharex=False ---
+        # --- MODIFIKATION: sharex=False, figsize angepasst ---
         fig, axs = plt.subplots(
             num_rows, num_cols, 
-            figsize=(6 * num_cols, 22), 
+            figsize=(5.5 * num_cols, 22), # 5.5 Zoll pro Spalte
             squeeze=False, 
             sharey=True, # Y-Achse (Storylines) wird geteilt
             sharex=False  # X-Achsen werden manuell pro Spalte gesteuert
@@ -2600,9 +2620,6 @@ class Visualizer:
         gwl_markers = {f'+{gwls_to_plot[0]}°C': 'o', f'+{gwls_to_plot[1]}°C': 'X'}
         
         # --- 2. Prepare Data for Plotting (v4.0) ---
-        # --- MODIFIKATION: Maximales Limit für Zoom entfernt (wird dynamisch) ---
-        # max_return_period_for_plot = 150 
-        
         plot_data_list = []
         for gwl in gwls_to_plot:
             gwl_label = f'+{gwl}°C'
@@ -2629,8 +2646,6 @@ class Visualizer:
             return
 
         df_plot = pd.DataFrame(plot_data_list)
-        # --- MODIFIKATION: Clipping entfernt ---
-        # df_plot_clipped = df_plot[df_plot['return_period'] <= max_return_period_for_plot].copy()
         df_plot_clipped = df_plot.copy() # Wir verwenden jetzt alle Daten
         
         # --- MODIFIKATION: Speicher für die X-Achsen-Limits pro Spalte ---
@@ -2663,6 +2678,9 @@ class Visualizer:
                     
                     title = f"{event_name}" 
                     if hist_val_q and "(<" not in event_name and "(>" not in event_name and "m³/s" not in event_name:
+                        # --- START: MODIFIKATION (User-Wunsch 06.11.2025) ---
+                        # title = title.replace("30Q", "30-Day ") # DIESE ZEILE WURDE ENTFERNT
+                        # --- ENDE MODIFIKATION ---
                         title += f"\n(Threshold: {op} {hist_val_q:.0f} m³/s)"
                     ax.set_title(title, fontsize=11, weight='bold')
 
@@ -2721,10 +2739,6 @@ class Visualizer:
                         column_x_limits[col].append((0.8, 100)) # Fallback
                     # --- ENDE MODIFIKATION ---
                     
-                    # --- MODIFIKATION: Statisches set_xlim und set_xticks entfernt ---
-                    # ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 150])
-                    # ax.set_xlim(left=0.8, right=160) 
-                    
                     ax.grid(axis='y', linestyle='none')
                     ax.grid(axis='x', linestyle=':', which='both')
                     
@@ -2762,10 +2776,10 @@ class Visualizer:
                                         bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
         
         # --- MODIFIKATION: Unbenutzte Achsen ausschalten (angepasste Logik) ---
-        for r in [0, 1]:
+        for r in [0, 1]: # Low-Flow Zeilen
             for c in range(num_cols_low, num_cols):
                 axs[r, c].axis('off')
-        for r in [2, 3]:
+        for r in [2, 3]: # High-Flow Zeilen
             for c in range(num_cols_high, num_cols):
                 axs[r, c].axis('off')
         
@@ -2785,8 +2799,11 @@ class Visualizer:
                         axs[row, col].set_xticks([1, 2, 5, 10, 20, 50])
                     elif final_max_lim <= 200:
                         axs[row, col].set_xticks([1, 2, 5, 10, 20, 50, 100, 150, 200])
+                    elif final_max_lim <= 1000:
+                        axs[row, col].set_xticks([1, 5, 10, 50, 100, 200, 500, 1000])
                     else:
-                        axs[row, col].set_xticks([1, 5, 10, 50, 100, 200, 500, 1000]) # Fallback für große Werte
+                        # Fallback für sehr große Werte
+                        axs[row, col].set_xticks([1, 10, 100, 1000, 10000]) 
         # --- ENDE MODIFIKATION ---
 
 
@@ -2803,8 +2820,24 @@ class Visualizer:
         fig.suptitle(f"Change in Return Period of Discharge Events for {scenario.upper()} (Half-Year Analysis, Pooled GEV)",
                     fontsize=16, weight='bold', y=0.99)
         
-        fig.text(0.5, 0.94, 'Low-Flow Events', ha='center', va='center', fontsize=14, weight='bold')
-        fig.text(0.5, 0.505, 'High-Flow Events', ha='center', va='center', fontsize=14, weight='bold')
+        # --- MODIFIKATION: Titelpositionen angepasst an 9 Spalten ---
+        try:
+            # Positioniere 'Low-Flow' über den ersten 4-5 Spalten
+            ax_pos_low_start = axs[0, 0].get_position()
+            ax_pos_low_end = axs[0, num_cols_low - 1].get_position()
+            mid_pos_low = (ax_pos_low_start.x0 + ax_pos_low_end.x1) / 2
+            fig.text(mid_pos_low, 0.94, 'Low-Flow Events', ha='center', va='center', fontsize=14, weight='bold')
+
+            # Positioniere 'High-Flow' über den ersten 4-5 Spalten
+            ax_pos_high_start = axs[2, 0].get_position()
+            ax_pos_high_end = axs[2, num_cols_high - 1].get_position()
+            mid_pos_high = (ax_pos_high_start.x0 + ax_pos_high_end.x1) / 2
+            fig.text(mid_pos_high, 0.505, 'High-Flow Events', ha='center', va='center', fontsize=14, weight='bold')
+        except Exception:
+             # Fallback, falls die Achsen nicht existieren
+             fig.text(0.5, 0.94, 'Low-Flow Events', ha='center', va='center', fontsize=14, weight='bold')
+             fig.text(0.5, 0.505, 'High-Flow Events', ha='center', va='center', fontsize=14, weight='bold')
+        # --- ENDE MODIFIKATION ---
         
         fig.tight_layout(rect=[0.05, 0.05, 0.98, 0.92], h_pad=8.0, w_pad=2.0)
         

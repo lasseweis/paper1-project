@@ -181,20 +181,29 @@ class StorylineAnalyzer:
                 gwl_years[gwl] = int(exceed_years.min().item())
         return gwl_years
 
-    def _extract_gwl_means(self, index_timeseries, gwl_years_model, gwl):
+    # HILFSFUNKTION (angepasste Version von _extract_gwl_means)
+    def _extract_gwl_means_v2(self, index_timeseries, gwl_years_model, gwl):
         """Extracts the N-year mean of a time series centered around a GWL threshold year."""
         threshold_year = gwl_years_model.get(gwl)
         if threshold_year is None or index_timeseries is None:
             return xr.DataArray(np.nan)
 
+        # Wähle die korrekte Zeitdimension
+        time_dim = 'season_year'
+        if time_dim not in index_timeseries.dims:
+            if 'year' in index_timeseries.dims:
+                time_dim = 'year'
+            else:
+                return xr.DataArray(np.nan) # Kann nicht slicen
+
         window = self.config.GWL_YEARS_WINDOW
         start_year, end_year = threshold_year - window // 2, threshold_year + (window - 1) // 2
         
-        gwl_slice = index_timeseries.sel(season_year=slice(start_year, end_year))
-        if gwl_slice.season_year.size < window / 2:
-            logging.warning(f"Only {gwl_slice.season_year.size}/{window} data points in window for GWL {gwl}.")
+        gwl_slice = index_timeseries.sel({time_dim: slice(start_year, end_year)})
+        if gwl_slice.sizes[time_dim] < window / 2:
+            logging.warning(f"Only {gwl_slice.sizes[time_dim]}/{window} data points in window for GWL {gwl}.")
 
-        return gwl_slice.mean(dim='season_year', skipna=True).compute()
+        return gwl_slice.mean(dim=time_dim, skipna=True).compute()
 
     def analyze_cmip6_changes_at_gwl(self, models_to_run=None, scenario_to_process=None):
         """The main workflow for analyzing CMIP6 data at specific GWLs."""
@@ -326,17 +335,33 @@ class StorylineAnalyzer:
                 da_7day_mean_winter = da_7day_mean.where(da_7day_mean.month.isin(winter_months), drop=True)
                 da_7day_mean_summer = da_7day_mean.where(da_7day_mean.month.isin(summer_months), drop=True)
 
+                # --- START: MODIFIKATION (User-Wunsch 06.11.2025) ---
+                # Berechne 30-Tages-Mittel
+                da_30day_mean = da_daily.rolling(time=30, center=True, min_periods=1).mean()
+                da_30day_mean_winter = da_30day_mean.where(da_30day_mean.month.isin(winter_months), drop=True)
+                da_30day_mean_summer = da_30day_mean.where(da_30day_mean.month.isin(summer_months), drop=True)
+                # --- ENDE MODIFIKATION ---
+
                 # Speichere halbjährliche Extremwert-Zeitreihen
                 # Winter
                 metric_timeseries[key]['1Q_low_winter'] = da_daily_winter.groupby('year').min('time')
                 metric_timeseries[key]['1Q_high_winter'] = da_daily_winter.groupby('year').max('time')
                 metric_timeseries[key]['7Q_low_winter'] = da_7day_mean_winter.groupby('year').min('time')
                 metric_timeseries[key]['7Q_high_winter'] = da_7day_mean_winter.groupby('year').max('time')
+                # --- START: MODIFIKATION (User-Wunsch 06.11.2025) ---
+                metric_timeseries[key]['30Q_low_winter'] = da_30day_mean_winter.groupby('year').min('time')
+                metric_timeseries[key]['30Q_high_winter'] = da_30day_mean_winter.groupby('year').max('time')
+                # --- ENDE MODIFIKATION ---
+                
                 # Sommer
                 metric_timeseries[key]['1Q_low_summer'] = da_daily_summer.groupby('year').min('time')
                 metric_timeseries[key]['1Q_high_summer'] = da_daily_summer.groupby('year').max('time')
                 metric_timeseries[key]['7Q_low_summer'] = da_7day_mean_summer.groupby('year').min('time')
                 metric_timeseries[key]['7Q_high_summer'] = da_7day_mean_summer.groupby('year').max('time')
+                # --- START: MODIFIKATION (User-Wunsch 06.11.2025) ---
+                metric_timeseries[key]['30Q_low_summer'] = da_30day_mean_summer.groupby('year').min('time')
+                metric_timeseries[key]['30Q_high_summer'] = da_30day_mean_summer.groupby('year').max('time')
+                # --- ENDE MODIFIKATION ---
 
                 # --- B) Bestehender Code für MONATLICHE/SAISONALE Mittel (für andere Plots) ---
                 # Resample TÄGLICHE Daten zu MONATLICHEN
@@ -491,30 +516,6 @@ class StorylineAnalyzer:
             'model_run_status': model_run_status,
             'storyline_classification_2d': storyline_classification_2d
         }
-
-    # HILFSFUNKTION (angepasste Version von _extract_gwl_means)
-    def _extract_gwl_means_v2(self, index_timeseries, gwl_years_model, gwl):
-        """Extracts the N-year mean of a time series centered around a GWL threshold year."""
-        threshold_year = gwl_years_model.get(gwl)
-        if threshold_year is None or index_timeseries is None:
-            return xr.DataArray(np.nan)
-
-        # Wähle die korrekte Zeitdimension
-        time_dim = 'season_year'
-        if time_dim not in index_timeseries.dims:
-            if 'year' in index_timeseries.dims:
-                time_dim = 'year'
-            else:
-                return xr.DataArray(np.nan) # Kann nicht slicen
-
-        window = self.config.GWL_YEARS_WINDOW
-        start_year, end_year = threshold_year - window // 2, threshold_year + (window - 1) // 2
-        
-        gwl_slice = index_timeseries.sel({time_dim: slice(start_year, end_year)})
-        if gwl_slice.sizes[time_dim] < window / 2:
-            logging.warning(f"Only {gwl_slice.sizes[time_dim]}/{window} data points in window for GWL {gwl}.")
-
-        return gwl_slice.mean(dim=time_dim, skipna=True).compute()
 
     @staticmethod
     def calculate_storyline_impacts(cmip6_results):
@@ -2089,6 +2090,10 @@ class StorylineAnalyzer:
         4. Berechnet die Wahrscheinlichkeit (CDF) des historischen Schwellenwerts in dieser
            neuen, zukünftigen Verteilung.
         5. Leitet daraus die neue, robuste Jährlichkeit (T = 1/P) für die Storyline ab.
+           
+        --- MODIFIKATION (User-Wunsch, 06.11.2025) ---
+        - EVA-Events erweitert auf 1Q, 7Q, 30Q und T=10, 50, 100.
+        --- ENDE MODIFIKATION ---
         """
         logging.info("Analyzing storyline discharge... mit GEPPOOLTER GEV-Logik (v4.3)...")
         
@@ -2099,23 +2104,40 @@ class StorylineAnalyzer:
         results = {'thresholds': {'winter': {}, 'summer': {}}, 'data': {}}
         
         # --- 1. Definiere die zu analysierenden EVA-Ereignisse ---
+        # --- MODIFIZIERTER BLOCK ---
         eva_events_to_analyze = [
+            # 1Q Events
             ('1Q10_low', '1Q_low', 1, 10, 'low', 'Low-Flow (1Q10)'),
+            ('1Q50_low', '1Q_low', 1, 50, 'low', 'Low-Flow (1Q50)'),
+            ('1Q100_low', '1Q_low', 1, 100, 'low', 'Low-Flow (1Q100)'),
+            ('1Q10_high', '1Q_high', 1, 10, 'high', 'High-Flow (1Q10)'),
+            ('1Q50_high', '1Q_high', 1, 50, 'high', 'High-Flow (1Q50)'),
+            ('1Q100_high', '1Q_high', 1, 100, 'high', 'High-Flow (1Q100)'),
+            
+            # 7Q Events
             ('7Q10_low', '7Q_low', 7, 10, 'low', 'Low-Flow (7Q10)'),
             ('7Q50_low', '7Q_low', 7, 50, 'low', 'Low-Flow (7Q50)'),
             ('7Q100_low', '7Q_low', 7, 100, 'low', 'Low-Flow (7Q100)'),
-            ('1Q10_high', '1Q_high', 1, 10, 'high', 'High-Flow (1Q10)'),
             ('7Q10_high', '7Q_high', 7, 10, 'high', 'High-Flow (7Q10)'),
             ('7Q50_high', '7Q_high', 7, 50, 'high', 'High-Flow (7Q50)'),
             ('7Q100_high', '7Q_high', 7, 100, 'high', 'High-Flow (7Q100)'),
+            
+            # 30Q Events
+            ('30Q10_low', '30Q_low', 30, 10, 'low', 'Low-Flow (30Q10)'),
+            ('30Q50_low', '30Q_low', 30, 50, 'low', 'Low-Flow (30Q50)'),
+            ('30Q100_low', '30Q_low', 30, 100, 'low', 'Low-Flow (30Q100)'),
+            ('30Q10_high', '30Q_high', 30, 10, 'high', 'High-Flow (30Q10)'),
+            ('30Q50_high', '30Q_high', 30, 50, 'high', 'High-Flow (30Q50)'),
+            ('30Q100_high', '30Q_high', 30, 100, 'high', 'High-Flow (30Q100)'),
         ]
         
         lnwl_fixed_threshold = discharge_thresholds.get(f'winter_lowflow_lnwl')
         if lnwl_fixed_threshold is not None:
              eva_events_to_analyze.append(('LNWL', '1Q_low', 1, None, 'low', f'Low Navigable (LNWL) (<{lnwl_fixed_threshold:.0f} m³/s)'))
         
-        q_days_needed = sorted(list(set([e[2] for e in eva_events_to_analyze])))
-        return_periods_needed = sorted(list(set([e[3] for e in eva_events_to_analyze if e[3] is not None])))
+        q_days_needed = sorted(list(set([e[2] for e in eva_events_to_analyze]))) # Wird zu [1, 7, 30]
+        return_periods_needed = sorted(list(set([e[3] for e in eva_events_to_analyze if e[3] is not None]))) # Wird zu [10, 50, 100]
+        # --- ENDE MODIFIZIERTER BLOCK ---
 
         # --- 2. Berechne historische Schwellenwerte (mit GEV) ---
         logging.info("Calculating historical EVA thresholds and return periods for each half-year (using GEV)...")
@@ -2212,12 +2234,14 @@ class StorylineAnalyzer:
                             start_year = threshold_year - window // 2
                             end_year = threshold_year + (window - 1) // 2
                             
+                            # --- MODIFIKATION: Verwende 'year' als Dimension ---
                             ts_slice = discharge_ts_half_year.sel(year=slice(start_year, end_year))
                             ts_slice_clean = ts_slice.dropna(dim='year')
                             
                             if ts_slice_clean.year.size > 0:
                                 pooled_model_extremes.extend(ts_slice_clean.values)
                                 X_valid_models += 1
+                            # --- ENDE MODIFIKATION ---
                         
                         # 2. Gepooolte GEV-Analyse
                         future_return_period_mean = np.inf

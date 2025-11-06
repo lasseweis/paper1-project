@@ -2540,13 +2540,19 @@ class Visualizer:
         
         --- MODIFIKATION (User-Wunsch, 06.11.2025) v3 ---
         - Titel-Korrektur: "30-Day" wieder zu "30Q" geändert.
+
+        --- MODIFIKATION (User-Wunsch, 06.11.2025) v4 ---
+        - Logik für X-Achsen-Synchronisierung angepasst:
+          - Zeile 1 (Low-Flow Winter) und Zeile 2 (Low-Flow Summer) teilen sich die X-Achsen pro Spalte.
+          - Zeile 3 (High-Flow Winter) und Zeile 4 (High-Flow Summer) teilen sich die X-Achsen pro Spalte.
+          - Low-Flow und High-Flow Spalten sind voneinander unabhängig.
         --- ENDE MODIFIKATION ---
         """
         if not results or not config or 'thresholds' not in results or 'data' not in results:
             logging.warning(f"Cannot plot return period change by event for {scenario}: Missing results or thresholds.")
             return
 
-        logging.info(f"Plotting POOLED GEV return period (4-row, 9-col, LNWL removed, SPALTEN-ZOOM) for {scenario}...")
+        logging.info(f"Plotting POOLED GEV return period (4-row, 9-col, LNWL removed, SPALTEN-ZOOM v4) for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
@@ -2559,7 +2565,6 @@ class Visualizer:
         low_flow_events = sorted([k for k in unique_event_keys if results['thresholds']['winter'].get(k, {}).get('type') == 'low' or results['thresholds']['summer'].get(k, {}).get('type') == 'low'])
         high_flow_events = sorted([k for k in unique_event_keys if results['thresholds']['winter'].get(k, {}).get('type') == 'high' or results['thresholds']['summer'].get(k, {}).get('type') == 'high'])
         
-        # --- MODIFIZIERTER BLOCK: Spaltenreihenfolge ---
         event_plot_order_keys_low = [
             '1Q10_low', '1Q50_low', '1Q100_low', 
             '7Q10_low', '7Q50_low', '7Q100_low', 
@@ -2570,11 +2575,9 @@ class Visualizer:
             '7Q10_high', '7Q50_high', '7Q100_high', 
             '30Q10_high', '30Q50_high', '30Q100_high'
         ]
-        # --- ENDE MODIFIZIERTER BLOCK ---
 
         def get_ordered_events(base_list, available_keys):
             ordered_list = [key for key in base_list if key in available_keys]
-            # Füge verbleibende Keys hinzu (außer LNWL), die nicht in der Basenliste waren
             ordered_list.extend([k for k in available_keys if k not in base_list and k != 'LNWL'])
             return ordered_list
 
@@ -2591,16 +2594,14 @@ class Visualizer:
             logging.warning(f"No valid EVA events found to plot for {scenario}.")
             return
 
-        # --- MODIFIKATION: sharex=False, figsize angepasst ---
         fig, axs = plt.subplots(
             num_rows, num_cols, 
-            figsize=(5.5 * num_cols, 22), # 5.5 Zoll pro Spalte
+            figsize=(5.5 * num_cols, 22),
             squeeze=False, 
             sharey=True, # Y-Achse (Storylines) wird geteilt
-            sharex=False  # X-Achsen werden manuell pro Spalte gesteuert
+            sharex=False  # X-Achsen werden manuell pro Spalte (und pro Block) gesteuert
         )
         plt.style.use('seaborn-v0_8-whitegrid')
-        # --- ENDE MODIFIKATION ---
 
         # Y-Axis setup for Storylines
         storyline_order = [
@@ -2646,26 +2647,27 @@ class Visualizer:
             return
 
         df_plot = pd.DataFrame(plot_data_list)
-        df_plot_clipped = df_plot.copy() # Wir verwenden jetzt alle Daten
+        df_plot_clipped = df_plot.copy()
         
-        # --- MODIFIKATION: Speicher für die X-Achsen-Limits pro Spalte ---
-        column_x_limits = {c: [] for c in range(num_cols)}
+        # --- MODIFIKATION v4: Getrennte Speicher für X-Achsen-Limits ---
+        column_x_limits_lowflow = {c: [] for c in range(num_cols)}
+        column_x_limits_highflow = {c: [] for c in range(num_cols)}
+        # --- ENDE MODIFIKATION v4 ---
 
         # --- 3. Plotting Loop (Reorganized) - PASS 1 ---
-        
         plot_blocks = [
-            {'title': 'Low-Flow Events', 'events': low_flow_events_ordered, 'base_row': 0},
-            {'title': 'High-Flow Events', 'events': high_flow_events_ordered, 'base_row': 2}
+            {'title': 'Low-Flow Events', 'events': low_flow_events_ordered, 'base_row': 0, 'limit_dict': column_x_limits_lowflow},
+            {'title': 'High-Flow Events', 'events': high_flow_events_ordered, 'base_row': 2, 'limit_dict': column_x_limits_highflow}
         ]
         
         for block in plot_blocks:
             base_row = block['base_row']
             event_list = block['events']
+            limit_dict = block['limit_dict'] # <-- MODIFIKATION v4
             
             for row_offset, half_year in enumerate(['winter', 'summer']):
                 row = base_row + row_offset
                 
-                # --- MODIFIKATION: Verwende enumerate(event_list) für den Spaltenindex ---
                 for col, event_key in enumerate(event_list):
                     ax = axs[row, col]
                     ax.set_ylim(y_limits)
@@ -2678,15 +2680,11 @@ class Visualizer:
                     
                     title = f"{event_name}" 
                     if hist_val_q and "(<" not in event_name and "(>" not in event_name and "m³/s" not in event_name:
-                        # --- START: MODIFIKATION (User-Wunsch 06.11.2025) ---
-                        # title = title.replace("30Q", "30-Day ") # DIESE ZEILE WURDE ENTFERNT
-                        # --- ENDE MODIFIKATION ---
                         title += f"\n(Threshold: {op} {hist_val_q:.0f} m³/s)"
                     ax.set_title(title, fontsize=11, weight='bold')
 
                     data_subset = df_plot_clipped[(df_plot_clipped['half_year'] == half_year) & (df_plot_clipped['event'] == event_key)]
                     
-                    # --- MODIFIKATION: Liste zum Sammeln der Daten für die Achsen-Limits ---
                     all_data_for_lims = []
 
                     if not data_subset.empty:
@@ -2703,7 +2701,6 @@ class Visualizer:
                                 linewidth=0.5,
                                 zorder=10
                             )
-                        # --- MODIFIKATION: Daten für Limits sammeln ---
                         all_data_for_lims.extend(data_subset['return_period'].dropna().values)
                     
                     else:
@@ -2713,7 +2710,6 @@ class Visualizer:
                     hist_period = threshold_data.get('hist_return_period')
                     if hist_period is not None and np.isfinite(hist_period):
                         ax.axvline(x=hist_period, color='skyblue', linestyle='--', linewidth=3, zorder=5)
-                        # --- MODIFIKATION: Daten für Limits sammeln ---
                         all_data_for_lims.append(hist_period)
 
                     # --- Axis Formatting (PASS 1) ---
@@ -2721,32 +2717,26 @@ class Visualizer:
                     ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
                     ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
                     
-                    # --- MODIFIKATION: Dynamische X-Limits berechnen und speichern ---
+                    # --- MODIFIKATION v4: Dynamische X-Limits berechnen und im korrekten Diktat speichern ---
                     if all_data_for_lims:
                         min_val = np.min(all_data_for_lims)
                         max_val = np.max(all_data_for_lims)
-                        
-                        # Definiere einen "zoomed" Bereich
                         x_min_limit = max(0.8, min_val * 0.8) 
                         x_max_limit = max_val * 1.5          
-                        
                         if (max_val / min_val) < 5: 
                             x_max_limit = max(x_max_limit, min_val * 5)
                         
-                        # Speichere die berechneten Limits für diese Spalte
-                        column_x_limits[col].append((x_min_limit, x_max_limit))
+                        limit_dict[col].append((x_min_limit, x_max_limit)) # <-- MODIFIKATION v4
                     else:
-                        column_x_limits[col].append((0.8, 100)) # Fallback
-                    # --- ENDE MODIFIKATION ---
+                        limit_dict[col].append((0.8, 100)) # Fallback
+                    # --- ENDE MODIFIKATION v4 ---
                     
                     ax.grid(axis='y', linestyle='none')
                     ax.grid(axis='x', linestyle=':', which='both')
                     
-                    # --- MODIFIKATION: X-Achsen-Beschriftung für alle Plots ---
                     ax.set_xlabel('Return Period (Years)', fontsize=11)
                     ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, pos: f'{x:.0f}'))
                     ax.tick_params(axis='x', labelbottom=True)
-                    # --- ENDE MODIFIKATION ---
                     
                     ax.set_yticks(y_ticks)
                     if col == 0: 
@@ -2759,7 +2749,6 @@ class Visualizer:
 
                     if ax.get_legend() is not None: ax.get_legend().remove()
                     
-                    # n=X/Y Annotationen (wie zuvor)
                     for i, storyline in enumerate(storyline_order):
                         y_base = y_ticks[i]
                         for j, gwl in enumerate(gwls_to_plot):
@@ -2775,7 +2764,7 @@ class Visualizer:
                                         color=gwl_colors[gwl_label],
                                         bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
         
-        # --- MODIFIKATION: Unbenutzte Achsen ausschalten (angepasste Logik) ---
+        # --- Unbenutzte Achsen ausschalten (angepasste Logik) ---
         for r in [0, 1]: # Low-Flow Zeilen
             for c in range(num_cols_low, num_cols):
                 axs[r, c].axis('off')
@@ -2783,28 +2772,49 @@ class Visualizer:
             for c in range(num_cols_high, num_cols):
                 axs[r, c].axis('off')
         
-        # --- MODIFIKATION: Zweiter Durchlauf (PASS 2) - Anwenden der X-Limits ---
-        logging.info("Applying shared column X-limits for return period plot...")
-        for col, limits_list in column_x_limits.items():
+        # --- MODIFIKATION v4: Zweiter Durchlauf (PASS 2) - Anwenden der X-Limits (GETRENNT) ---
+        logging.info("Applying shared column X-limits (Low-Flow and High-Flow separately)...")
+        
+        # 1. Low-Flow Achsen setzen (Zeile 0 und 1)
+        for col, limits_list in column_x_limits_lowflow.items():
             if limits_list: 
-                # Finde den weitesten Bereich, der für diese Spalte benötigt wird
-                final_min_lim = min(l[0] for l in limits_list)
-                final_max_lim = max(l[1] for l in limits_list)
+                final_min_lim_low = min(l[0] for l in limits_list)
+                final_max_lim_low = max(l[1] for l in limits_list)
                 
-                # Wende dieses Limit auf alle Zeilen in dieser Spalte an
-                for row in range(num_rows):
-                    axs[row, col].set_xlim(left=final_min_lim, right=final_max_lim)
-                    # Setze die Ticks basierend auf dem finalen Limit
-                    if final_max_lim <= 50:
-                        axs[row, col].set_xticks([1, 2, 5, 10, 20, 50])
-                    elif final_max_lim <= 200:
-                        axs[row, col].set_xticks([1, 2, 5, 10, 20, 50, 100, 150, 200])
-                    elif final_max_lim <= 1000:
-                        axs[row, col].set_xticks([1, 5, 10, 50, 100, 200, 500, 1000])
-                    else:
-                        # Fallback für sehr große Werte
-                        axs[row, col].set_xticks([1, 10, 100, 1000, 10000]) 
-        # --- ENDE MODIFIKATION ---
+                # Wende auf Zeile 0 und 1 an
+                for row in [0, 1]:
+                    if col < axs.shape[1]: # Sicherstellen, dass die Spalte existiert
+                        axs[row, col].set_xlim(left=final_min_lim_low, right=final_max_lim_low)
+                        # Setze die Ticks basierend auf dem finalen Limit
+                        if final_max_lim_low <= 50:
+                            axs[row, col].set_xticks([1, 2, 5, 10, 20, 50])
+                        elif final_max_lim_low <= 200:
+                            axs[row, col].set_xticks([1, 2, 5, 10, 20, 50, 100, 150, 200])
+                        elif final_max_lim_low <= 1000:
+                            axs[row, col].set_xticks([1, 5, 10, 50, 100, 200, 500, 1000])
+                        else:
+                            axs[row, col].set_xticks([1, 10, 100, 1000, 10000]) 
+
+        # 2. High-Flow Achsen setzen (Zeile 2 und 3)
+        for col, limits_list in column_x_limits_highflow.items():
+            if limits_list: 
+                final_min_lim_high = min(l[0] for l in limits_list)
+                final_max_lim_high = max(l[1] for l in limits_list)
+                
+                # Wende auf Zeile 2 und 3 an
+                for row in [2, 3]:
+                     if col < axs.shape[1]: # Sicherstellen, dass die Spalte existiert
+                        axs[row, col].set_xlim(left=final_min_lim_high, right=final_max_lim_high)
+                        # Setze die Ticks basierend auf dem finalen Limit
+                        if final_max_lim_high <= 50:
+                            axs[row, col].set_xticks([1, 2, 5, 10, 20, 50])
+                        elif final_max_lim_high <= 200:
+                            axs[row, col].set_xticks([1, 2, 5, 10, 20, 50, 100, 150, 200])
+                        elif final_max_lim_high <= 1000:
+                            axs[row, col].set_xticks([1, 5, 10, 50, 100, 200, 500, 1000])
+                        else:
+                            axs[row, col].set_xticks([1, 10, 100, 1000, 10000]) 
+        # --- ENDE MODIFIKATION v4 ---
 
 
         # --- 4. Final Figure Formatting ---
@@ -2820,31 +2830,26 @@ class Visualizer:
         fig.suptitle(f"Change in Return Period of Discharge Events for {scenario.upper()} (Half-Year Analysis, Pooled GEV)",
                     fontsize=16, weight='bold', y=0.99)
         
-        # --- MODIFIKATION: Titelpositionen angepasst an 9 Spalten ---
         try:
-            # Positioniere 'Low-Flow' über den ersten 4-5 Spalten
             ax_pos_low_start = axs[0, 0].get_position()
             ax_pos_low_end = axs[0, num_cols_low - 1].get_position()
             mid_pos_low = (ax_pos_low_start.x0 + ax_pos_low_end.x1) / 2
             fig.text(mid_pos_low, 0.94, 'Low-Flow Events', ha='center', va='center', fontsize=14, weight='bold')
 
-            # Positioniere 'High-Flow' über den ersten 4-5 Spalten
             ax_pos_high_start = axs[2, 0].get_position()
             ax_pos_high_end = axs[2, num_cols_high - 1].get_position()
             mid_pos_high = (ax_pos_high_start.x0 + ax_pos_high_end.x1) / 2
             fig.text(mid_pos_high, 0.505, 'High-Flow Events', ha='center', va='center', fontsize=14, weight='bold')
         except Exception:
-             # Fallback, falls die Achsen nicht existieren
              fig.text(0.5, 0.94, 'Low-Flow Events', ha='center', va='center', fontsize=14, weight='bold')
              fig.text(0.5, 0.505, 'High-Flow Events', ha='center', va='center', fontsize=14, weight='bold')
-        # --- ENDE MODIFIKATION ---
         
         fig.tight_layout(rect=[0.05, 0.05, 0.98, 0.92], h_pad=8.0, w_pad=2.0)
         
         filename = os.path.join(config.PLOT_DIR, f"storyline_discharge_return_period_BY_EVENT_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved REORGANIZED return period plot (4-row, Pooled GEV Points, LNWL removed, SPALTEN-ZOOM) to {filename}")
+        logging.info(f"Saved REORGANIZED return period plot (4-row, Pooled GEV Points, LNWL removed, SPALTEN-ZOOM v4) to {filename}")
         
     @staticmethod
     def plot_storyline_wind_change_maps(map_data, config, scenario, filename="storyline_u850_change_maps.png"):

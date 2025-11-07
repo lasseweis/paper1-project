@@ -362,6 +362,17 @@ class StorylineAnalyzer:
                 metric_timeseries[key]['30Q_low_summer'] = da_30day_mean_summer.groupby('year').min('time')
                 metric_timeseries[key]['30Q_high_summer'] = da_30day_mean_summer.groupby('year').max('time')
                 # --- ENDE MODIFIKATION ---
+                
+                # --- START: NEUE MODIFIKATION (Full Year Metriken) ---
+                # Speichere ganzjährige Extremwert-Zeitreihen (ohne monatliches Filtering)
+                metric_timeseries[key]['1Q_low_full_year'] = da_daily.groupby('year').min('time')
+                metric_timeseries[key]['1Q_high_full_year'] = da_daily.groupby('year').max('time')
+                metric_timeseries[key]['7Q_low_full_year'] = da_7day_mean.groupby('year').min('time')
+                metric_timeseries[key]['7Q_high_full_year'] = da_7day_mean.groupby('year').max('time')
+                metric_timeseries[key]['30Q_low_full_year'] = da_30day_mean.groupby('year').min('time')
+                metric_timeseries[key]['30Q_high_full_year'] = da_30day_mean.groupby('year').max('time')
+                # --- ENDE: NEUE MODIFIKATION ---
+
 
                 # --- B) Bestehender Code für MONATLICHE/SAISONALE Mittel (für andere Plots) ---
                 # Resample TÄGLICHE Daten zu MONATLICHEN
@@ -2080,7 +2091,7 @@ class StorylineAnalyzer:
     def analyze_storyline_discharge_extremes(cmip6_results, historical_discharge_da, config, discharge_thresholds):
         """
         Analysiert die Frequenz und Wiederkehrperiode von hydrologischen Extremen (EVA)
-        für HALBJÄHRIGE Perioden (Winter/Sommer).
+        für HALBJÄHRIGE Perioden (Winter/Sommer) UND GANZJÄHRIG (Full Year).
 
         NEUE LOGIK (v4.3 - Pooled GEV Fit mit korrigiertem Aufruf):
         1. Verwendet die (mit GEV angepassten) historischen Schwellenwerte aus Schritt 1.
@@ -2093,7 +2104,10 @@ class StorylineAnalyzer:
            
         --- MODIFIKATION (User-Wunsch, 06.11.2025) ---
         - EVA-Events erweitert auf 1Q, 7Q, 30Q und T=10, 50, 100.
-        --- ENDE MODIFIKATION ---
+        
+        --- MODIFIKATION (User-Wunsch, 07.11.2025) ---
+        - Berechnungen für 'full_year' hinzugefügt.
+        - 'full_year' wird den 'DJF'-Storylines zugeordnet.
         """
         logging.info("Analyzing storyline discharge... mit GEPPOOLTER GEV-Logik (v4.3)...")
         
@@ -2101,7 +2115,8 @@ class StorylineAnalyzer:
             logging.error("Historical discharge data (daily) is missing. Aborting.")
             return None
         
-        results = {'thresholds': {'winter': {}, 'summer': {}}, 'data': {}}
+        # --- MODIFIKATION: 'full_year' zum results-Dict hinzugefügt ---
+        results = {'thresholds': {'winter': {}, 'summer': {}, 'full_year': {}}, 'data': {}}
         
         # --- 1. Definiere die zu analysierenden EVA-Ereignisse ---
         # --- MODIFIZIERTER BLOCK ---
@@ -2141,7 +2156,8 @@ class StorylineAnalyzer:
 
         # --- 2. Berechne historische Schwellenwerte (mit GEV) ---
         logging.info("Calculating historical EVA thresholds and return periods for each half-year (using GEV)...")
-        for half_year in ['winter', 'summer']:
+        # --- MODIFIKATION: Schleife um 'full_year' erweitert ---
+        for half_year in ['winter', 'summer', 'full_year']:
             hist_thresholds_low = StatsAnalyzer.calculate_eva_thresholds(
                 historical_discharge_da, eva_type='low', q_days=q_days_needed, 
                 return_periods=return_periods_needed, half_year_filter=half_year
@@ -2153,7 +2169,14 @@ class StorylineAnalyzer:
             
             hist_T_lnwl = np.inf
             if lnwl_fixed_threshold is not None:
-                months = [12, 1, 2, 3, 4, 5] if half_year == 'winter' else [6, 7, 8, 9, 10, 11]
+                months = []
+                if half_year == 'winter':
+                    months = [12, 1, 2, 3, 4, 5]
+                elif half_year == 'summer':
+                    months = [6, 7, 8, 9, 10, 11]
+                else: # 'full_year'
+                    months = list(range(1, 13)) # Alle Monate
+                
                 daily_filtered = historical_discharge_da.where(historical_discharge_da.time.dt.month.isin(months), drop=True)
                 q_1_low_hist_half_year = daily_filtered.groupby('time.year').min('time').dropna(dim='year')
                 if q_1_low_hist_half_year.year.size > 0:
@@ -2199,10 +2222,18 @@ class StorylineAnalyzer:
             return None
 
         for gwl in config.GLOBAL_WARMING_LEVELS:
-            results['data'][gwl] = {'winter': {}, 'summer': {}}
+            # --- MODIFIKATION: 'full_year' zum results-Dict hinzugefügt ---
+            results['data'][gwl] = {'winter': {}, 'summer': {}, 'full_year': {}}
             
-            for half_year in ['winter', 'summer']:
-                season_label = 'DJF' if half_year == 'winter' else 'JJA'
+            # --- MODIFIKATION: Schleife um 'full_year' erweitert ---
+            for half_year in ['winter', 'summer', 'full_year']:
+                
+                # --- START MODIFIKATION (Full Year Storyline Zuweisung) ---
+                if half_year == 'summer':
+                    season_label = 'JJA'
+                else:
+                    season_label = 'DJF' # Benutze DJF-Storylines für 'winter' UND 'full_year'
+                # --- ENDE MODIFIKATION ---
                 
                 all_storyline_keys_for_gwl = {k: v for k, v in storyline_classification.get(gwl, {}).items() if k.startswith(season_label)}
                 
@@ -2216,6 +2247,7 @@ class StorylineAnalyzer:
                         
                         # --- START: MODIFIKATION (Pooled GEV) ---
                         
+                        # --- MODIFIKATION: metric_key_to_use wird jetzt korrekt ..._full_year enthalten ---
                         metric_key_to_use = f"{event_data['metric_key_base']}_{half_year}" 
                         hist_threshold_val = event_data['threshold_m3s']
                         eva_type = event_data['type']

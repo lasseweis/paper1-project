@@ -2465,10 +2465,13 @@ class Visualizer:
                 ax.grid(axis='y', linestyle=':', which='both')
                 
                 ax.set_xticks(x_ticks)
-                if row == num_rows - 1: # X-labels only on the bottom row
-                    ax.set_xticklabels(x_tick_labels, rotation=45, ha='right', fontsize=9)
-                else:
-                    ax.set_xticklabels([])
+                
+                # --- ANPASSUNG START ---
+                # Die X-Achsen-Beschriftung (Storyline-Namen) wird nun
+                # in JEDER Zeile angezeigt, nicht mehr nur in der untersten.
+                ax.set_xticklabels(x_tick_labels, rotation=45, ha='right', fontsize=9)
+                # --- ANPASSUNG ENDE ---
+                
                 ax.set_xlabel('')
 
                 # Add Row Titles (Half-Year) to the first column

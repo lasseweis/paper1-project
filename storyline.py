@@ -2108,6 +2108,11 @@ class StorylineAnalyzer:
         --- MODIFIKATION (User-Wunsch, 07.11.2025) ---
         - Berechnungen für 'full_year' hinzugefügt.
         - 'full_year' wird den 'DJF'-Storylines zugeordnet.
+        
+        --- START: KORREKTUR (07.11.2025 12:30) ---
+        - Logik auf '>= 30' geändert, um N=30 zu erlauben.
+        - Detaillierteres Logging hinzugefügt.
+        --- ENDE: KORREKTUR ---
         """
         logging.info("Analyzing storyline discharge... mit GEPPOOLTER GEV-Logik (v4.3)...")
         
@@ -2279,10 +2284,18 @@ class StorylineAnalyzer:
                         future_return_period_mean = np.inf
                         total_pooled_points = len(pooled_model_extremes)
                         
-                        if total_pooled_points > 30: # Brauchen genug Daten für einen robusten Fit
+                        # --- START: DEBUG-LOG HINZUGEFÜGT ---
+                        logging.info(f"  Data pooled for {storyline_name} ({event_key}, GWL {gwl}, {half_year}): "
+                                     f"N={total_pooled_points} points (from {X_valid_models}/{Y_total_models} models)")
+                        # --- ENDE: DEBUG-LOG ---
+                        
+                        # --- START: KORREKTUR ' > 30 ' zu ' >= 30 ' ---
+                        if total_pooled_points >= 30: # Brauchen genug Daten für einen robusten Fit
+                        # --- ENDE: KORREKTUR ---
                             try:
                                 pooled_array = np.array(pooled_model_extremes)
-                                logging.info(f"Fitting Pooled GEV for {storyline_name} ({event_key}), GWL {gwl}, N={total_pooled_points}...")
+                                # (Loggen wird jetzt oben im 'info' log gemacht)
+                                # logging.info(f"Fitting Pooled GEV for {storyline_name} ({event_key}), GWL {gwl}, N={total_pooled_points}...")
 
                                 # KORREKTER AUFRUF (v4.3)
                                 params = distr.gev.lmom_fit(pooled_array) 
@@ -2312,7 +2325,10 @@ class StorylineAnalyzer:
                                         future_return_period_mean = 1.0 / future_freq
                         
                         else:
-                            logging.warning(f"Skipping Pooled GEV for {storyline_name} ({event_key}): Insufficient data (N={total_pooled_points}).")
+                            # --- START: VERBESSERTES WARNING-LOG ---
+                            logging.warning(f"Skipping Pooled GEV for {storyline_name} ({event_key}, {half_year}): "
+                                            f"Insufficient data (N={total_pooled_points} points from {X_valid_models}/{Y_total_models} models). Need >= 30 points.")
+                            # --- ENDE: VERBESSERTES WARNING-LOG ---
 
                         # 3. Ergebnisse speichern
                         # WICHTIG: Wir speichern den *einzelnen* Wert in der Liste,

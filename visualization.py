@@ -2613,13 +2613,17 @@ class Visualizer:
             logging.warning(f"No valid EVA events (excl. LNWL) found to plot for {scenario}.")
             return
 
+        # --- START: ANPASSUNG (Benutzerwunsch) ---
+        # sharey=True entfernt und auf sharey=False gesetzt.
         fig, axs = plt.subplots(
             num_rows, num_cols, 
             figsize=(5.5 * num_cols, 33), 
             squeeze=False, 
-            sharey=True,
+            sharey=False, # <-- HIER GEÄNDERT
             sharex=False
         )
+        # --- ENDE: ANPASSUNG ---
+        
         plt.style.use('seaborn-v0_8-whitegrid')
 
         storyline_order = [
@@ -2687,6 +2691,12 @@ class Visualizer:
         
         # --- KORREKTUR: Schleifenvariable 'config' zu 'row_config' umbenannt ---
         for row, row_config in enumerate(row_configs):
+            
+            # --- START: ANPASSUNG (Manuelles sharey) ---
+            # Hole die erste Achse der Zeile, um sie als Referenz zu verwenden
+            ax_row_start = axs[row, 0]
+            # --- ENDE: ANPASSUNG ---
+
             half_year = row_config['half_year']
             event_list = row_config['events']
             mmm_only = row_config['mmm_only']
@@ -2697,8 +2707,16 @@ class Visualizer:
             
             for col, event_key in enumerate(event_list):
                 ax = axs[row, col]
+
+                # --- START: ANPASSUNG (Manuelles sharey) ---
+                # Setze Limits & Invertierung für JEDE Achse
                 ax.set_ylim(y_limits)
                 ax.invert_yaxis()
+                
+                # Verknüpfe die Y-Achse manuell mit der ersten Achse der Zeile
+                if col > 0:
+                    ax.sharey(ax_row_start)
+                # --- ENDE: ANPASSUNG ---
                 
                 threshold_data = results.get('thresholds', {}).get(half_year, {}).get(event_key, {})
                 event_name = threshold_data.get('name', event_key).replace("Low-Flow", "Low Flow").replace("High-Flow", "High Flow")
@@ -2774,14 +2792,22 @@ class Visualizer:
                     ax.set_xlabel('')
                     ax.tick_params(axis='x', labelbottom=False)
                 
+
+                # --- START: ANPASSUNG (Manuelles sharey) ---
+                # Setze die Ticks und Labels für JEDE Achse
                 ax.set_yticks(y_ticks)
+                ax.set_yticklabels(current_y_tick_labels, fontsize=9)
+                
                 if col == 0: 
-                    ax.set_yticklabels(current_y_tick_labels, fontsize=9)
-                    # --- KORREKTUR: 'config' zu 'row_config' geändert ---
+                    # Setze den Y-Titel für die erste Spalte
                     ax.set_ylabel(row_config['season_label'], fontsize=11, weight='bold', labelpad=15)
                 else:
-                    ax.set_yticklabels([])
+                    # Blende die Tick-BESCHRIFTUNGEN (Labels) für alle anderen Spalten aus
                     ax.set_ylabel('')
+                    plt.setp(ax.get_yticklabels(), visible=False)
+                    plt.setp(ax.get_yticklines(), visible=False)
+                # --- ENDE: ANPASSUNG ---
+
 
                 if ax.get_legend() is not None: ax.get_legend().remove()
                 

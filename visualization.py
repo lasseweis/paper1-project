@@ -2784,13 +2784,14 @@ class Visualizer:
                 ax.grid(axis='y', linestyle='none')
                 ax.grid(axis='x', linestyle=':', which='both')
                 
-                if row == 2 or row == 5:
-                    ax.set_xlabel('Return Period (Years)', fontsize=11)
-                    ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, pos: f'{x:.0f}'))
-                    ax.tick_params(axis='x', labelbottom=True)
-                else:
-                    ax.set_xlabel('')
-                    ax.tick_params(axis='x', labelbottom=False)
+                
+                # --- START: MODIFIKATION (Benutzerwunsch) ---
+                # Die if/else-Logik wurde entfernt. Alle Subplots erhalten jetzt
+                # die X-Achsen-Beschriftung und die Ticks.
+                ax.set_xlabel('Return Period (Years)', fontsize=11)
+                ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, pos: f'{x:.0f}'))
+                ax.tick_params(axis='x', labelbottom=True)
+                # --- ENDE: MODIFIKATION ---
                 
 
                 # --- START: ANPASSUNG (Manuelles sharey) ---

@@ -3248,10 +3248,10 @@ class Visualizer:
         
         # --- 1. Define Event and Plot Structure (NOW 4 COLS, ENGLISH NAMES) ---
         event_plot_order = [
-            ('Q_daily_low', 'Daily Minimum'),
-            ('Q_7day_low', '7-Day Minimum'),
-            ('Q_30day_low', '30-Day Minimum'),     # <-- MODIFIED
-            ('Q_3month_low', '3-Month Minimum')
+            ('Q_daily_low', 'Daily lowflow'),
+            ('Q_7day_low', '7-Day lowflow'),
+            ('Q_30day_low', '30-Day lowflow'),
+            ('Q_3month_low', '3-Month lowflow')
         ]
         num_cols = len(event_plot_order) # Should be 4
         

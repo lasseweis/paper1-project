@@ -2524,40 +2524,6 @@ class Visualizer:
         """
         Creates a plot showing the change in return periods, organized with
         Low-Flow and High-Flow sections, each having a Winter, Summer, and Full Year row.
-
-        MODIFIED LAYOUT (v4.2 - Pooled GEV Plot, LNWL removed):
-        - Creates the same 4-row layout as v4.1.
-        - REPLACES Boxplots/Stripplots with ax.scatter() to show the
-          single, robust, pooled GEV result for each storyline.
-        - Places annotation (n=X/Y) on the right edge of the plot.
-        - MODIFIED: The 'LNWL' event column has been removed from this plot.
-        
-        --- MODIFIKATION (User-Wunsch, 06.11.2025): ---
-        - sharex=False: X-Achsen werden spaltenweise synchronisiert (alle 1Q10-Plots teilen sich eine Achse, etc.)
-        - Verwendet eine Zwei-Durchlauf-Logik (ähnlich wie 'plot_storyline_lnwl_aggregation_comparison'),
-          um zuerst die "idealen" Zoom-Limits für jede Spalte zu finden und sie dann anzuwenden.
-          
-        --- MODIFIKATION (User-Wunsch, 06.11.2025) v2 ---
-        - Spalten erweitert auf 1Q, 7Q, 30Q (jeweils T=10, 50, 100).
-        - Spaltenreihenfolge angepasst.
-        
-        --- MODIFIKATION (User-Wunsch, 06.11.2025) v3 ---
-        - Titel-Korrektur: "30-Day" wieder zu "30Q" geändert.
-
-        --- MODIFIKATION (User-Wunsch, 06.11.2025) v4 ---
-        - Logik für X-Achsen-Synchronisierung angepasst:
-          - Zeile 1 (Low-Flow Winter) und Zeile 2 (Low-Flow Summer) teilen sich die X-Achsen pro Spalte.
-          - Zeile 3 (High-Flow Winter) und Zeile 4 (High-Flow Summer) teilen sich die X-Achsen pro Spalte.
-          - Low-Flow und High-Flow Spalten sind voneinander unabhängig.
-          
-        --- MODIFIKATION (User-Wunsch, 07.11.2025) ---
-        - Layout auf 6 Zeilen erweitert (Winter, Summer, Full Year für Low- und High-Flow).
-        - "Full Year"-Zeilen (Row 2 und 5) plotten NUR die 'MMM'-Storyline.
-        - Y-Achsen-Beschriftung und X-Achsen-Label-Positionen angepasst.
-        
-        --- KORREKTUR (07.11.2025 11:10) ---
-        - Behebt einen `AttributeError` (Shadowing der 'config'-Variablen).
-        - Die Schleifenvariable `config` wurde zu `row_config` umbenannt.
         """
         if not results or not config or 'thresholds' not in results or 'data' not in results:
             logging.warning(f"Cannot plot return period change by event for {scenario}: Missing results or thresholds.")
@@ -2613,16 +2579,13 @@ class Visualizer:
             logging.warning(f"No valid EVA events (excl. LNWL) found to plot for {scenario}.")
             return
 
-        # --- START: ANPASSUNG (Benutzerwunsch) ---
-        # sharey=True entfernt und auf sharey=False gesetzt.
         fig, axs = plt.subplots(
             num_rows, num_cols, 
             figsize=(5.5 * num_cols, 33), 
             squeeze=False, 
-            sharey=False, # <-- HIER GEÄNDERT
+            sharey=False, 
             sharex=False
         )
-        # --- ENDE: ANPASSUNG ---
         
         plt.style.use('seaborn-v0_8-whitegrid')
 
@@ -2656,16 +2619,22 @@ class Visualizer:
                         if event_key == 'LNWL': continue
                         
                         event_data = results['data'].get(gwl, {}).get(half_year, {}).get(storyline, {}).get(event_key)
+                        
+                        # --- MODIFIKATION: CI-Werte ebenfalls auslesen ---
                         if event_data and 'future_return_period_mean' in event_data:
-                            period = event_data['future_return_period_mean']
+                            period_mean = event_data['future_return_period_mean']
+                            ci_low = event_data.get('future_return_period_ci_low', np.nan) # .get() für Sicherheit
+                            ci_high = event_data.get('future_return_period_ci_high', np.nan)
                             
-                            if np.isfinite(period):
+                            if np.isfinite(period_mean):
                                 plot_data_list.append({
                                     'half_year': half_year,
                                     'event': event_key,
                                     'storyline': storyline,
                                     'gwl': gwl_label,
-                                    'return_period': period
+                                    'return_period': period_mean,
+                                    'ci_low': ci_low,   # NEUER SCHLÜSSEL
+                                    'ci_high': ci_high # NEUER SCHLÜSSEL
                                 })
         
         if not plot_data_list:
@@ -2689,14 +2658,9 @@ class Visualizer:
             {'title_prefix': 'High-Flow', 'half_year': 'full_year', 'events': high_flow_events_ordered, 'mmm_only': True, 'limit_dict': column_x_limits_highflow, 'season_label': "Full Year\n(Jan - Dec)\n(MMM Only)"}
         ]
         
-        # --- KORREKTUR: Schleifenvariable 'config' zu 'row_config' umbenannt ---
         for row, row_config in enumerate(row_configs):
             
-            # --- START: ANPASSUNG (Manuelles sharey) ---
-            # Hole die erste Achse der Zeile, um sie als Referenz zu verwenden
             ax_row_start = axs[row, 0]
-            # --- ENDE: ANPASSUNG ---
-
             half_year = row_config['half_year']
             event_list = row_config['events']
             mmm_only = row_config['mmm_only']
@@ -2708,15 +2672,11 @@ class Visualizer:
             for col, event_key in enumerate(event_list):
                 ax = axs[row, col]
 
-                # --- START: ANPASSUNG (Manuelles sharey) ---
-                # Setze Limits & Invertierung für JEDE Achse
                 ax.set_ylim(y_limits)
                 ax.invert_yaxis()
                 
-                # Verknüpfe die Y-Achse manuell mit der ersten Achse der Zeile
                 if col > 0:
                     ax.sharey(ax_row_start)
-                # --- ENDE: ANPASSUNG ---
                 
                 threshold_data = results.get('thresholds', {}).get(half_year, {}).get(event_key, {})
                 event_name = threshold_data.get('name', event_key).replace("Low-Flow", "Low Flow").replace("High-Flow", "High Flow")
@@ -2731,7 +2691,6 @@ class Visualizer:
                      ax.set_title(title, fontsize=11, weight='normal', style='italic')
                 else: # Winter & Summer (bold)
                     ax.set_title(title, fontsize=11, weight='bold')
-                # --- ENDE KORREKTUR ---
 
                 data_subset = df_plot_clipped[(df_plot_clipped['half_year'] == half_year) & (df_plot_clipped['event'] == event_key)]
                 
@@ -2741,25 +2700,62 @@ class Visualizer:
                 all_data_for_lims = []
 
                 if not data_subset.empty:
-                    for gwl_label, gwl_group in data_subset.groupby('gwl'):
-                        y_values = gwl_group['storyline'].map(dict(zip(storyline_order, y_ticks)))
-                        ax.scatter(
-                            x=gwl_group['return_period'],
-                            y=y_values,
+                    # --- START: MODIFIKATION (Plotten mit ax.errorbar) ---
+                    dodge_amount = 0.15 # Wie stark die GWLs auf der Y-Achse versetzt werden
+                    gwl_labels = sorted(data_subset['gwl'].unique())
+                    
+                    for i, gwl_label in enumerate(gwl_labels):
+                        gwl_group = data_subset[data_subset['gwl'] == gwl_label]
+                        if gwl_group.empty:
+                            continue
+                            
+                        # Storyline-Namen zu Y-Positionen mappen
+                        y_values_base = gwl_group['storyline'].map(dict(zip(storyline_order, y_ticks)))
+                        # "Dodging" anwenden (leichter Y-Versatz)
+                        y_values_dodged = y_values_base + (i * 2 * dodge_amount) - dodge_amount
+                        
+                        x_means = gwl_group['return_period']
+                        ci_low_vals = gwl_group['ci_low']
+                        ci_high_vals = gwl_group['ci_high']
+
+                        # Fehlerwerte für errorbar berechnen
+                        # Umgang mit NaNs in Konfidenzintervallen (falls Bootstrapping fehlschlug)
+                        x_err_low = np.where(np.isnan(ci_low_vals), 0, x_means - ci_low_vals)
+                        x_err_high = np.where(np.isnan(ci_high_vals), 0, ci_high_vals - x_means)
+                        # Sicherstellen, dass Fehler nicht negativ sind
+                        x_err_low = np.maximum(x_err_low, 0)
+                        x_err_high = np.maximum(x_err_high, 0)
+                        x_errors = [x_err_low, x_err_high]
+                        
+                        # ax.errorbar statt ax.scatter verwenden
+                        ax.errorbar(
+                            x=x_means,
+                            y=y_values_dodged,
+                            xerr=x_errors,
                             color=gwl_colors[gwl_label],
                             marker=gwl_markers[gwl_label],
-                            s=100, 
+                            markersize=8,          # Markergröße
+                            linestyle='None',      # Keine Verbindungslinie
                             label=gwl_label,
-                            edgecolor='black',
-                            linewidth=0.5,
+                            markeredgecolor='black',
+                            markeredgewidth=0.5,
+                            elinewidth=1.5,      # Dicke des Fehlerbalkens
+                            capsize=4,           # Größe der "Kappen" am Ende
                             zorder=10
                         )
+                    # --- ENDE: MODIFIKATION (Plotten mit ax.errorbar) ---
+                    
+                    # Daten für die Achsenlimits sammeln
                     all_data_for_lims.extend(data_subset['return_period'].dropna().values)
+                    # Auch die CIs für die Achsenlimits berücksichtigen
+                    all_data_for_lims.extend(data_subset['ci_low'].dropna().values)
+                    all_data_for_lims.extend(data_subset['ci_high'].dropna().values)
                 
                 else:
                     if not mmm_only: 
                         ax.text(0.5, 0.5, "Data N/A", ha='center', va='center', transform=ax.transAxes, color='gray')
 
+                # Historische Jährlichkeit (T_hist) plotten
                 hist_period = threshold_data.get('hist_return_period')
                 if hist_period is not None and np.isfinite(hist_period):
                     ax.axvline(x=hist_period, color='skyblue', linestyle='--', linewidth=3, zorder=5)
@@ -2770,7 +2766,7 @@ class Visualizer:
                 ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
                 
                 if all_data_for_lims:
-                    min_val = np.min(all_data_for_lims)
+                    min_val = np.min([v for v in all_data_for_lims if v > 0]) # Log-Skala mag keine 0
                     max_val = np.max(all_data_for_lims)
                     x_min_limit = max(0.8, min_val * 0.8) 
                     x_max_limit = max_val * 1.5          
@@ -2783,51 +2779,40 @@ class Visualizer:
                 ax.grid(axis='y', linestyle='none')
                 ax.grid(axis='x', linestyle=':', which='both')
                 
-                
-                # --- START: MODIFIKATION (Benutzerwunsch) ---
-                # Die if/else-Logik wurde entfernt. Alle Subplots erhalten jetzt
-                # die X-Achsen-Beschriftung und die Ticks.
                 ax.set_xlabel('Return Period (Years)', fontsize=11)
                 ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, pos: f'{x:.0f}'))
                 ax.tick_params(axis='x', labelbottom=True)
-                # --- ENDE: MODIFIKATION ---
                 
-
-                # --- START: ANPASSUNG (Manuelles sharey) ---
-                # Setze die Ticks und Labels für JEDE Achse
                 ax.set_yticks(y_ticks)
                 ax.set_yticklabels(current_y_tick_labels, fontsize=9)
                 
                 if col == 0: 
-                    # Setze den Y-Titel für die erste Spalte
                     ax.set_ylabel(row_config['season_label'], fontsize=11, weight='bold', labelpad=15)
                 else:
-                    # Blende die Tick-BESCHRIFTUNGEN (Labels) für alle anderen Spalten aus
                     ax.set_ylabel('')
                     plt.setp(ax.get_yticklabels(), visible=False)
                     plt.setp(ax.get_yticklines(), visible=False)
-                # --- ENDE: ANPASSUNG ---
-
 
                 if ax.get_legend() is not None: ax.get_legend().remove()
                 
+                # n=X/Y Annotationen
                 for i, storyline in enumerate(current_storyline_order):
                     y_base = y_ticks[i]
                     for j, gwl in enumerate(gwls_to_plot):
                         gwl_label = f'+{gwl}°C'
-                        y_offset = -0.2 + (j * 0.4) 
+                        y_offset = -0.15 + (j * 0.3) # Y-Versatz für Annotationen
                         event_data_gwl = results['data'].get(gwl, {}).get(half_year, {}).get(storyline, {}).get(event_key)
                         if event_data_gwl and 'model_count_X' in event_data_gwl:
                             X, Y = event_data_gwl['model_count_X'], event_data_gwl['model_count_Y']
-                            text_to_display = f"n={X}/{Y}"
+                            N_pool = event_data_gwl.get('pooled_data_points_N', 0)
+                            text_to_display = f"n={X}/{Y} (N={N_pool})"
                             ax.text(0.98, y_base + y_offset, text_to_display, 
                                     transform=ax.get_yaxis_transform(), 
-                                    horizontalalignment='right', fontsize=7, weight='bold', 
+                                    horizontalalignment='right', fontsize=6, weight='bold', # Schriftgröße angepasst
                                     color=gwl_colors[gwl_label],
                                     bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
         
         # --- Unbenutzte Achsen ausschalten ---
-        # --- KORREKTUR: 'r_config' zu 'row_config' geändert ---
         for r_idx, row_config in enumerate(row_configs):
             num_events_in_row = len(row_config['events'])
             for c_idx in range(num_events_in_row, num_cols):
@@ -2879,9 +2864,8 @@ class Visualizer:
             ax_pos_low_start = axs[0, 0].get_position()
             ax_pos_low_end = axs[0, max(num_cols_low-1, 0)].get_position()
             mid_pos_low = (ax_pos_low_start.x0 + ax_pos_low_end.x1) / 2
-            # --- KORREKTUR: Y-Position des Titels angepasst ---
             y_pos_low_title = (axs[0,0].get_position().y1 + fig.get_window_extent().height / fig.dpi / fig.get_figheight()) * 0.5 + 0.48
-            y_pos_low_title = min(y_pos_low_title, 0.96) # Obergrenze
+            y_pos_low_title = min(y_pos_low_title, 0.96) 
             fig.text(mid_pos_low, y_pos_low_title, 'Low-Flow Events', ha='center', va='center', fontsize=14, weight='bold')
 
             ax_pos_high_start = axs[3, 0].get_position()
@@ -2895,7 +2879,6 @@ class Visualizer:
         
         fig.tight_layout(rect=[0.05, 0.05, 0.98, 0.94], h_pad=3.0, w_pad=2.0)
         
-        # --- KORREKTUR: 'config' (jetzt ein dict) wird hier nicht mehr verwendet. Wir verwenden das 'config'-Objekt.
         filename = os.path.join(config.PLOT_DIR, f"storyline_discharge_return_period_BY_EVENT_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)

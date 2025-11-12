@@ -2112,9 +2112,11 @@ class StorylineAnalyzer:
         --- START: KORREKTUR (07.11.2025 12:30) ---
         - Logik auf '>= 30' geändert, um N=30 zu erlauben.
         - Detaillierteres Logging hinzugefügt.
-        --- ENDE: KORREKTUR ---
+        
+        --- NEUE MODIFIKATION: BOOTSTRAPPING HINZUGEFÜGT ---
+        - Berechnet 95%-Konfidenzintervalle mittels Bootstrapping (1000 Iterationen).
         """
-        logging.info("Analyzing storyline discharge... mit GEPPOOLTER GEV-Logik (v4.3)...")
+        logging.info("Analyzing storyline discharge... mit GEPPOOLTER GEV-Logik (v4.3) + BOOTSTRAPPING...")
         
         if historical_discharge_da is None:
             logging.error("Historical discharge data (daily) is missing. Aborting.")
@@ -2221,6 +2223,9 @@ class StorylineAnalyzer:
         metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
         gwl_years = cmip6_results.get('gwl_threshold_years', {})
         window = config.GWL_YEARS_WINDOW
+        
+        # --- NEU: Bootstrapping-Konfiguration ---
+        N_BOOTSTRAP = 1000 # Anzahl der Iterationen
 
         if not all([storyline_classification, metric_timeseries, gwl_years]):
             logging.error("Missing CMIP6 data for storyline discharge analysis.")
@@ -2250,9 +2255,8 @@ class StorylineAnalyzer:
 
                     for event_key, event_data in results['thresholds'][half_year].items():
                         
-                        # --- START: MODIFIKATION (Pooled GEV) ---
+                        # --- START: MODIFIKATION (Pooled GEV + BOOTSTRAPPING) ---
                         
-                        # --- MODIFIKATION: metric_key_to_use wird jetzt korrekt ..._full_year enthalten ---
                         metric_key_to_use = f"{event_data['metric_key_base']}_{half_year}" 
                         hist_threshold_val = event_data['threshold_m3s']
                         eva_type = event_data['type']
@@ -2271,77 +2275,102 @@ class StorylineAnalyzer:
                             start_year = threshold_year - window // 2
                             end_year = threshold_year + (window - 1) // 2
                             
-                            # --- MODIFIKATION: Verwende 'year' als Dimension ---
                             ts_slice = discharge_ts_half_year.sel(year=slice(start_year, end_year))
                             ts_slice_clean = ts_slice.dropna(dim='year')
                             
                             if ts_slice_clean.year.size > 0:
                                 pooled_model_extremes.extend(ts_slice_clean.values)
                                 X_valid_models += 1
-                            # --- ENDE MODIFIKATION ---
                         
-                        # 2. Gepooolte GEV-Analyse
+                        # 2. Gepooolte GEV-Analyse & Bootstrapping
                         future_return_period_mean = np.inf
+                        ci_low, ci_high = np.nan, np.nan
                         total_pooled_points = len(pooled_model_extremes)
                         
-                        # --- START: DEBUG-LOG HINZUGEFÜGT ---
                         logging.info(f"  Data pooled for {storyline_name} ({event_key}, GWL {gwl}, {half_year}): "
                                      f"N={total_pooled_points} points (from {X_valid_models}/{Y_total_models} models)")
-                        # --- ENDE: DEBUG-LOG ---
                         
-                        # --- START: KORREKTUR ' > 30 ' zu ' >= 30 ' ---
                         if total_pooled_points >= 30: # Brauchen genug Daten für einen robusten Fit
-                        # --- ENDE: KORREKTUR ---
+                            pooled_array = np.array(pooled_model_extremes)
+                            
+                            # --- A) Fit des Original-Datensatzes (unser "bester Schätzwert") ---
                             try:
-                                pooled_array = np.array(pooled_model_extremes)
-                                # (Loggen wird jetzt oben im 'info' log gemacht)
-                                # logging.info(f"Fitting Pooled GEV for {storyline_name} ({event_key}), GWL {gwl}, N={total_pooled_points}...")
-
-                                # KORREKTER AUFRUF (v4.3)
-                                params = distr.gev.lmom_fit(pooled_array) 
-                                dist_future = distr.gev(**params)
+                                params_orig = distr.gev.lmom_fit(pooled_array) 
+                                dist_orig = distr.gev(**params_orig)
                                 
                                 if eva_type == 'low':
-                                    prob_exceed = dist_future.cdf(hist_threshold_val)
+                                    prob_orig = dist_orig.cdf(hist_threshold_val)
                                 else: # 'high'
-                                    prob_exceed = 1.0 - dist_future.cdf(hist_threshold_val)
+                                    prob_orig = 1.0 - dist_orig.cdf(hist_threshold_val)
                                 
-                                if prob_exceed > 1e-9: # Verhindert Division durch Null
-                                    future_return_period_mean = 1.0 / prob_exceed
+                                if prob_orig > 1e-9:
+                                    future_return_period_mean = 1.0 / prob_orig
                                 else:
-                                    future_return_period_mean = np.inf # Extrem selten
-                            
+                                    future_return_period_mean = np.inf
+
                             except Exception as e_gev:
-                                logging.warning(f"Pooled GEV fit failed for {storyline_name} ({event_key}): {e_gev}. FALLING BACK to empirical pooled frequency.")
-                                # Fallback: Empirische Frequenz auf gepoolten Daten
+                                logging.warning(f"Pooled GEV fit (Original) failed for {storyline_name} ({event_key}): {e_gev}. FALLING BACK to empirical.")
+                                # Fallback (optional, aber gut für den Mittelwert)
                                 if total_pooled_points > 0:
                                     if eva_type == 'low':
                                         future_event_count = (pooled_array < hist_threshold_val).sum()
                                     else:
                                         future_event_count = (pooled_array > hist_threshold_val).sum()
-                                    
                                     future_freq = future_event_count / total_pooled_points
                                     if future_freq > 0:
                                         future_return_period_mean = 1.0 / future_freq
-                        
+                            
+                            # --- B) Bootstrapping-Schleife für Konfidenzintervalle ---
+                            bootstrap_return_periods = []
+                            logging.info(f"    ... starting {N_BOOTSTRAP} bootstrap iterations for CI...")
+                            for _ in range(N_BOOTSTRAP):
+                                try:
+                                    # 1. Resample MIT Zurücklegen
+                                    resampled_pool = np.random.choice(pooled_array, size=total_pooled_points, replace=True)
+                                    
+                                    # 2. Fit auf Resample
+                                    params_boot = distr.gev.lmom_fit(resampled_pool) 
+                                    dist_boot = distr.gev(**params_boot)
+                                    
+                                    # 3. Jährlichkeit berechnen
+                                    if eva_type == 'low':
+                                        prob_boot = dist_boot.cdf(hist_threshold_val)
+                                    else: # 'high'
+                                        prob_boot = 1.0 - dist_boot.cdf(hist_threshold_val)
+                                    
+                                    if prob_boot > 1e-9:
+                                        bootstrap_return_periods.append(1.0 / prob_boot)
+                                    
+                                except Exception:
+                                    continue # GEV-Fit schlug fehl (z.B. wegen zu vieler gleicher Werte), Iteration überspringen
+                            
+                            # --- C) Konfidenzintervall aus Ergebnissen berechnen ---
+                            if len(bootstrap_return_periods) > (N_BOOTSTRAP * 0.8): # Sicherstellen, dass die meisten Fits erfolgreich waren
+                                # Clip bei 10000 Jahren, um extreme Ausreißer im KI zu vermeiden
+                                bootstrap_return_periods_clipped = np.clip(bootstrap_return_periods, a_min=None, a_max=10000)
+                                ci_low = np.percentile(bootstrap_return_periods_clipped, 2.5)
+                                ci_high = np.percentile(bootstrap_return_periods_clipped, 97.5)
+                                logging.info(f"    ... Bootstrap CI (95%): [{ci_low:.1f}, {ci_high:.1f}]")
+                            else:
+                                logging.warning(f"    ... Bootstrap failed for {storyline_name} ({event_key}): "
+                                                f"Only {len(bootstrap_return_periods)}/{N_BOOTSTRAP} fits succeeded.")
+
                         else:
-                            # --- START: VERBESSERTES WARNING-LOG ---
                             logging.warning(f"Skipping Pooled GEV for {storyline_name} ({event_key}, {half_year}): "
                                             f"Insufficient data (N={total_pooled_points} points from {X_valid_models}/{Y_total_models} models). Need >= 30 points.")
-                            # --- ENDE: VERBESSERTES WARNING-LOG ---
 
-                        # 3. Ergebnisse speichern
-                        # WICHTIG: Wir speichern den *einzelnen* Wert in der Liste,
-                        # damit der Plot-Code (den wir gleich anpassen) ihn findet.
+                        # --- ENDE: MODIFIKATION (Pooled GEV + BOOTSTRAPPING) ---
+
+                        # 3. Ergebnisse speichern (inkl. Konfidenzintervallen)
                         storyline_results_storage[event_key] = {
                             'future_return_periods_all_models': [future_return_period_mean] if np.isfinite(future_return_period_mean) else [],
                             'future_return_period_mean': future_return_period_mean,
+                            'future_return_period_ci_low': ci_low,   # NEU
+                            'future_return_period_ci_high': ci_high, # NEU
                             'model_count_X': X_valid_models, 
                             'model_count_Y': Y_total_models, 
                             'pooled_data_points_N': total_pooled_points
                         }
-                        
-                        # --- ENDE: MODIFIKATION (Pooled GEV) ---
 
                     results['data'][gwl][half_year][storyline_name] = storyline_results_storage
 

@@ -2727,12 +2727,11 @@ class Visualizer:
                 if hist_val_q and "(<" not in event_name and "(>" not in event_name and "m³/s" not in event_name:
                     title += f"\n(Threshold: {op} {hist_val_q:.0f} m³/s)"
                 
-                if row == 0 or row == 3:
-                    ax.set_title(title, fontsize=11, weight='bold')
-                elif row == 2 or row == 5:
+                if row == 2 or row == 5: # Full Year (italic)
                      ax.set_title(title, fontsize=11, weight='normal', style='italic')
-                else:
-                    ax.set_title("")
+                else: # Winter & Summer (bold)
+                    ax.set_title(title, fontsize=11, weight='bold')
+                # --- ENDE KORREKTUR ---
 
                 data_subset = df_plot_clipped[(df_plot_clipped['half_year'] == half_year) & (df_plot_clipped['event'] == event_key)]
                 
@@ -3253,6 +3252,7 @@ class Visualizer:
             ('Q_30day_low', '30-Day lowflow'),
             ('Q_3month_low', '3-Month lowflow')
         ]
+        
         num_cols = len(event_plot_order) # Should be 4
         
         num_rows = 3 # Winter, Summer, Full Year

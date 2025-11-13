@@ -322,9 +322,9 @@ class StorylineAnalyzer:
                 da_daily['year'] = da_daily.time.dt.year
                 da_daily['month'] = da_daily.time.dt.month
 
-                # Definiere Halbjahre
-                winter_months = [12, 1, 2, 3, 4, 5]
-                summer_months = [6, 7, 8, 9, 10, 11]
+                # Definiere Halbjahre (hydrologisch, Nov-Apr / Mai-Okt) # <<< KORRIGIERT >>>
+                winter_months = [11, 12, 1, 2, 3, 4] # <<< KORRIGIERT >>>
+                summer_months = [5, 6, 7, 8, 9, 10] # <<< KORRIGIERT >>>
 
                 da_daily_winter = da_daily.where(da_daily.month.isin(winter_months), drop=True)
                 da_daily_summer = da_daily.where(da_daily.month.isin(summer_months), drop=True)
@@ -2178,9 +2178,9 @@ class StorylineAnalyzer:
             if lnwl_fixed_threshold is not None:
                 months = []
                 if half_year == 'winter':
-                    months = [12, 1, 2, 3, 4, 5]
+                    months = [11, 12, 1, 2, 3, 4] # Hydrologisches Winterhalbjahr # <<< KORRIGIERT >>>
                 elif half_year == 'summer':
-                    months = [6, 7, 8, 9, 10, 11]
+                    months = [5, 6, 7, 8, 9, 10] # Hydrologisches Sommerhalbjahr # <<< KORRIGIERT >>>
                 else: # 'full_year'
                     months = list(range(1, 13)) # Alle Monate
                 
@@ -2865,9 +2865,9 @@ class StorylineAnalyzer:
 
         # Define months for filtering, or None for full year
         if half_year_filter == 'winter':
-            months = [12, 1, 2, 3, 4, 5]
+            months = [11, 12, 1, 2, 3, 4] # Hydrologisches Winterhalbjahr # <<< KORRIGIERT >>>
         elif half_year_filter == 'summer':
-            months = [6, 7, 8, 9, 10, 11]
+            months = [5, 6, 7, 8, 9, 10] # Hydrologisches Sommerhalbjahr # <<< KORRIGIERT >>>
         else: # 'full_year' or None
             months = None
 

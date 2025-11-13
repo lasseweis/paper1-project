@@ -2476,7 +2476,7 @@ class Visualizer:
 
                 # Add Row Titles (Half-Year) to the first column
                 if col == 0:
-                    season_title = "Winter\n(Dec - May)" if half_year == 'winter' else "Summer\n(Jun - Nov)"
+                    season_title = "Winter\n(Nov - Apr)" if half_year == 'winter' else "Summer\n(May - Oct)" # <<< KORRIGIERT >>>
                     ax.set_ylabel(f"{season_title}\n\nReturn Period (Years)", fontsize=11, weight='bold')
                 else:
                     ax.set_ylabel('')
@@ -2650,11 +2650,11 @@ class Visualizer:
 
         # --- 3. Plotting Loop (Reorganized) - PASS 1 ---
         row_configs = [
-            {'title_prefix': 'Low-Flow', 'half_year': 'winter', 'events': low_flow_events_ordered, 'mmm_only': False, 'limit_dict': column_x_limits_lowflow, 'season_label': "Winter\n(Dec - May)"},
-            {'title_prefix': 'Low-Flow', 'half_year': 'summer', 'events': low_flow_events_ordered, 'mmm_only': False, 'limit_dict': column_x_limits_lowflow, 'season_label': "Summer\n(Jun - Nov)"},
+            {'title_prefix': 'Low-Flow', 'half_year': 'winter', 'events': low_flow_events_ordered, 'mmm_only': False, 'limit_dict': column_x_limits_lowflow, 'season_label': "Winter\n(Nov - Apr)"}, # <<< KORRIGIERT >>>
+            {'title_prefix': 'Low-Flow', 'half_year': 'summer', 'events': low_flow_events_ordered, 'mmm_only': False, 'limit_dict': column_x_limits_lowflow, 'season_label': "Summer\n(May - Oct)"}, # <<< KORRIGIERT >>>
             {'title_prefix': 'Low-Flow', 'half_year': 'full_year', 'events': low_flow_events_ordered, 'mmm_only': True, 'limit_dict': column_x_limits_lowflow, 'season_label': "Full Year\n(Jan - Dec)\n(MMM Only)"},
-            {'title_prefix': 'High-Flow', 'half_year': 'winter', 'events': high_flow_events_ordered, 'mmm_only': False, 'limit_dict': column_x_limits_highflow, 'season_label': "Winter\n(Dec - May)"},
-            {'title_prefix': 'High-Flow', 'half_year': 'summer', 'events': high_flow_events_ordered, 'mmm_only': False, 'limit_dict': column_x_limits_highflow, 'season_label': "Summer\n(Jun - Nov)"},
+            {'title_prefix': 'High-Flow', 'half_year': 'winter', 'events': high_flow_events_ordered, 'mmm_only': False, 'limit_dict': column_x_limits_highflow, 'season_label': "Winter\n(Nov - Apr)"}, # <<< KORRIGIERT >>>
+            {'title_prefix': 'High-Flow', 'half_year': 'summer', 'events': high_flow_events_ordered, 'mmm_only': False, 'limit_dict': column_x_limits_highflow, 'season_label': "Summer\n(May - Oct)"}, # <<< KORRIGIERT >>>
             {'title_prefix': 'High-Flow', 'half_year': 'full_year', 'events': high_flow_events_ordered, 'mmm_only': True, 'limit_dict': column_x_limits_highflow, 'season_label': "Full Year\n(Jan - Dec)\n(MMM Only)"}
         ]
         
@@ -3379,9 +3379,9 @@ class Visualizer:
                 # Y-Achsen-Label (nur in der ersten Spalte)
                 if col == 0:
                     if half_year == 'winter':
-                        season_title = "Winter Half-Year\n(Dec - May)"
+                        season_title = "Winter Half-Year\n(Nov - Apr)" # <<< KORRIGIERT >>>
                     elif half_year == 'summer':
-                        season_title = "Summer Half-Year\n(Jun - Nov)"
+                        season_title = "Summer Half-Year\n(May - Oct)" # <<< KORRIGIERT >>>
                     else: # 'full_year'
                         season_title = "Full Year\n(Jan - Dec)"
                     ax.set_ylabel(season_title, fontsize=12, weight='bold', labelpad=15)

@@ -309,11 +309,11 @@ class StatsAnalyzer:
         if half_year_filter and half_year_filter in ['winter', 'summer']:
             months = []
             if half_year_filter == 'winter':
-                months = [12, 1, 2, 3, 4, 5]
-                logging.info(f"Calculating EVA thresholds for WINTER half-year (Dec-May)...")
+                months = [11, 12, 1, 2, 3, 4] # Hydrologisches Winterhalbjahr # <<< KORRIGIERT >>>
+                logging.info(f"Calculating EVA thresholds for WINTER half-year (Nov-Apr)...") # <<< KORRIGIERT >>>
             elif half_year_filter == 'summer':
-                months = [6, 7, 8, 9, 10, 11]
-                logging.info(f"Calculating EVA thresholds for SUMMER half-year (Jun-Nov)...")
+                months = [5, 6, 7, 8, 9, 10] # Hydrologisches Sommerhalbjahr # <<< KORRIGIERT >>>
+                logging.info(f"Calculating EVA thresholds for SUMMER half-year (May-Oct)...") # <<< KORRIGIERT >>>
             
             if months:
                 daily_timeseries_filtered = daily_timeseries.where(daily_timeseries.time.dt.month.isin(months), drop=True)
@@ -341,9 +341,9 @@ class StatsAnalyzer:
             if half_year_filter and half_year_filter in ['winter', 'summer']:
                 months = []
                 if half_year_filter == 'winter':
-                    months = [12, 1, 2, 3, 4, 5]
+                    months = [11, 12, 1, 2, 3, 4] # Hydrologisches Winterhalbjahr # <<< KORRIGIERT >>>
                 elif half_year_filter == 'summer':
-                    months = [6, 7, 8, 9, 10, 11]
+                    months = [5, 6, 7, 8, 9, 10] # Hydrologisches Sommerhalbjahr # <<< KORRIGIERT >>>
                 
                 if months:
                     if 'month' not in moving_avg_full.coords:

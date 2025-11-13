@@ -2328,6 +2328,13 @@ class StorylineAnalyzer:
                                     # 1. Resample MIT Zurücklegen
                                     resampled_pool = np.random.choice(pooled_array, size=total_pooled_points, replace=True)
                                     
+                                    # --- START MODIFIED CHECK ---
+                                    # If resampled pool has no variance, GEV fit will fail.
+                                    if np.std(resampled_pool) < 1e-9:
+                                        bootstrap_return_periods.append(np.nan)
+                                        continue
+                                    # --- END MODIFIED CHECK ---
+
                                     # 2. Fit auf Resample
                                     params_boot = distr.gev.lmom_fit(resampled_pool) 
                                     dist_boot = distr.gev(**params_boot)
@@ -2340,21 +2347,33 @@ class StorylineAnalyzer:
                                     
                                     if prob_boot > 1e-9:
                                         bootstrap_return_periods.append(1.0 / prob_boot)
+                                    else:
+                                        bootstrap_return_periods.append(np.inf) # Append inf
                                     
                                 except Exception:
-                                    continue # GEV-Fit schlug fehl (z.B. wegen zu vieler gleicher Werte), Iteration überspringen
+                                    # GEV-Fit schlug fehl -> Append np.nan
+                                    bootstrap_return_periods.append(np.nan)
                             
                             # --- C) Konfidenzintervall aus Ergebnissen berechnen ---
-                            if len(bootstrap_return_periods) > (N_BOOTSTRAP * 0.8): # Sicherstellen, dass die meisten Fits erfolgreich waren
+                            # --- START MODIFIED CHECK (count finite fits) ---
+                            n_fits_succeeded = np.isfinite(bootstrap_return_periods).sum()
+                            
+                            if n_fits_succeeded > (N_BOOTSTRAP * 0.8): # Sicherstellen, dass die meisten Fits erfolgreich waren
+                            # --- END MODIFIED CHECK ---
+                            
                                 # Clip bei 10000 Jahren, um extreme Ausreißer im KI zu vermeiden
                                 bootstrap_return_periods_clipped = np.clip(bootstrap_return_periods, a_min=None, a_max=10000)
-                                ci_low = np.percentile(bootstrap_return_periods_clipped, 2.5)
-                                ci_high = np.percentile(bootstrap_return_periods_clipped, 97.5)
-                                logging.info(f"    ... Bootstrap CI (95%): [{ci_low:.1f}, {ci_high:.1f}]")
+                                
+                                # --- START MODIFICATION (use nanpercentile) ---
+                                ci_low = np.nanpercentile(bootstrap_return_periods_clipped, 2.5)
+                                ci_high = np.nanpercentile(bootstrap_return_periods_clipped, 97.5)
+                                # --- END MODIFICATION ---
+
+                                logging.info(f"    ... Bootstrap CI (95%): [{ci_low:.1f}, {ci_high:.1f}] (from {n_fits_succeeded} valid fits)")
                             else:
                                 logging.warning(f"    ... Bootstrap failed for {storyline_name} ({event_key}): "
-                                                f"Only {len(bootstrap_return_periods)}/{N_BOOTSTRAP} fits succeeded.")
-
+                                                f"Only {n_fits_succeeded}/{N_BOOTSTRAP} fits succeeded. CI will be 'nan'.")
+                        
                         else:
                             logging.warning(f"Skipping Pooled GEV for {storyline_name} ({event_key}, {half_year}): "
                                             f"Insufficient data (N={total_pooled_points} points from {X_valid_models}/{Y_total_models} models). Need >= 30 points.")

@@ -2209,21 +2209,21 @@ class Visualizer:
                     # LNWL (fixed)
                     lnwl_event_name = [k for k in key_thresholds if 'LNWL' in k]
                     if lnwl_event_name:
-                         lnwl_val = key_thresholds[lnwl_event_name[0]].get('val')
+                         lnwl_val = key_thresholds[lnwl_event_name[0]].get('threshold_m3s') # <-- KORRIGIERTER KEY
                          if lnwl_val is not None:
                              ax.axhline(lnwl_val - hist_mean_specific, color='red', linestyle='-.', linewidth=2.5, zorder=5)
 
                     # Extreme Low-Flow (1%)
                     low_extreme_event_name = [k for k in key_thresholds if '<1%' in k]
                     if low_extreme_event_name:
-                         low_extreme_val = key_thresholds[low_extreme_event_name[0]].get('val')
+                         low_extreme_val = key_thresholds[low_extreme_event_name[0]].get('threshold_m3s') # <-- KORRIGIERTER KEY
                          if low_extreme_val is not None:
                              ax.axhline(low_extreme_val - hist_mean_specific, color='darkviolet', linestyle=(0, (3, 5)), linewidth=2.5, zorder=5) # Dashed-dot
 
                     # Extreme High-Flow (99%)
                     high_extreme_event_name = [k for k in key_thresholds if '>99%' in k]
                     if high_extreme_event_name:
-                         high_extreme_val = key_thresholds[high_extreme_event_name[0]].get('val')
+                         high_extreme_val = key_thresholds[high_extreme_event_name[0]].get('threshold_m3s') # <-- KORRIGIERTER KEY
                          if high_extreme_val is not None:
                              ax.axhline(high_extreme_val - hist_mean_specific, color='deepskyblue', linestyle=(0, (5, 5)), linewidth=2.5, zorder=5) # Dashed
             # --- ENDE: MODIFIKATION ---
@@ -2241,18 +2241,37 @@ class Visualizer:
         
         lnwl_key = [k for k in djf_thresholds if 'LNWL' in k]
         if lnwl_key:
-             lnwl_val_str = f"{djf_thresholds[lnwl_key[0]].get('val', '?'):.0f}"
+             # --- START: KORRIGIERTER BLOCK ---
+             lnwl_val_from_dict = djf_thresholds[lnwl_key[0]].get('threshold_m3s', '?')
+             # Check if it's a number before formatting
+             if isinstance(lnwl_val_from_dict, (int, float)):
+                 lnwl_val_str = f"{lnwl_val_from_dict:.0f}"
+             else:
+                 lnwl_val_str = "?" # Fallback if it's not a number (e.g., '?')
              unique_labels_map[f'Low Navigable (LNWL, ~{lnwl_val_str} m³/s)'] = plt.Line2D([0], [0], color='red', linestyle='-.', linewidth=2.5)
+             # --- ENDE: KORRIGIERTER BLOCK ---
 
         low_extreme_key = [k for k in djf_thresholds if '<1%' in k]
         if low_extreme_key:
-             low_val_str = f"{djf_thresholds[low_extreme_key[0]].get('val', '?'):.0f}"
+             # --- START: KORRIGIERTER BLOCK ---
+             low_val_from_dict = djf_thresholds[low_extreme_key[0]].get('threshold_m3s', '?')
+             if isinstance(low_val_from_dict, (int, float)):
+                 low_val_str = f"{low_val_from_dict:.0f}"
+             else:
+                 low_val_str = "?"
              unique_labels_map[f'Extreme Low-Flow (<1%, ~{low_val_str} m³/s)'] = plt.Line2D([0], [0], color='darkviolet', linestyle=(0, (3, 5)), linewidth=2.5)
+             # --- ENDE: KORRIGIERTER BLOCK ---
 
         high_extreme_key = [k for k in djf_thresholds if '>99%' in k]
         if high_extreme_key:
-             high_val_str = f"{djf_thresholds[high_extreme_key[0]].get('val', '?'):.0f}"
+             # --- START: KORRIGIERTER BLOCK ---
+             high_val_from_dict = djf_thresholds[high_extreme_key[0]].get('threshold_m3s', '?')
+             if isinstance(high_val_from_dict, (int, float)):
+                 high_val_str = f"{high_val_from_dict:.0f}"
+             else:
+                 high_val_str = "?"
              unique_labels_map[f'Extreme High-Flow (>99%, ~{high_val_str} m³/s)'] = plt.Line2D([0], [0], color='deepskyblue', linestyle=(0, (5, 5)), linewidth=2.5)
+             # --- ENDE: KORRIGIERTER BLOCK ---
 
         # Place legend below the plot
         fig.legend(unique_labels_map.values(), unique_labels_map.keys(), loc='lower center', bbox_to_anchor=(0.5, 0.06), ncol=3, fontsize=12, frameon=False)

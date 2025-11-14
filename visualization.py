@@ -2543,6 +2543,9 @@ class Visualizer:
         """
         Creates a plot showing the change in return periods, organized with
         Low-Flow and High-Flow sections, each having a Winter, Summer, and Full Year row.
+        
+        --- MODIFIKATION (14.11.2025) ---
+        - Ändert die Annotation von 'n=X/Y' zu 'N=Pool (Fin: %)'
         """
         if not results or not config or 'thresholds' not in results or 'data' not in results:
             logging.warning(f"Cannot plot return period change by event for {scenario}: Missing results or thresholds.")
@@ -2814,22 +2817,32 @@ class Visualizer:
 
                 if ax.get_legend() is not None: ax.get_legend().remove()
                 
-                # n=X/Y Annotationen
+                # Annotationen (z.B. N=120 (Fin: 10%))
                 for i, storyline in enumerate(current_storyline_order):
                     y_base = y_ticks[i]
                     for j, gwl in enumerate(gwls_to_plot):
                         gwl_label = f'+{gwl}°C'
                         y_offset = -0.15 + (j * 0.3) # Y-Versatz für Annotationen
                         event_data_gwl = results['data'].get(gwl, {}).get(half_year, {}).get(storyline, {}).get(event_key)
-                        if event_data_gwl and 'model_count_X' in event_data_gwl:
-                            X, Y = event_data_gwl['model_count_X'], event_data_gwl['model_count_Y']
-                            N_pool = event_data_gwl.get('pooled_data_points_N', 0)
-                            text_to_display = f"n={X}/{Y} (N={N_pool})"
+                        
+                        # --- START: MODIFIZIERTE ANNOTATION ---
+                        if event_data_gwl and 'pooled_data_points_N' in event_data_gwl:
+                            N_pool = event_data_gwl['pooled_data_points_N']
+                            boot_pct = event_data_gwl.get('bootstrap_finite_pct') # Holt den neuen Wert
+                            
+                            if boot_pct is not None:
+                                # Zeige N=Pool und %-Finite
+                                text_to_display = f"N={N_pool} (Fin: {boot_pct:.0f}%)" 
+                            else:
+                                # Fallback, falls der Wert fehlt
+                                text_to_display = f"N={N_pool}"
+                            
                             ax.text(0.98, y_base + y_offset, text_to_display, 
                                     transform=ax.get_yaxis_transform(), 
-                                    horizontalalignment='right', fontsize=6, weight='bold', # Schriftgröße angepasst
+                                    horizontalalignment='right', fontsize=7, weight='bold', 
                                     color=gwl_colors[gwl_label],
                                     bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
+                        # --- ENDE: MODIFIZIERTE ANNOTATION ---
         
         # --- Unbenutzte Achsen ausschalten ---
         for r_idx, row_config in enumerate(row_configs):

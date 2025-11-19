@@ -1,0 +1,10 @@
+numpy
+matplotlib
+cartopy
+pandas
+seaborn
+xarray
+scipy
+netCDF4
+cftime
+openpyxl

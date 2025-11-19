@@ -380,8 +380,17 @@ class ClimateAnalysis:
         regression_period = (1981, 2010)
         for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
             regression_plot_filename = os.path.join(Config.PLOT_DIR, f'regression_maps_norm_{dset_key}.png')
-            if not os.path.exists(regression_plot_filename):
-                logging.info(f"Plot '{regression_plot_filename}' not found. Calculating data and creating plot...")
+            if dset_key == Config.DATASET_ERA5:
+                # regression_plot_filename = os.path.join(Config.PLOT_DIR, 'Figure1_regression_maps_ERA5.png') # Reverted overwrite
+                pass
+            # Check if we need to calculate results (either old plot OR new ERL plot missing)
+            erl_fig1_filename = os.path.join(Config.PLOT_DIR, 'Figure1_regression_maps_ERA5.png')
+            need_calc = not os.path.exists(regression_plot_filename)
+            if dset_key == Config.DATASET_ERA5 and not os.path.exists(erl_fig1_filename):
+                need_calc = True
+
+            if need_calc:
+                logging.info(f"Calculating regression data for {dset_key}...")
                 results = StorylineAnalyzer.calculate_regression_maps(
                     datasets=datasets_reanalysis,
                     dataset_key=dset_key,
@@ -389,11 +398,18 @@ class ClimateAnalysis:
                 )
                 if results:
                     regression_results[dset_key] = results
-                    Visualizer.plot_regression_analysis(results, dset_key)
+                    
+                    # Plot standard version if missing
+                    if not os.path.exists(regression_plot_filename):
+                        Visualizer.plot_regression_analysis(results, dset_key)
+                    
+                    # Plot ERL Figure 1 if missing (ERA5 only)
+                    if dset_key == Config.DATASET_ERA5 and not os.path.exists(erl_fig1_filename):
+                        Visualizer.plot_erl_figure1_regression_maps(results, dset_key)
                 else:
                     logging.warning(f"Could not calculate regression for {dset_key}.")
             else:
-                logging.info(f"Plot '{regression_plot_filename}' already exists. Skipping.")
+                logging.info(f"Regression plots for {dset_key} already exist. Skipping.")
 
         logging.info("\n\n--- Checking for Reanalysis Jet Index Comparison Timeseries ---")
         jet_indices_plot_filename = os.path.join(Config.PLOT_DIR, "jet_indices_comparison_seasonal_detrended.png")
@@ -576,16 +592,29 @@ class ClimateAnalysis:
                 # --- ENDE: NEUER PLOT ---
 
                 # --- PLOT: Climate Evolution Timeseries (per scenario) ---
+                # --- PLOT: Climate Evolution Timeseries (per scenario) ---
                 evolution_plot_filename = os.path.join(Config.PLOT_DIR, f"climate_indices_evolution_{scenario}.png")
-                if not os.path.exists(evolution_plot_filename):
-                    logging.info(f"Plot '{evolution_plot_filename}' not found. Calculating and creating plot...")
+                erl_fig2_filename = os.path.join(Config.PLOT_DIR, "Figure2_climate_indices_evolution_ssp585.png")
+                
+                need_calc_evo = not os.path.exists(evolution_plot_filename)
+                if scenario == 'ssp585' and not os.path.exists(erl_fig2_filename):
+                    need_calc_evo = True
+
+                if need_calc_evo:
+                    logging.info(f"Calculating data for climate evolution plot ({scenario})...")
                     cmip6_plot_data, reanalysis_plot_data = StorylineAnalyzer.analyze_timeseries_for_projection_plot(cmip6_results, datasets_reanalysis, Config())
                     if cmip6_plot_data and reanalysis_plot_data:
-                        Visualizer.plot_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, Config(), filename=os.path.basename(evolution_plot_filename))
+                        # Plot standard version if missing
+                        if not os.path.exists(evolution_plot_filename):
+                            Visualizer.plot_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, Config(), filename=os.path.basename(evolution_plot_filename))
+                        
+                        # Plot ERL Figure 2 if missing (SSP5-8.5 only)
+                        if scenario == 'ssp585' and not os.path.exists(erl_fig2_filename):
+                            Visualizer.plot_erl_figure2_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, Config())
                     else:
-                         logging.warning(f"Skipping climate evolution plot for {scenario}, data preparation failed.") # Added warning
+                         logging.warning(f"Skipping climate evolution plot for {scenario}, data preparation failed.")
                 else:
-                    logging.info(f"Plot '{evolution_plot_filename}' already exists.")
+                    logging.info(f"Climate evolution plots for {scenario} already exist. Skipping.")
 
                 # --- PLOT: Storyline U850 Wind Change Maps (per scenario) ---
                 storyline_map_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_u850_change_maps_{scenario}.png")
@@ -661,6 +690,14 @@ class ClimateAnalysis:
                 else:
                     logging.info(f"Half-year return period plot '{return_period_plot_filename}' already exists.")
 
+                # --- PLOT: Figure 3 (Core Finding GEV Panel) ---
+                if scenario == 'ssp585' and return_period_results_for_plot:
+                     fig3_filename = os.path.join(Config.PLOT_DIR, "Figure3_core_finding_regime_shift_ssp585.png")
+                     if not os.path.exists(fig3_filename):
+                         Visualizer.plot_core_finding_gev_panel(return_period_results_for_plot, Config(), scenario)
+                     else:
+                         logging.info(f"Figure 3 '{fig3_filename}' already exists.")
+
 
                 # --- PLOT: Storyline Impacts Bar Chart (per scenario) ---
                 # (This block remains the same, but it uses the 'return_period_results_for_plot' calculated above)
@@ -714,6 +751,15 @@ class ClimateAnalysis:
                 else:
                     logging.info(f"Plot '{impacts_plot_filename}' already exists.")
                 # --- END: MODIFIED BLOCK ---
+
+                # --- PLOT: Figure 4 (Mechanism Drivers Panel) ---
+                if scenario == 'ssp585' and cmip6_results:
+                    fig4_filename = os.path.join(Config.PLOT_DIR, "Figure4_mechanism_drivers_summary_ssp585.png")
+                    if not os.path.exists(fig4_filename):
+                        storyline_impacts = StorylineAnalyzer.calculate_storyline_impacts(cmip6_results)
+                        Visualizer.plot_mechanism_drivers_panel(storyline_impacts, Config(), scenario)
+                    else:
+                         logging.info(f"Figure 4 '{fig4_filename}' already exists.")
 
 
                 # --- PLOT: LNWL Monthly Distribution (NEW PLOT v2: Grid Plot) ---

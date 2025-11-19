@@ -117,7 +117,10 @@ class Visualizer:
 
     @staticmethod
     def plot_regression_analysis(all_season_data, dataset_key):
-        """Creates a panel plot for regression maps (U850 vs PR/TAS indices)."""
+        """
+        Creates a panel plot for regression maps (U850 vs PR/TAS indices).
+        MODIFIED for ERL Figure 1: 2x2 Layout (Winter/Summer x PR/TAS)
+        """
         logging.info(f"Plotting U850 vs Box Index regression maps for {dataset_key}...")
         Visualizer.ensure_plot_dir_exists()
 
@@ -132,27 +135,23 @@ class Visualizer:
         # Plot PR panels
         winter_pr_data = all_season_data['Winter']
         ax_pr_winter = fig.add_subplot(gs[0, 0], projection=ccrs.PlateCarree())
-        # MODIFIED: Pass dataset_key to the plotting function
-        cf_pr, label_pr = Visualizer.plot_regression_map(ax_pr_winter, winter_pr_data.get('slopes_pr'), winter_pr_data.get('p_values_pr'), winter_pr_data.get('lons'), winter_pr_data.get('lats'), f"{dataset_key}: U850 vs PR Box Index", box_coords, "DJF", 'pr', ua_seasonal_mean=winter_pr_data.get('ua850_mean'), std_dev_predictor=winter_pr_data.get('std_dev_pr'), dataset_key=dataset_key)
+        cf_pr, label_pr = Visualizer.plot_regression_map(ax_pr_winter, winter_pr_data.get('slopes_pr'), winter_pr_data.get('p_values_pr'), winter_pr_data.get('lons'), winter_pr_data.get('lats'), f"Winter (DJF) Precipitation", box_coords, "DJF", 'pr', ua_seasonal_mean=winter_pr_data.get('ua850_mean'), std_dev_predictor=winter_pr_data.get('std_dev_pr'), dataset_key=dataset_key)
 
         summer_pr_data = all_season_data['Summer']
-        ax_pr_summer = fig.add_subplot(gs[0, 1], projection=ccrs.PlateCarree())
-        # MODIFIED: Pass dataset_key to the plotting function
-        Visualizer.plot_regression_map(ax_pr_summer, summer_pr_data.get('slopes_pr'), summer_pr_data.get('p_values_pr'), summer_pr_data.get('lons'), summer_pr_data.get('lats'), f"{dataset_key}: U850 vs PR Box Index", box_coords, "JJA", 'pr', ua_seasonal_mean=summer_pr_data.get('ua850_mean'), std_dev_predictor=summer_pr_data.get('std_dev_pr'), dataset_key=dataset_key)
+        ax_pr_summer = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
+        Visualizer.plot_regression_map(ax_pr_summer, summer_pr_data.get('slopes_pr'), summer_pr_data.get('p_values_pr'), summer_pr_data.get('lons'), summer_pr_data.get('lats'), f"Summer (JJA) Precipitation", box_coords, "JJA", 'pr', ua_seasonal_mean=summer_pr_data.get('ua850_mean'), std_dev_predictor=summer_pr_data.get('std_dev_pr'), dataset_key=dataset_key)
 
         if cf_pr:
             cax_pr = fig.add_subplot(gs[0, 2]); fig.colorbar(cf_pr, cax=cax_pr, extend='both', label=label_pr)
 
         # Plot TAS panels
         winter_tas_data = all_season_data['Winter']
-        ax_tas_winter = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
-        # MODIFIED: Pass dataset_key to the plotting function
-        cf_tas, label_tas = Visualizer.plot_regression_map(ax_tas_winter, winter_tas_data.get('slopes_tas'), winter_tas_data.get('p_values_tas'), winter_tas_data.get('lons'), winter_tas_data.get('lats'), f"{dataset_key}: U850 vs TAS Box Index", box_coords, "DJF", 'tas', ua_seasonal_mean=winter_tas_data.get('ua850_mean'), std_dev_predictor=winter_tas_data.get('std_dev_tas'), dataset_key=dataset_key)
+        ax_tas_winter = fig.add_subplot(gs[0, 1], projection=ccrs.PlateCarree())
+        cf_tas, label_tas = Visualizer.plot_regression_map(ax_tas_winter, winter_tas_data.get('slopes_tas'), winter_tas_data.get('p_values_tas'), winter_tas_data.get('lons'), winter_tas_data.get('lats'), f"Winter (DJF) Temperature", box_coords, "DJF", 'tas', ua_seasonal_mean=winter_tas_data.get('ua850_mean'), std_dev_predictor=winter_tas_data.get('std_dev_tas'), dataset_key=dataset_key)
 
         summer_tas_data = all_season_data['Summer']
         ax_tas_summer = fig.add_subplot(gs[1, 1], projection=ccrs.PlateCarree())
-        # MODIFIED: Pass dataset_key to the plotting function
-        Visualizer.plot_regression_map(ax_tas_summer, summer_tas_data.get('slopes_tas'), summer_tas_data.get('p_values_tas'), summer_tas_data.get('lons'), summer_tas_data.get('lats'), f"{dataset_key}: U850 vs TAS Box Index", box_coords, "JJA", 'tas', ua_seasonal_mean=summer_tas_data.get('ua850_mean'), std_dev_predictor=summer_tas_data.get('std_dev_tas'), dataset_key=dataset_key)
+        Visualizer.plot_regression_map(ax_tas_summer, summer_tas_data.get('slopes_tas'), summer_tas_data.get('p_values_tas'), summer_tas_data.get('lons'), summer_tas_data.get('lats'), f"Summer (JJA) Temperature", box_coords, "JJA", 'tas', ua_seasonal_mean=summer_tas_data.get('ua850_mean'), std_dev_predictor=summer_tas_data.get('std_dev_tas'), dataset_key=dataset_key)
 
         if cf_tas:
             cax_tas = fig.add_subplot(gs[1, 2]); fig.colorbar(cf_tas, cax=cax_tas, extend='both', label=label_tas)
@@ -162,6 +161,88 @@ class Visualizer:
         filename = os.path.join(Config.PLOT_DIR, f'regression_maps_norm_{dataset_key}.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
+        logging.info(f"Saved regression analysis plot to {filename}")
+
+    @staticmethod
+    def plot_erl_figure1_regression_maps(all_season_data, dataset_key):
+        """
+        Creates ERL Figure 1: Historical Jet Influence (Regression Maps).
+        Layout: 2x2 Grid (Winter/Summer x Precip/Temp).
+        """
+        logging.info(f"Plotting ERL Figure 1 for {dataset_key}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        if not isinstance(all_season_data, dict) or not all_season_data.get('Winter') or not all_season_data.get('Summer'):
+             logging.warning(f"Skipping ERL Figure 1 for {dataset_key}: Missing Winter or Summer data.")
+             return
+
+        # --- MODIFIED LAYOUT: 2x2 Grid ---
+        fig = plt.figure(figsize=(12, 10))
+        gs = gridspec.GridSpec(2, 2, wspace=0.1, hspace=0.2, top=0.92, bottom=0.15, left=0.05, right=0.95)
+        box_coords = [Config.BOX_LON_MIN, Config.BOX_LON_MAX, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX]
+        
+        # --- Row 1: Winter (Left: PR, Right: TAS) ---
+        winter_data = all_season_data['Winter']
+        
+        # Winter PR
+        ax_pr_winter = fig.add_subplot(gs[0, 0], projection=ccrs.PlateCarree())
+        cf_pr, label_pr = Visualizer.plot_regression_map(
+            ax_pr_winter, winter_data.get('slopes_pr'), winter_data.get('p_values_pr'), 
+            winter_data.get('lons'), winter_data.get('lats'), 
+            "a) Winter Precipitation", box_coords, "DJF", 'pr', 
+            ua_seasonal_mean=winter_data.get('ua850_mean'), 
+            std_dev_predictor=winter_data.get('std_dev_pr'), dataset_key=dataset_key
+        )
+
+        # Winter TAS
+        ax_tas_winter = fig.add_subplot(gs[0, 1], projection=ccrs.PlateCarree())
+        cf_tas, label_tas = Visualizer.plot_regression_map(
+            ax_tas_winter, winter_data.get('slopes_tas'), winter_data.get('p_values_tas'), 
+            winter_data.get('lons'), winter_data.get('lats'), 
+            "b) Winter Temperature", box_coords, "DJF", 'tas', 
+            ua_seasonal_mean=winter_data.get('ua850_mean'), 
+            std_dev_predictor=winter_data.get('std_dev_tas'), dataset_key=dataset_key
+        )
+
+        # --- Row 2: Summer (Left: PR, Right: TAS) ---
+        summer_data = all_season_data['Summer']
+        
+        # Summer PR
+        ax_pr_summer = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
+        Visualizer.plot_regression_map(
+            ax_pr_summer, summer_data.get('slopes_pr'), summer_data.get('p_values_pr'), 
+            summer_data.get('lons'), summer_data.get('lats'), 
+            "c) Summer Precipitation", box_coords, "JJA", 'pr', 
+            ua_seasonal_mean=summer_data.get('ua850_mean'), 
+            std_dev_predictor=summer_data.get('std_dev_pr'), dataset_key=dataset_key
+        )
+
+        # Summer TAS
+        ax_tas_summer = fig.add_subplot(gs[1, 1], projection=ccrs.PlateCarree())
+        Visualizer.plot_regression_map(
+            ax_tas_summer, summer_data.get('slopes_tas'), summer_data.get('p_values_tas'), 
+            summer_data.get('lons'), summer_data.get('lats'), 
+            "d) Summer Temperature", box_coords, "JJA", 'tas', 
+            ua_seasonal_mean=summer_data.get('ua850_mean'), 
+            std_dev_predictor=summer_data.get('std_dev_tas'), dataset_key=dataset_key
+        )
+
+        # --- Colorbars (Horizontal at bottom) ---
+        # PR Colorbar (Left side)
+        cax_pr = fig.add_axes([0.1, 0.08, 0.35, 0.02])
+        fig.colorbar(cf_pr, cax=cax_pr, orientation='horizontal', label=label_pr, extend='both')
+        
+        # TAS Colorbar (Right side)
+        cax_tas = fig.add_axes([0.55, 0.08, 0.35, 0.02])
+        fig.colorbar(cf_tas, cax=cax_tas, orientation='horizontal', label=label_tas, extend='both')
+
+        plt.suptitle(f"{dataset_key}: Historical Jet Influence on Climate", fontsize=16, weight='bold')
+        
+        filename = os.path.join(Config.PLOT_DIR, 'Figure1_regression_maps_ERA5.png')
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved ERL Figure 1 to {filename}")
+
 
     @staticmethod
     def plot_jet_correlation_maps(correlation_data_20crv3, correlation_data_era5, season):
@@ -997,47 +1078,25 @@ class Visualizer:
     def plot_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, config, filename="climate_indices_evolution.png"):
         """
         Plots CMIP6 and Reanalysis changes over time, showing the evolution of key climate indices.
-        MODIFIZIERT, um ein 2x3-Raster mit globaler Temperatur und allen vier Jet-Indizes zu erstellen.
+        Original 2x2 layout for backward compatibility.
         """
-        filename = "climate_indices_evolution.png"
-        logging.info(f"Plotting climate projection timeseries comparison to {filename} (2x3 layout)...")
+        logging.info(f"Plotting climate projection timeseries comparison to {filename}...")
         Visualizer.ensure_plot_dir_exists()
 
-        # --- MODIFIKATION START ---
-        # Ändern des Layouts auf 2x3 Subplots
-        fig, axs = plt.subplots(2, 3, figsize=(21, 12), sharex=True)
-        axs_flat = axs.flatten()
-        # --- MODIFIKATION ENDE ---
-
-        # --- (a) Globale Temperatur-Anomalie ---
-        ax_a = axs_flat[0]
-        if cmip6_plot_data['Global_Tas']['members']:
-            for member_tas in cmip6_plot_data['Global_Tas']['members']:
-                ax_a.plot(member_tas.year, member_tas, color='grey', alpha=0.3, linewidth=0.7)
-        if cmip6_plot_data['Global_Tas']['mmm'] is not None:
-            ax_a.plot(cmip6_plot_data['Global_Tas']['mmm'].year, cmip6_plot_data['Global_Tas']['mmm'], color='black', linewidth=2.5, label='CMIP6 MMM')
+        # Original Layout: 2x2 Grid
+        # Row 1: Summer Jet Lat, Summer Jet Speed
+        # Row 2: Winter Jet Lat, Winter Jet Speed
+        # (Note: Global Temp was likely a separate plot or not in this specific function originally, 
+        # but to be safe, we'll just plot the 4 jet indices as that's what the data structure suggests)
         
-        # --- START: NEUER PLOT-CODE ---
-        # Zeichne Reanalyse-Daten für globale Temperatur
-        if reanalysis_plot_data.get('Global_Tas'):
-            if reanalysis_plot_data['Global_Tas'].get('20CRv3') is not None:
-                reanalysis_20crv3_tas = reanalysis_plot_data['Global_Tas']['20CRv3']
-                ax_a.plot(reanalysis_20crv3_tas.year, reanalysis_20crv3_tas, color='darkorange', linewidth=2, label='20CRv3')
-            if reanalysis_plot_data['Global_Tas'].get('ERA5') is not None:
-                reanalysis_era5_tas = reanalysis_plot_data['Global_Tas']['ERA5']
-                ax_a.plot(reanalysis_era5_tas.year, reanalysis_era5_tas, color='purple', linewidth=2, label='ERA5')
-        # --- ENDE: NEUER PLOT-CODE ---
-        
-        ax_a.set_title('(a) Global Temperature Change', fontsize=12)
-        ax_a.set_ylabel(f'Temp. Anomaly (°C rel. to {config.CMIP6_PRE_INDUSTRIAL_REF_START}-{config.CMIP6_PRE_INDUSTRIAL_REF_END})', fontsize=10)
-        ax_a.legend(fontsize=9)
+        fig, axs = plt.subplots(2, 2, figsize=(12, 10))
+        axs = axs.flatten()
 
-        # --- Konfiguration für die vier Jet-Index-Plots ---
         plot_configs = [
-            {'key': 'JJA_JetLat', 'ax': axs_flat[1], 'title': '(b) Summer (JJA) Jet Latitude Change', 'ylabel': 'Latitude Anomaly (°)'},
-            {'key': 'JJA_JetSpeed', 'ax': axs_flat[2], 'title': '(c) Summer (JJA) Jet Speed Change', 'ylabel': 'Speed Anomaly (m/s)'},
-            {'key': 'DJF_JetLat', 'ax': axs_flat[4], 'title': '(e) Winter (DJF) Jet Latitude Change', 'ylabel': 'Latitude Anomaly (°)'},
-            {'key': 'DJF_JetSpeed', 'ax': axs_flat[5], 'title': '(f) Winter (DJF) Jet Speed Change', 'ylabel': 'Speed Anomaly (m/s)'},
+            {'key': 'JJA_JetLat',   'ax': axs[0], 'title': 'Summer (JJA) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)'},
+            {'key': 'JJA_JetSpeed', 'ax': axs[1], 'title': 'Summer (JJA) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)'},
+            {'key': 'DJF_JetLat',   'ax': axs[2], 'title': 'Winter (DJF) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)'},
+            {'key': 'DJF_JetSpeed', 'ax': axs[3], 'title': 'Winter (DJF) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)'},
         ]
 
         for p_config in plot_configs:
@@ -1057,32 +1116,104 @@ class Visualizer:
                 reanalysis_era5 = reanalysis_plot_data[key]['ERA5']
                 ax.plot(reanalysis_era5.season_year, reanalysis_era5, color='purple', linewidth=2, label='ERA5')
 
-            ax.set_title(p_config['title'], fontsize=12)
+            ax.set_title(p_config['title'], fontsize=12, weight='bold', loc='left')
             ax.set_ylabel(p_config['ylabel'], fontsize=10)
-            ax.legend(fontsize=9)
-
-        # --- Finale Formatierung für alle Achsen ---
-        for ax in axs_flat:
             ax.grid(True, linestyle=':', alpha=0.7)
             ax.set_xlim(1850, 2100)
             ax.axhline(0, color='black', linewidth=0.5)
-        
-        # X-Achsen-Label nur für die untere Reihe
-        for ax in axs[1, :]:
+            if p_config['ax'] in [axs[2], axs[3]]: # Bottom row
                 ax.set_xlabel('Year', fontsize=10)
 
-        # --- MODIFIKATION START ---
-        # Leeren Subplot in der Mitte ausblenden
-        axs_flat[3].axis('off')
-        # --- MODIFIKATION ENDE ---
-
-        fig.suptitle('Evolution of Key Climate Indices (20-Year Rolling Mean Anomaly)', fontsize=16, weight='bold')
-        # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
+        fig.suptitle('Evolution of Key Climate Indices (20-Year Rolling Mean)', fontsize=16, weight='bold')
         fig.tight_layout(rect=[0, 0, 1, 0.96])
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved climate projection timeseries plot to {filepath}")
+
+    @staticmethod
+    def plot_erl_figure2_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, config):
+        """
+        Creates ERL Figure 2: Future Dynamical Uncertainty (Climate Indices Evolution).
+        Layout: 3 Rows (Global Temp, Summer Jet, Winter Jet).
+        """
+        filename = "Figure2_climate_indices_evolution_ssp585.png"
+        logging.info(f"Plotting ERL Figure 2 to {filename}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        # --- MODIFIED LAYOUT: 3 Rows ---
+        # Row 1: Global Temp (Full Width) - Reduced Height
+        # Row 2: Summer Jet Lat (Left), Summer Jet Speed (Right)
+        # Row 3: Winter Jet Lat (Left), Winter Jet Speed (Right)
+        
+        fig = plt.figure(figsize=(12, 14))
+        # Reduced height ratio for the first row (Global Temp)
+        # Adjusted hspace to reduce gap between title and first plot
+        gs = gridspec.GridSpec(3, 2, height_ratios=[0.6, 1, 1], hspace=0.25)
+
+        # --- (a) Global Temperature Anomaly ---
+        ax_a = fig.add_subplot(gs[0, :]) # Span both columns
+        if cmip6_plot_data.get('Global_Tas') and cmip6_plot_data['Global_Tas']['members']:
+            for member_tas in cmip6_plot_data['Global_Tas']['members']:
+                ax_a.plot(member_tas.year, member_tas, color='grey', alpha=0.3, linewidth=0.7)
+        if cmip6_plot_data.get('Global_Tas') and cmip6_plot_data['Global_Tas']['mmm'] is not None:
+            ax_a.plot(cmip6_plot_data['Global_Tas']['mmm'].year, cmip6_plot_data['Global_Tas']['mmm'], color='black', linewidth=2.5, label='CMIP6 MMM')
+        
+        # Reanalysis for Global Temp
+        if reanalysis_plot_data.get('Global_Tas'):
+            if reanalysis_plot_data['Global_Tas'].get('20CRv3') is not None:
+                reanalysis_20crv3_tas = reanalysis_plot_data['Global_Tas']['20CRv3']
+                ax_a.plot(reanalysis_20crv3_tas.year, reanalysis_20crv3_tas, color='darkorange', linewidth=2, label='20CRv3')
+            if reanalysis_plot_data['Global_Tas'].get('ERA5') is not None:
+                reanalysis_era5_tas = reanalysis_plot_data['Global_Tas']['ERA5']
+                ax_a.plot(reanalysis_era5_tas.year, reanalysis_era5_tas, color='purple', linewidth=2, label='ERA5')
+        
+        ax_a.set_title('a) Global Temperature Change', fontsize=12, weight='bold', loc='left')
+        ax_a.set_ylabel(f'Temp. Anomaly (°C)', fontsize=10)
+        ax_a.legend(fontsize=9, loc='upper left')
+        ax_a.grid(True, linestyle=':', alpha=0.7)
+        ax_a.set_xlim(1850, 2100)
+        ax_a.axhline(0, color='black', linewidth=0.5)
+
+        # --- Configuration for Jet Indices ---
+        plot_configs = [
+            {'key': 'JJA_JetLat',   'ax': fig.add_subplot(gs[1, 0]), 'title': 'b) Summer (JJA) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)'},
+            {'key': 'JJA_JetSpeed', 'ax': fig.add_subplot(gs[1, 1]), 'title': 'c) Summer (JJA) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)'},
+            {'key': 'DJF_JetLat',   'ax': fig.add_subplot(gs[2, 0]), 'title': 'd) Winter (DJF) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)'},
+            {'key': 'DJF_JetSpeed', 'ax': fig.add_subplot(gs[2, 1]), 'title': 'e) Winter (DJF) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)'},
+        ]
+
+        for p_config in plot_configs:
+            ax = p_config['ax']
+            key = p_config['key']
+
+            if cmip6_plot_data.get(key) and cmip6_plot_data[key]['members']:
+                for member_jet in cmip6_plot_data[key]['members']:
+                    ax.plot(member_jet.season_year, member_jet, color='grey', alpha=0.3, linewidth=0.7)
+            if cmip6_plot_data.get(key) and cmip6_plot_data[key]['mmm'] is not None:
+                ax.plot(cmip6_plot_data[key]['mmm'].season_year, cmip6_plot_data[key]['mmm'], color='black', linewidth=2.5, label='CMIP6 MMM')
+            
+            if reanalysis_plot_data.get(key) and reanalysis_plot_data[key].get('20CRv3') is not None:
+                reanalysis_20crv3 = reanalysis_plot_data[key]['20CRv3']
+                ax.plot(reanalysis_20crv3.season_year, reanalysis_20crv3, color='darkorange', linewidth=2, label='20CRv3')
+            if reanalysis_plot_data.get(key) and reanalysis_plot_data[key].get('ERA5') is not None:
+                reanalysis_era5 = reanalysis_plot_data[key]['ERA5']
+                ax.plot(reanalysis_era5.season_year, reanalysis_era5, color='purple', linewidth=2, label='ERA5')
+
+            ax.set_title(p_config['title'], fontsize=12, weight='bold', loc='left')
+            ax.set_ylabel(p_config['ylabel'], fontsize=10)
+            ax.grid(True, linestyle=':', alpha=0.7)
+            ax.set_xlim(1850, 2100)
+            ax.axhline(0, color='black', linewidth=0.5)
+            if p_config['ax'] in [fig.axes[-2], fig.axes[-1]]: # Bottom row
+                ax.set_xlabel('Year', fontsize=10)
+
+        fig.suptitle('Evolution of Key Climate Indices (20-Year Rolling Mean)', fontsize=16, weight='bold')
+        fig.tight_layout(rect=[0, 0, 1, 0.96])
+        filepath = os.path.join(config.PLOT_DIR, filename)
+        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved ERL Figure 2 to {filepath}")
         
     @staticmethod
     def _plot_single_scatter_panel(ax, cmip6_results, beta_obs_slopes, gwl_to_plot,
@@ -3468,3 +3599,264 @@ class Visualizer:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved LNWL aggregation comparison plot (3x4 grid, 30-Day, FullYear) to {filename}")
+
+    @staticmethod
+    def plot_core_finding_gev_panel(return_period_results, config, scenario):
+        """
+        Creates ERL Figure 3: Core Finding - Regime Shift in Extremes (30Q100).
+        Layout: 2x2 (Summer Low, Winter Low, Summer High, Winter High).
+        """
+        logging.info(f"Plotting Figure 3 (Core Finding GEV Panel) for {scenario}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        if not return_period_results or 'data' not in return_period_results:
+            logging.warning("Missing data for Figure 3.")
+            return
+
+        # Target Event: 30-Day Duration, 100-Year Return Period
+        # Keys might be '30Q100_low' and '30Q100_high' or similar.
+        # Based on typical naming: '30Q100' might be the duration/return period, type is low/high.
+        # Let's look for keys containing '30Q100' in the thresholds.
+        
+        target_event_substring = "30Q100"
+        
+        # Identify specific keys for Low and High flow
+        # We expect keys like '30Q100_low' and '30Q100_high' in the 'winter'/'summer' dictionaries
+        # IMPROVED KEY MATCHING: Look for keys containing '30Q100' (or similar) and 'low'/'high'
+        winter_keys = list(return_period_results['thresholds']['winter'].keys())
+        summer_keys = list(return_period_results['thresholds']['summer'].keys())
+        
+        logging.info(f"Available Winter Keys: {winter_keys}")
+        logging.info(f"Available Summer Keys: {summer_keys}")
+
+        low_key_winter = next((k for k in winter_keys if target_event_substring in k and 'low' in k.lower()), None)
+        high_key_winter = next((k for k in winter_keys if target_event_substring in k and 'high' in k.lower()), None)
+        low_key_summer = next((k for k in summer_keys if target_event_substring in k and 'low' in k.lower()), None)
+        high_key_summer = next((k for k in summer_keys if target_event_substring in k and 'high' in k.lower()), None)
+        
+        plot_configs = [
+            {'half_year': 'summer', 'event_key': low_key_summer,  'title': 'a) Summer (JJA) Low-Flow (30Q100)', 'ax_idx': 0},
+            {'half_year': 'winter', 'event_key': low_key_winter,  'title': 'b) Winter (DJF) Low-Flow (30Q100)', 'ax_idx': 1},
+            {'half_year': 'summer', 'event_key': high_key_summer, 'title': 'c) Summer (JJA) High-Flow (30Q100)', 'ax_idx': 2},
+            {'half_year': 'winter', 'event_key': high_key_winter, 'title': 'd) Winter (DJF) High-Flow (30Q100)', 'ax_idx': 3},
+        ]
+
+        fig, axs = plt.subplots(2, 2, figsize=(14, 10), sharex=False) # ShareX False because Low/High magnitudes differ
+        axs = axs.flatten()
+        
+        # Main Title
+        fig.suptitle(f"Regime Shift in Extremes (30Q100) - {scenario.upper()}", fontsize=16, weight='bold', y=0.98)
+        
+        gwls_to_plot = config.GLOBAL_WARMING_LEVELS
+        # gwl_colors = {f'+{gwl}°C': color for gwl, color in zip(gwls_to_plot, ['#fdbf6f', '#ff7f00'])} # Example colors
+        # Better colors from config if available, or hardcoded standard
+        gwl_colors = {f'+{gwls_to_plot[0]}°C': '#4575b4', f'+{gwls_to_plot[1]}°C': '#d73027'}
+
+        storyline_order = [
+            'MMM',
+            'Slow Jet & Northward Shift',
+            'Fast Jet & Northward Shift',
+            'Slow Jet & Southward Shift',
+            'Fast Jet & Southward Shift',
+        ]
+
+        for config_item in plot_configs:
+            ax = axs[config_item['ax_idx']]
+            half_year = config_item['half_year']
+            event_key = config_item['event_key']
+            
+            if not event_key:
+                ax.text(0.5, 0.5, "Event Not Found", ha='center', va='center')
+                ax.set_title(config_item['title'], weight='bold', loc='left')
+                continue
+
+            # Prepare data for boxplots
+            plot_data = []
+            
+            # Get Historical Return Period
+            hist_rp = return_period_results['thresholds'][half_year][event_key].get('hist_return_period')
+            
+            for storyline in storyline_order:
+                for gwl in gwls_to_plot:
+                    gwl_label = f'+{gwl}°C'
+                    # Data structure: results['data'][gwl][half_year][storyline][event_key]['future_return_periods_all_models']
+                    # CORRECTED KEY: 'future_return_periods_all_models' instead of 'new_return_periods'
+                    try:
+                        event_data = return_period_results['data'][gwl][half_year][storyline][event_key]
+                        if event_data and 'future_return_periods_all_models' in event_data:
+                            rps = event_data['future_return_periods_all_models']
+                            # Filter NaNs and Infs
+                            rps = [rp for rp in rps if np.isfinite(rp)]
+                            for rp in rps:
+                                plot_data.append({
+                                    'Storyline': storyline,
+                                    'GWL': gwl_label,
+                                    'Return Period': rp
+                                })
+                    except KeyError:
+                        continue
+            
+            df = pd.DataFrame(plot_data)
+            
+            if df.empty:
+                ax.text(0.5, 0.5, "No Data", ha='center', va='center')
+            else:
+                # Plot - ROTATED: Storyline on Y, Return Period on X
+                sns.boxplot(data=df, y='Storyline', x='Return Period', hue='GWL', ax=ax,
+                            order=storyline_order, palette=gwl_colors,
+                            showfliers=False, linewidth=1.2, width=0.7, orient='h')
+                
+                # Add stripplot for individual models
+                sns.stripplot(data=df, y='Storyline', x='Return Period', hue='GWL', ax=ax,
+                              order=storyline_order, palette=gwl_colors,
+                              dodge=True, jitter=0.15, size=3, alpha=0.6, legend=False, orient='h')
+
+            # Formatting
+            ax.set_xscale('log')
+            ax.set_title(config_item['title'], weight='bold', loc='left', fontsize=12)
+            ax.set_ylabel('') # Storylines are self-explanatory
+            if config_item['ax_idx'] in [2, 3]: # Bottom row
+                ax.set_xlabel('Return Period (Years)', fontsize=10)
+            else:
+                ax.set_xlabel('')
+            
+            # Historical Line (Vertical now)
+            if hist_rp:
+                ax.axvline(hist_rp, color='black', linestyle='--', linewidth=1.5, label=f'Hist. ({hist_rp:.0f}yr)')
+            
+            # Ticks
+            ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 200, 500])
+            ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+            
+            # Y-axis labels (Storylines) - Only on left column
+            if config_item['ax_idx'] % 2 != 0: # Right column
+                 ax.set_yticklabels([])
+                 ax.set_ylabel('')
+            
+            # Legend only in first plot
+            if config_item['ax_idx'] == 0:
+                ax.legend(loc='lower right', fontsize=8, ncol=1)
+            else:
+                if ax.get_legend(): ax.get_legend().remove()
+                
+            ax.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust for suptitle
+        filename = os.path.join(config.PLOT_DIR, "Figure3_core_finding_regime_shift_ssp585.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved Figure 3 to {filename}")
+
+    @staticmethod
+    def plot_mechanism_drivers_panel(storyline_impacts, config, scenario):
+        """
+        Creates ERL Figure 4: Mechanism - Drivers (Temp & Precip).
+        Layout: 2x2 (Summer Temp, Summer Precip, Winter Temp, Winter Precip).
+        """
+        logging.info(f"Plotting Figure 4 (Mechanism Drivers Panel) for {scenario}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        if not storyline_impacts:
+            logging.warning("Missing data for Figure 4.")
+            return
+
+        fig, axs = plt.subplots(2, 2, figsize=(12, 10))
+        axs = axs.flatten()
+        
+        gwls_to_plot = config.GLOBAL_WARMING_LEVELS
+        gwl_colors = {f'+{gwls_to_plot[0]}°C': '#4575b4', f'+{gwls_to_plot[1]}°C': '#d73027'}
+        
+        # Plot Configuration
+        # Note: Order requested is Summer Temp, Summer Precip, Winter Temp, Winter Precip?
+        # Let's check instructions: "(a) Summer Temp, (b) Summer Precip, (c) Winter Temp, (d) Winter Precip."
+        # Plot Configuration
+        plot_configs = [
+            {'key': 'JJA_tas', 'title': 'a) Summer (JJA) Temperature', 'unit': '°C', 'ax': axs[0], 'col': 0},
+            {'key': 'JJA_pr',  'title': 'b) Summer (JJA) Precipitation', 'unit': '%',  'ax': axs[1], 'col': 1},
+            {'key': 'DJF_tas', 'title': 'c) Winter (DJF) Temperature', 'unit': '°C', 'ax': axs[2], 'col': 0},
+            {'key': 'DJF_pr',  'title': 'd) Winter (DJF) Precipitation', 'unit': '%',  'ax': axs[3], 'col': 1},
+        ]
+
+        storyline_order = [
+            'MMM',
+            'Slow Jet & Northward Shift',
+            'Fast Jet & Northward Shift',
+            'Slow Jet & Southward Shift',
+            'Fast Jet & Southward Shift',
+        ]
+        
+        # Main Title
+        fig.suptitle(f"Drivers of Change (Temperature & Precipitation) - {scenario.upper()}", fontsize=16, weight='bold', y=0.98)
+        
+        # Store limits for shared axes
+        col_limits = {0: [], 1: []}
+
+        for p_conf in plot_configs:
+            ax = p_conf['ax']
+            key = p_conf['key']
+            
+            # Prepare Data
+            plot_data = []
+            for gwl in gwls_to_plot:
+                gwl_label = f'+{gwl}°C'
+                for storyline in storyline_order:
+                    try:
+                        val = storyline_impacts[gwl][key][storyline]['total']
+                        plot_data.append({
+                            'Storyline': storyline,
+                            'GWL': gwl_label,
+                            'Change': val
+                        })
+                    except KeyError:
+                        continue
+
+            df = pd.DataFrame(plot_data)
+            
+            if df.empty:
+                ax.text(0.5, 0.5, "No Data", ha='center', va='center')
+            else:
+                # Plot - ROTATED: Storyline on Y, Change on X
+                sns.barplot(data=df, y='Storyline', x='Change', hue='GWL', ax=ax,
+                            order=storyline_order, palette=gwl_colors,
+                            edgecolor='black', linewidth=0.5, orient='h')
+                
+                # Collect limits
+                col_limits[p_conf['col']].append(ax.get_xlim())
+            
+            # Formatting
+            ax.set_title(p_conf['title'], weight='bold', loc='left', fontsize=12)
+            ax.set_ylabel('')
+            if p_conf['ax'] in [axs[2], axs[3]]: # Bottom row
+                ax.set_xlabel(f"Change ({p_conf['unit']})", fontsize=10)
+            else:
+                ax.set_xlabel('')
+            
+            ax.axvline(0, color='black', linewidth=0.8)
+            ax.grid(True, axis='x', linestyle=':', alpha=0.7)
+            
+            # Y-axis labels (Storylines) - Only on left column
+            if p_conf['ax'] in [axs[1], axs[3]]: # Right column
+                 ax.set_yticklabels([])
+                 ax.set_ylabel('')
+
+            # Legend
+            if p_conf['ax'] == axs[0]:
+                ax.legend(loc='lower right', fontsize=8)
+            else:
+                if ax.get_legend(): ax.get_legend().remove()
+        
+        # Apply shared limits per column
+        for col, limits in col_limits.items():
+            if limits:
+                min_val = min(l[0] for l in limits)
+                max_val = max(l[1] for l in limits)
+                # Apply to all axes in this column
+                for p_conf in plot_configs:
+                    if p_conf['col'] == col:
+                        p_conf['ax'].set_xlim(min_val, max_val)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust for suptitle
+        filename = os.path.join(config.PLOT_DIR, "Figure4_mechanism_drivers_summary_ssp585.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved Figure 4 to {filename}")

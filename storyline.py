@@ -2094,33 +2094,17 @@ class StorylineAnalyzer:
         für HALBJÄHRIGE Perioden (Winter/Sommer) UND GANZJÄHRIG (Full Year).
 
         NEUE LOGIK (v4.3 - Pooled GEV Fit mit korrigiertem Aufruf):
-        1. Verwendet die (mit GEV angepassten) historischen Schwellenwerte aus Schritt 1.
-        2. Poolt die 30-Jahres-Extremwert-Zeitreihen (z.B. '7Q_low_winter') ALLER Modelle
-           INNERHALB einer Storyline zu einem großen Datensatz (z.B. N=150).
-        3. Fittet EINE GEV-Verteilung an diesen gepoolten Datensatz.
-        4. Berechnet die Wahrscheinlichkeit (CDF) des historischen Schwellenwerts in dieser
-           neuen, zukünftigen Verteilung.
-        5. Leitet daraus die neue, robuste Jährlichkeit (T = 1/P) für die Storyline ab.
-           
-        --- MODIFIKATION (User-Wunsch, 06.11.2025) ---
-        - EVA-Events erweitert auf 1Q, 7Q, 30Q und T=10, 50, 100.
+        - Verwendet die (mit GEV angepassten) historischen Schwellenwerte.
+        - Poolt die 30-Jahres-Extremwert-Zeitreihen ALLER Modelle INNERHALB einer Storyline.
+        - Fittet EINE GEV-Verteilung an diesen gepoolten Datensatz.
+        - Berechnet die Wahrscheinlichkeit (CDF) des historischen Schwellenwerts.
+        - Leitet daraus die neue, robuste Jährlichkeit (T = 1/P) ab.
         
-        --- MODIFIKATION (User-Wunsch, 07.11.2025) ---
-        - Berechnungen für 'full_year' hinzugefügt.
-        - 'full_year' wird den 'DJF'-Storylines zugeordnet.
-        
-        --- START: KORREKTUR (07.11.2025 12:30) ---
-        - Logik auf '>= 30' geändert, um N=30 zu erlauben.
-        - Detaillierteres Logging hinzugefügt.
-        
-        --- NEUE MODIFIKATION: BOOTSTRAPPING HINZUGEFÜGT ---
+        NEUE MODIFIKATION: BOOTSTRAPPING HINZUGEFÜGT
         - Berechnet 95%-Konfidenzintervalle mittels Bootstrapping (1000 Iterationen).
-        
-        --- MODIFIKATION (14.11.2025) ---
-        - Zählweise für Bootstrap-Erfolg geändert (inf ist kein Fehler).
-        - Speichert 'bootstrap_finite_pct' für Plot-Annotation.
+        - Berechnet den MEDIAN der Bootstrap-Verteilung als robusten Schätzer.
         """
-        logging.info("Analyzing storyline discharge... mit GEPPOOLTER GEV-Logik (v4.3) + BOOTSTRAPPING...")
+        logging.info("Analyzing storyline discharge... mit GEPPOOLTER GEV-Logik (v4.3) + BOOTSTRAPPING (Median)...")
         
         if historical_discharge_da is None:
             logging.error("Historical discharge data (daily) is missing. Aborting.")
@@ -2130,7 +2114,6 @@ class StorylineAnalyzer:
         results = {'thresholds': {'winter': {}, 'summer': {}, 'full_year': {}}, 'data': {}}
         
         # --- 1. Definiere die zu analysierenden EVA-Ereignisse ---
-        # --- MODIFIZIERTER BLOCK ---
         eva_events_to_analyze = [
             # 1Q Events
             ('1Q10_low', '1Q_low', 1, 10, 'low', 'Low-Flow (1Q10)'),
@@ -2161,13 +2144,11 @@ class StorylineAnalyzer:
         if lnwl_fixed_threshold is not None:
              eva_events_to_analyze.append(('LNWL', '1Q_low', 1, None, 'low', f'Low Navigable (LNWL) (<{lnwl_fixed_threshold:.0f} m³/s)'))
         
-        q_days_needed = sorted(list(set([e[2] for e in eva_events_to_analyze]))) # Wird zu [1, 7, 30]
-        return_periods_needed = sorted(list(set([e[3] for e in eva_events_to_analyze if e[3] is not None]))) # Wird zu [10, 50, 100]
-        # --- ENDE MODIFIZIERTER BLOCK ---
+        q_days_needed = sorted(list(set([e[2] for e in eva_events_to_analyze])))
+        return_periods_needed = sorted(list(set([e[3] for e in eva_events_to_analyze if e[3] is not None])))
 
         # --- 2. Berechne historische Schwellenwerte (mit GEV) ---
         logging.info("Calculating historical EVA thresholds and return periods for each half-year (using GEV)...")
-        # --- MODIFIKATION: Schleife um 'full_year' erweitert ---
         for half_year in ['winter', 'summer', 'full_year']:
             
             hist_thresholds_low = StatsAnalyzer.calculate_eva_thresholds(
@@ -2183,11 +2164,11 @@ class StorylineAnalyzer:
             if lnwl_fixed_threshold is not None:
                 months = []
                 if half_year == 'winter':
-                    months = [11, 12, 1, 2, 3, 4] # Hydrologisches Winterhalbjahr # <<< KORRIGIERT >>>
+                    months = [11, 12, 1, 2, 3, 4]
                 elif half_year == 'summer':
-                    months = [5, 6, 7, 8, 9, 10] # Hydrologisches Sommerhalbjahr # <<< KORRIGIERT >>>
+                    months = [5, 6, 7, 8, 9, 10]
                 else: # 'full_year'
-                    months = list(range(1, 13)) # Alle Monate
+                    months = list(range(1, 13))
                 
                 daily_filtered = historical_discharge_da.where(historical_discharge_da.time.dt.month.isin(months), drop=True)
                 q_1_low_hist_half_year = daily_filtered.groupby('time.year').min('time').dropna(dim='year')
@@ -2237,18 +2218,14 @@ class StorylineAnalyzer:
             return None
 
         for gwl in config.GLOBAL_WARMING_LEVELS:
-            # --- MODIFIKATION: 'full_year' zum results-Dict hinzugefügt ---
             results['data'][gwl] = {'winter': {}, 'summer': {}, 'full_year': {}}
             
-            # --- MODIFIKATION: Schleife um 'full_year' erweitert ---
             for half_year in ['winter', 'summer', 'full_year']:
                 
-                # --- START MODIFIKATION (Full Year Storyline Zuweisung) ---
                 if half_year == 'summer':
                     season_label = 'JJA'
                 else:
-                    season_label = 'DJF' # Benutze DJF-Storylines für 'winter' UND 'full_year'
-                # --- ENDE MODIFIKATION ---
+                    season_label = 'DJF'
                 
                 all_storyline_keys_for_gwl = {k: v for k, v in storyline_classification.get(gwl, {}).items() if k.startswith(season_label)}
                 
@@ -2291,17 +2268,15 @@ class StorylineAnalyzer:
                         future_return_period_mean = np.inf
                         ci_low, ci_high = np.nan, np.nan
                         total_pooled_points = len(pooled_model_extremes)
-                        
-                        # --- NEUER SCHLÜSSEL für Plot ---
                         n_finite_fits = 0 
                         
                         logging.info(f"  Data pooled for {storyline_name} ({event_key}, GWL {gwl}, {half_year}): "
                                      f"N={total_pooled_points} points (from {X_valid_models}/{Y_total_models} models)")
                         
-                        if total_pooled_points >= 30: # Brauchen genug Daten für einen robusten Fit
+                        if total_pooled_points >= 30:
                             pooled_array = np.array(pooled_model_extremes)
                             
-                            # --- A) Fit des Original-Datensatzes (unser "bester Schätzwert") ---
+                            # --- A) Fit des Original-Datensatzes (als Fallback/Initialwert) ---
                             try:
                                 params_orig = distr.gev.lmom_fit(pooled_array) 
                                 dist_orig = distr.gev(**params_orig)
@@ -2318,7 +2293,6 @@ class StorylineAnalyzer:
 
                             except Exception as e_gev:
                                 logging.warning(f"Pooled GEV fit (Original) failed for {storyline_name} ({event_key}): {e_gev}. FALLING BACK to empirical.")
-                                # Fallback (optional, aber gut für den Mittelwert)
                                 if total_pooled_points > 0:
                                     if eva_type == 'low':
                                         future_event_count = (pooled_array < hist_threshold_val).sum()
@@ -2333,21 +2307,15 @@ class StorylineAnalyzer:
                             logging.info(f"    ... starting {N_BOOTSTRAP} bootstrap iterations for CI...")
                             for _ in range(N_BOOTSTRAP):
                                 try:
-                                    # 1. Resample MIT Zurücklegen
                                     resampled_pool = np.random.choice(pooled_array, size=total_pooled_points, replace=True)
                                     
-                                    # --- START MODIFIED CHECK ---
-                                    # If resampled pool has no variance, GEV fit will fail.
                                     if np.std(resampled_pool) < 1e-9:
                                         bootstrap_return_periods.append(np.nan)
                                         continue
-                                    # --- END MODIFIED CHECK ---
 
-                                    # 2. Fit auf Resample
                                     params_boot = distr.gev.lmom_fit(resampled_pool) 
                                     dist_boot = distr.gev(**params_boot)
                                     
-                                    # 3. Jährlichkeit berechnen
                                     if eva_type == 'low':
                                         prob_boot = dist_boot.cdf(hist_threshold_val)
                                     else: # 'high'
@@ -2356,35 +2324,26 @@ class StorylineAnalyzer:
                                     if prob_boot > 1e-9:
                                         bootstrap_return_periods.append(1.0 / prob_boot)
                                     else:
-                                        bootstrap_return_periods.append(np.inf) # Append inf
+                                        bootstrap_return_periods.append(np.inf)
                                     
                                 except Exception:
-                                    # GEV-Fit schlug fehl -> Append np.nan
                                     bootstrap_return_periods.append(np.nan)
                             
-                            # --- C) Konfidenzintervall aus Ergebnissen berechnen ---
-                            
-                            # --- START KORREKTUR (Zwei Zählweisen) ---
-                            # Zählung 1: Wie viele Fits waren ENDLICH (nicht inf, nicht nan)?
-                            # Dies wird für die Plot-Annotation verwendet.
+                            # --- C) Konfidenzintervall und MEDIAN aus Ergebnissen berechnen ---
                             n_finite_fits = np.isfinite(bootstrap_return_periods).sum()
-                            
-                            # Zählung 2: Wie viele Fits waren KEINE ECHTEN FEHLER (nicht nan)?
-                            # Dies wird für die CI-Robustheitsprüfung verwendet.
                             n_failed_fits = np.isnan(bootstrap_return_periods).sum()
                             n_succeeded_for_ci = N_BOOTSTRAP - n_failed_fits
-                            # --- ENDE KORREKTUR ---
                             
-                            if n_succeeded_for_ci > (N_BOOTSTRAP * 0.8): # Sicherstellen, dass die meisten Fits erfolgreich waren
-                                # Clip bei 10000 Jahren, um extreme Ausreißer im KI zu vermeiden
+                            if n_succeeded_for_ci > (N_BOOTSTRAP * 0.8):
                                 bootstrap_return_periods_clipped = np.clip(bootstrap_return_periods, a_min=None, a_max=10000)
                                 
-                                # --- START MODIFICATION (use nanpercentile) ---
                                 ci_low = np.nanpercentile(bootstrap_return_periods_clipped, 2.5)
                                 ci_high = np.nanpercentile(bootstrap_return_periods_clipped, 97.5)
-                                # --- END MODIFICATION ---
+                                
+                                # --- MODIFIKATION: Berechne Median als zentralen Schätzer ---
+                                future_return_period_mean = np.nanpercentile(bootstrap_return_periods_clipped, 50)
 
-                                logging.info(f"    ... Bootstrap CI (95%): [{ci_low:.1f}, {ci_high:.1f}] (from {n_succeeded_for_ci} valid fits)")
+                                logging.info(f"    ... Bootstrap CI (95%): [{ci_low:.1f}, {ci_high:.1f}], Median: {future_return_period_mean:.1f} (from {n_succeeded_for_ci} valid fits)")
                             else:
                                 logging.warning(f"    ... Bootstrap failed for {storyline_name} ({event_key}): "
                                                 f"Only {n_succeeded_for_ci}/{N_BOOTSTRAP} fits succeeded. CI will be 'nan'.")
@@ -2395,16 +2354,17 @@ class StorylineAnalyzer:
 
                         # --- ENDE: MODIFIKATION (Pooled GEV + BOOTSTRAPPING) ---
 
-                        # 3. Ergebnisse speichern (inkl. Konfidenzintervallen)
+                        # 3. Ergebnisse speichern
                         storyline_results_storage[event_key] = {
                             'future_return_periods_all_models': [future_return_period_mean] if np.isfinite(future_return_period_mean) else [],
-                            'future_return_period_mean': future_return_period_mean,
-                            'future_return_period_ci_low': ci_low,   # NEU
-                            'future_return_period_ci_high': ci_high, # NEU
+                            'future_return_period_mean': future_return_period_mean, # Speichert jetzt den MEDIAN
+                            'future_return_period_median': future_return_period_mean, # Explizit
+                            'future_return_period_ci_low': ci_low,
+                            'future_return_period_ci_high': ci_high,
                             'model_count_X': X_valid_models, 
                             'model_count_Y': Y_total_models, 
                             'pooled_data_points_N': total_pooled_points,
-                            'bootstrap_finite_pct': (n_finite_fits / N_BOOTSTRAP) * 100.0 if N_BOOTSTRAP > 0 else 0.0 # NEU HINZUGEFÜGT
+                            'bootstrap_finite_pct': (n_finite_fits / N_BOOTSTRAP) * 100.0 if N_BOOTSTRAP > 0 else 0.0 
                         }
 
                     results['data'][gwl][half_year][storyline_name] = storyline_results_storage

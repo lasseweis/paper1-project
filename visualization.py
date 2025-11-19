@@ -3652,6 +3652,7 @@ class Visualizer:
         """
         Creates ERL Figure 3: Core Finding - Regime Shift in Extremes (30Q100).
         Layout: 2x2 Grid, but each plot uses a BROKEN X-AXIS (Left: Normal, Right: Extreme).
+        INCLUDES: X-Axis Label Rotation, Legend Update, AND Y-AXIS LABELS (Storylines).
         """
         logging.info(f"Plotting Figure 3 (Core Finding GEV Panel) with BROKEN AXIS for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
@@ -3805,7 +3806,6 @@ class Visualizer:
             
             # RIGHT Axis (Extreme Range)
             ax_right.set_xscale('log')
-            # If max data is less than break point, pad it a bit, otherwise go to max
             right_max = max(max_val_in_plot * 1.5, BREAK_POINT * 10)
             ax_right.set_xlim(BREAK_POINT, right_max)
             ax_right.set_xticks([500, 1000, 5000, 10000])
@@ -3819,14 +3819,21 @@ class Visualizer:
             ax_right.yaxis.set_ticks([])
             ax_right.set_ylabel('')
             
+            # --- MODIFICATION START: Configure Y-Axis Labels (Storylines) ---
             # Only show Y labels on the far left of the grid
             if cfg['col_group'] == 0:
                 ax_left.set_ylabel('')
+                # Explicitly set labels and format them like in Figure 4
+                labels = [l.replace(' & ', ' &\n') for l in storyline_display_order]
+                ax_left.set_yticks(range(len(labels)))
+                ax_left.set_yticklabels(labels, fontsize=10)
+                ax_left.invert_yaxis() # Ensure MMM is at the top
             else:
                 ax_left.set_ylabel('')
-                ax_left.yaxis.set_ticks([])
+                ax_left.yaxis.set_ticks([]) # Hide ticks for right column group
+                ax_left.invert_yaxis() # Also invert here to match the data order!
+            # --- MODIFICATION END ---
 
-            # Grid
             ax_left.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
             ax_right.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
             
@@ -3834,12 +3841,14 @@ class Visualizer:
             if cfg['row'] == 1:
                 ax_left.set_xlabel('Return Period (Years)', fontsize=10)
                 ax_right.set_xlabel('', fontsize=10)
+                
+                plt.setp(ax_right.get_xticklabels(), rotation=30, ha='right')
             else:
                 ax_left.set_xlabel('')
                 ax_right.set_xlabel('')
 
             # --- DRAW DIAGONALS ("//") ---
-            d = .015  # size of diagonal lines
+            d = .015
             kwargs = dict(transform=ax_left.transAxes, color='k', clip_on=False)
             ax_left.plot((1 - d, 1 + d), (-d, +d), **kwargs)
             ax_left.plot((1 - d, 1 + d), (1 - d, 1 + d), **kwargs)
@@ -3850,11 +3859,10 @@ class Visualizer:
 
         # Shared Legend
         handles = []
-        handles.append(plt.Line2D([0], [0], marker='D', color='w', markerfacecolor='gray', markeredgecolor='k', label='Pooled Mean & 95% CI'))
+        handles.append(plt.Line2D([0], [0], marker='D', color='w', markerfacecolor='gray', markeredgecolor='k', label='Pooled Median & 95% CI'))
         handles.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.5, label='Individual Models'))
-        # --- LABEL CHANGED HERE ---
         handles.append(plt.Line2D([0], [0], color='black', linestyle='--', linewidth=1.5, label='Historical Return Period'))
-        # --------------------------
+        
         for gwl, color in gwl_colors.items():
             handles.append(mpatches.Patch(color=color, label=gwl))
             
@@ -3873,8 +3881,9 @@ class Visualizer:
         Creates ERL Figure 4: Mechanism - Drivers (Temp & Precip) as BOXPLOTS.
         Layout: 2x2 (Summer Temp, Summer Precip, Winter Temp, Winter Precip).
         Shows the spread of individual models within each storyline.
+        ROTATED: Variable changes on X-axis, Storylines on Y-axis.
         """
-        logging.info(f"Plotting Figure 4 (Mechanism Drivers Panel) with Boxplots for {scenario}...")
+        logging.info(f"Plotting Figure 4 (Mechanism Drivers Panel) with Boxplots (Horizontal) for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
 
         if not cmip6_results:
@@ -3889,7 +3898,8 @@ class Visualizer:
             logging.warning("Missing delta or classification data for Figure 4.")
             return
 
-        fig, axs = plt.subplots(2, 2, figsize=(14, 12))
+        # Erhöhte Breite für bessere Lesbarkeit der Y-Labels
+        fig, axs = plt.subplots(2, 2, figsize=(16, 12)) 
         axs = axs.flatten()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
@@ -3907,7 +3917,7 @@ class Visualizer:
             'MMM', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
             'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
         ]
-        # Names for the X-axis labels
+        # Names for the Y-axis labels
         storyline_display_order = [
             'Multi-Model Mean', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
             'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
@@ -3925,18 +3935,11 @@ class Visualizer:
                 gwl_label = f'+{gwl}°C'
                 
                 for storyline_key_short in storyline_data_keys:
-                    # Construct the full key, e.g., 'JJA_MMM' or 'JJA_Fast Jet...'
-                    # Note: 'MMM' might be stored as 'JJA_MMM' in classification
                     full_storyline_key = f"{season_prefix}_{storyline_key_short}"
-                    
-                    # Get list of models for this storyline/GWL/Season
                     models = classification.get(gwl, {}).get(full_storyline_key, [])
-                    
-                    # Map data key to display name
                     display_name = 'Multi-Model Mean' if storyline_key_short == 'MMM' else storyline_key_short
                     
                     for model in models:
-                         # Fetch the value for this specific model/GWL/metric
                          val = all_deltas.get(key, {}).get(gwl, {}).get(model)
                          if val is not None and np.isfinite(val):
                              plot_data.append({
@@ -3950,38 +3953,40 @@ class Visualizer:
             if df.empty:
                 ax.text(0.5, 0.5, "No Data", ha='center', va='center')
             else:
-                # Create Vertical Boxplot
-                sns.boxplot(data=df, x='Storyline', y='Change', hue='GWL', ax=ax,
+                # Create Horizontal Boxplot (y=Storyline, x=Change)
+                sns.boxplot(data=df, y='Storyline', x='Change', hue='GWL', ax=ax,
                             order=storyline_display_order, palette=gwl_colors,
-                            showfliers=False, linewidth=1.2, width=0.7)
+                            showfliers=False, linewidth=1.2, width=0.7, orient='h')
                 
-                # Add Stripplot for individual points
-                sns.stripplot(data=df, x='Storyline', y='Change', hue='GWL', ax=ax,
+                # Add Stripplot for individual points (Horizontal)
+                sns.stripplot(data=df, y='Storyline', x='Change', hue='GWL', ax=ax,
                               order=storyline_display_order, palette=gwl_colors,
                               dodge=True, jitter=0.15, size=3, alpha=0.6, legend=False,
-                              edgecolor='gray', linewidth=0.5)
+                              edgecolor='gray', linewidth=0.5, orient='h')
 
             # Formatting
             ax.set_title(p_conf['title'], weight='bold', loc='left', fontsize=12)
-            ax.set_xlabel('')
-            ax.set_ylabel(f"Change ({p_conf['unit']})", fontsize=10)
+            ax.set_ylabel('') # Storylines on Y
+            ax.set_xlabel(f"Change ({p_conf['unit']})", fontsize=10)
             
-            ax.axhline(0, color='black', linewidth=0.8, linestyle='-')
-            ax.grid(True, axis='y', linestyle=':', alpha=0.7)
+            # Vertical zero line instead of horizontal
+            ax.axvline(0, color='black', linewidth=0.8, linestyle='-') 
+            ax.grid(True, axis='x', linestyle=':', alpha=0.7)
             
-            # Rotate X-axis labels for readability
-            # Using replace to break long lines if needed
+            # Format Y-axis labels (Storylines) with line breaks
             labels = [l.replace(' & ', ' &\n') for l in storyline_display_order]
-            ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
+            ax.set_yticklabels(labels, fontsize=10)
             
-            # Remove individual legends to use a shared one later
+            # Invert Y-axis to have 'Multi-Model Mean' at the top
+            ax.invert_yaxis()
+            
             if ax.get_legend(): ax.get_legend().remove()
 
         # Shared Legend
         handles = [mpatches.Patch(color=gwl_colors[label], label=label) for label in sorted(gwl_colors.keys())]
         fig.legend(handles=handles, loc='lower center', ncol=2, bbox_to_anchor=(0.5, 0.01), frameon=True)
         
-        plt.tight_layout(rect=[0, 0.08, 1, 0.96])
+        plt.tight_layout(rect=[0, 0.05, 1, 0.96])
         filename = os.path.join(config.PLOT_DIR, "Figure4_mechanism_drivers_summary_ssp585.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)

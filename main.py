@@ -757,7 +757,7 @@ class ClimateAnalysis:
                     fig4_filename = os.path.join(Config.PLOT_DIR, "Figure4_mechanism_drivers_summary_ssp585.png")
                     if not os.path.exists(fig4_filename):
                         storyline_impacts = StorylineAnalyzer.calculate_storyline_impacts(cmip6_results)
-                        Visualizer.plot_mechanism_drivers_panel(storyline_impacts, Config(), scenario)
+                        Visualizer.plot_mechanism_drivers_panel(cmip6_results, Config(), scenario)
                     else:
                          logging.info(f"Figure 4 '{fig4_filename}' already exists.")
 

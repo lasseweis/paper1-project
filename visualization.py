@@ -36,6 +36,19 @@ from data_processing import DataProcessor
 class Visualizer:
     """A collection of static methods for plotting climate analysis results."""
 
+    # --- Global Style Settings ---
+    plt.rcParams['font.family'] = 'sans-serif'
+    plt.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans']
+    plt.rcParams['axes.titlesize'] = 12
+    plt.rcParams['axes.titleweight'] = 'bold'
+    plt.rcParams['axes.labelsize'] = 10
+    plt.rcParams['xtick.labelsize'] = 9
+    plt.rcParams['ytick.labelsize'] = 9
+    plt.rcParams['legend.fontsize'] = 9
+    
+    # Unified Colors for Global Warming Levels
+    GWL_COLORS = {2.0: '#0072B2', 3.0: '#D55E00'}
+
     @staticmethod
     def ensure_plot_dir_exists():
         """Ensure the plot directory from the config exists."""
@@ -47,7 +60,7 @@ class Visualizer:
     def plot_regression_map(ax, slopes, p_values, lons, lats, title, box_coords,
                           season_label, variable, ua_seasonal_mean=None,
                           show_jet_boxes=False, significance_level=0.05, std_dev_predictor=None,
-                          stipple_skip=None, dataset_key=None): # MODIFIED: Added dataset_key
+                          stipple_skip=None, dataset_key=None, set_title_in_helper=True): # MODIFIED: Added dataset_key and set_title_in_helper
         """Helper function to create a single regression map panel."""
         ax.set_extent(Config.PLOT_MAP_EXTENT, crs=ccrs.PlateCarree())
         ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=0)
@@ -112,7 +125,8 @@ class Visualizer:
                                  fill=False, edgecolor='lime', linewidth=2, zorder=10, transform=ccrs.PlateCarree())
         ax.add_patch(box)
         
-        ax.set_title(f"{title}\n{season_label}", fontsize=10)
+        if title: # Changed from set_title_in_helper
+            ax.set_title(f"{title}\n{season_label}", fontsize=10)
         return cf, label
 
     @staticmethod
@@ -189,20 +203,24 @@ class Visualizer:
         cf_pr, label_pr = Visualizer.plot_regression_map(
             ax_pr_winter, winter_data.get('slopes_pr'), winter_data.get('p_values_pr'), 
             winter_data.get('lons'), winter_data.get('lats'), 
-            "a) Winter Precipitation", box_coords, "DJF", 'pr', 
+            "", box_coords, "", 'pr', 
             ua_seasonal_mean=winter_data.get('ua850_mean'), 
-            std_dev_predictor=winter_data.get('std_dev_pr'), dataset_key=dataset_key
+            std_dev_predictor=winter_data.get('std_dev_pr'), dataset_key=dataset_key,
+            set_title_in_helper=False
         )
+        ax_pr_winter.set_title("a) Winter (DJF) Precipitation", loc='left', fontweight='bold')
 
         # Winter TAS
         ax_tas_winter = fig.add_subplot(gs[0, 1], projection=ccrs.PlateCarree())
         cf_tas, label_tas = Visualizer.plot_regression_map(
             ax_tas_winter, winter_data.get('slopes_tas'), winter_data.get('p_values_tas'), 
             winter_data.get('lons'), winter_data.get('lats'), 
-            "b) Winter Temperature", box_coords, "DJF", 'tas', 
+            "", box_coords, "", 'tas', 
             ua_seasonal_mean=winter_data.get('ua850_mean'), 
-            std_dev_predictor=winter_data.get('std_dev_tas'), dataset_key=dataset_key
+            std_dev_predictor=winter_data.get('std_dev_tas'), dataset_key=dataset_key,
+            set_title_in_helper=False
         )
+        ax_tas_winter.set_title("b) Winter (DJF) Temperature", loc='left', fontweight='bold')
 
         # --- Row 2: Summer (Left: PR, Right: TAS) ---
         summer_data = all_season_data['Summer']
@@ -212,20 +230,24 @@ class Visualizer:
         Visualizer.plot_regression_map(
             ax_pr_summer, summer_data.get('slopes_pr'), summer_data.get('p_values_pr'), 
             summer_data.get('lons'), summer_data.get('lats'), 
-            "c) Summer Precipitation", box_coords, "JJA", 'pr', 
+            "", box_coords, "", 'pr', 
             ua_seasonal_mean=summer_data.get('ua850_mean'), 
-            std_dev_predictor=summer_data.get('std_dev_pr'), dataset_key=dataset_key
+            std_dev_predictor=summer_data.get('std_dev_pr'), dataset_key=dataset_key,
+            set_title_in_helper=False
         )
+        ax_pr_summer.set_title("c) Summer (JJA) Precipitation", loc='left', fontweight='bold')
 
         # Summer TAS
         ax_tas_summer = fig.add_subplot(gs[1, 1], projection=ccrs.PlateCarree())
         Visualizer.plot_regression_map(
             ax_tas_summer, summer_data.get('slopes_tas'), summer_data.get('p_values_tas'), 
             summer_data.get('lons'), summer_data.get('lats'), 
-            "d) Summer Temperature", box_coords, "JJA", 'tas', 
+            "", box_coords, "", 'tas', 
             ua_seasonal_mean=summer_data.get('ua850_mean'), 
-            std_dev_predictor=summer_data.get('std_dev_tas'), dataset_key=dataset_key
+            std_dev_predictor=summer_data.get('std_dev_tas'), dataset_key=dataset_key,
+            set_title_in_helper=False
         )
+        ax_tas_summer.set_title("d) Summer (JJA) Temperature", loc='left', fontweight='bold')
 
         # --- Colorbars (Horizontal at bottom) ---
         # PR Colorbar (Left side)
@@ -236,7 +258,7 @@ class Visualizer:
         cax_tas = fig.add_axes([0.55, 0.08, 0.35, 0.02])
         fig.colorbar(cf_tas, cax=cax_tas, orientation='horizontal', label=label_tas, extend='both')
 
-        plt.suptitle(f"{dataset_key}: Historical Jet Influence on Climate", fontsize=16, weight='bold')
+        plt.suptitle(f"{dataset_key}: Historical Jet Influence on Climate", fontsize=16, weight='bold') # Restored
         
         filename = os.path.join(Config.PLOT_DIR, 'Figure1_regression_maps_ERA5.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -542,6 +564,7 @@ class Visualizer:
         filepath = os.path.join(Config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
+        logging.info(f"Saved jet_changes_vs_gwl plot to {filepath}")
 
     @staticmethod
     def plot_jet_impact_comparison_maps(impact_data_20crv3, impact_data_era5, season):
@@ -1149,7 +1172,7 @@ class Visualizer:
         fig = plt.figure(figsize=(12, 14))
         # Reduced height ratio for the first row (Global Temp)
         # Adjusted hspace to reduce gap between title and first plot
-        gs = gridspec.GridSpec(3, 2, height_ratios=[0.6, 1, 1], hspace=0.25)
+        gs = gridspec.GridSpec(3, 2, height_ratios=[0.6, 1, 1], hspace=0.2, top=0.93)
 
         # --- (a) Global Temperature Anomaly ---
         ax_a = fig.add_subplot(gs[0, :]) # Span both columns
@@ -1163,15 +1186,15 @@ class Visualizer:
         if reanalysis_plot_data.get('Global_Tas'):
             if reanalysis_plot_data['Global_Tas'].get('20CRv3') is not None:
                 reanalysis_20crv3_tas = reanalysis_plot_data['Global_Tas']['20CRv3']
-                ax_a.plot(reanalysis_20crv3_tas.year, reanalysis_20crv3_tas, color='darkorange', linewidth=2, label='20CRv3')
+                ax_a.plot(reanalysis_20crv3_tas.year, reanalysis_20crv3_tas, color='darkorange', linewidth=1.5, label='20CRv3')
             if reanalysis_plot_data['Global_Tas'].get('ERA5') is not None:
                 reanalysis_era5_tas = reanalysis_plot_data['Global_Tas']['ERA5']
-                ax_a.plot(reanalysis_era5_tas.year, reanalysis_era5_tas, color='purple', linewidth=2, label='ERA5')
+                ax_a.plot(reanalysis_era5_tas.year, reanalysis_era5_tas, color='purple', linewidth=1.5, label='ERA5')
         
         ax_a.set_title('a) Global Temperature Change', fontsize=12, weight='bold', loc='left')
         ax_a.set_ylabel(f'Temp. Anomaly (°C)', fontsize=10)
-        ax_a.legend(fontsize=9, loc='upper left')
-        ax_a.grid(True, linestyle=':', alpha=0.7)
+        # ax_a.legend(fontsize=9, loc='upper left') # Removed individual legend
+        ax_a.grid(True, linestyle=':', alpha=0.6)
         ax_a.set_xlim(1850, 2100)
         ax_a.axhline(0, color='black', linewidth=0.5)
 
@@ -1195,21 +1218,48 @@ class Visualizer:
             
             if reanalysis_plot_data.get(key) and reanalysis_plot_data[key].get('20CRv3') is not None:
                 reanalysis_20crv3 = reanalysis_plot_data[key]['20CRv3']
-                ax.plot(reanalysis_20crv3.season_year, reanalysis_20crv3, color='darkorange', linewidth=2, label='20CRv3')
+                ax.plot(reanalysis_20crv3.season_year, reanalysis_20crv3, color='darkorange', linewidth=1.5, label='20CRv3')
             if reanalysis_plot_data.get(key) and reanalysis_plot_data[key].get('ERA5') is not None:
                 reanalysis_era5 = reanalysis_plot_data[key]['ERA5']
-                ax.plot(reanalysis_era5.season_year, reanalysis_era5, color='purple', linewidth=2, label='ERA5')
+                ax.plot(reanalysis_era5.season_year, reanalysis_era5, color='purple', linewidth=1.5, label='ERA5')
 
             ax.set_title(p_config['title'], fontsize=12, weight='bold', loc='left')
             ax.set_ylabel(p_config['ylabel'], fontsize=10)
-            ax.grid(True, linestyle=':', alpha=0.7)
+            ax.grid(True, linestyle=':', alpha=0.6)
             ax.set_xlim(1850, 2100)
             ax.axhline(0, color='black', linewidth=0.5)
-            if p_config['ax'] in [fig.axes[-2], fig.axes[-1]]: # Bottom row
+            if p_config['ax'] in [plot_configs[2]['ax'], plot_configs[3]['ax']]: # Bottom row
                 ax.set_xlabel('Year', fontsize=10)
 
+        # Shared Legend at the bottom
+        handles, labels = ax_a.get_legend_handles_labels()
+        
+        # Re-construct handles/labels list for order
+        final_handles = []
+        final_labels = []
+        
+        # Order: CMIP6 MMM, Individual Models, 20CRv3, ERA5
+        if 'CMIP6 MMM' in handles: # Check if CMIP6 MMM is present
+            idx = labels.index('CMIP6 MMM')
+            final_handles.append(handles[idx])
+            final_labels.append(labels[idx])
+        
+        final_handles.append(plt.Line2D([0], [0], color='grey', linewidth=0.7, alpha=0.5, label='Individual Models'))
+        final_labels.append('Individual Models')
+        
+        if '20CRv3' in labels:
+            idx = labels.index('20CRv3')
+            final_handles.append(handles[idx])
+            final_labels.append(labels[idx])
+        if 'ERA5' in labels:
+            idx = labels.index('ERA5')
+            final_handles.append(handles[idx])
+            final_labels.append(labels[idx])
+
+        fig.legend(final_handles, final_labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.02), frameon=True)
+
         fig.suptitle('Evolution of Key Climate Indices (20-Year Rolling Mean)', fontsize=16, weight='bold')
-        fig.tight_layout(rect=[0, 0, 1, 0.96])
+        fig.tight_layout(rect=[0, 0.05, 1, 0.96]) # Adjusted rect for bottom legend
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -3626,10 +3676,10 @@ class Visualizer:
         high_key_summer = next((k for k in summer_keys if target_event_substring in k and 'high' in k.lower()), None)
         
         plot_configs = [
-            {'half_year': 'summer', 'event_key': low_key_summer,  'base_title': 'a) Summer (JJA) Low-Flow (30Q100)', 'ax_idx': 0},
-            {'half_year': 'winter', 'event_key': low_key_winter,  'base_title': 'b) Winter (DJF) Low-Flow (30Q100)', 'ax_idx': 1},
-            {'half_year': 'summer', 'event_key': high_key_summer, 'base_title': 'c) Summer (JJA) High-Flow (30Q100)', 'ax_idx': 2},
-            {'half_year': 'winter', 'event_key': high_key_winter, 'base_title': 'd) Winter (DJF) High-Flow (30Q100)', 'ax_idx': 3},
+            {'half_year': 'summer', 'event_key': low_key_summer,  'base_title': 'a) Summer Half-Year Low-Flow', 'ax_idx': 0},
+            {'half_year': 'winter', 'event_key': low_key_winter,  'base_title': 'b) Winter Half-Year Low-Flow', 'ax_idx': 1},
+            {'half_year': 'summer', 'event_key': high_key_summer, 'base_title': 'c) Summer Half-Year High-Flow', 'ax_idx': 2},
+            {'half_year': 'winter', 'event_key': high_key_winter, 'base_title': 'd) Winter Half-Year High-Flow', 'ax_idx': 3},
         ]
 
         fig, axs = plt.subplots(2, 2, figsize=(14, 10), sharex=False) 
@@ -3638,17 +3688,16 @@ class Visualizer:
         fig.suptitle(f"Regime Shift in Return Periods of Extremes (30Q100) - {scenario.upper()}", fontsize=16, weight='bold', y=0.98)
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
-        gwl_colors = {f'+{gwls_to_plot[0]}°C': '#4575b4', f'+{gwls_to_plot[1]}°C': '#d73027'}
+        # gwl_colors = {f'+{gwls_to_plot[0]}°C': '#4575b4', f'+{gwls_to_plot[1]}°C': '#d73027'} # OLD
+        gwl_colors = {f'+{gwl}°C': Visualizer.GWL_COLORS[gwl] for gwl in gwls_to_plot}
         storyline_order = [
             'MMM', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
             'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
         ]
 
-        # --- BROKEN AXIS SETTINGS ---
-        # Threshold ab dem die Achse "gebrochen" wird (jetzt 500 Jahre)
-        BREAK_THRESHOLD = 500  
-        # Visuelle Position für Ausreißer auf der Log-Skala (weit genug weg von 500)
-        VISUAL_OUTLIER_POS = 1000 
+        # --- BROKEN AXIS SETTINGS REMOVED -> USING STANDARD LOG SCALE ---
+        # BREAK_THRESHOLD = 500  
+        # VISUAL_OUTLIER_POS = 1000 
 
         for config_item in plot_configs:
             ax = axs[config_item['ax_idx']]
@@ -3692,7 +3741,7 @@ class Visualizer:
                                         'Storyline': storyline,
                                         'GWL': gwl_label,
                                         'Return Period': rp,
-                                        'Plot Pos': rp if rp <= BREAK_THRESHOLD else VISUAL_OUTLIER_POS
+                                        'Plot Pos': rp
                                     })
                             
                             # 2. Pooled Mean + CI (Errorbar)
@@ -3701,23 +3750,12 @@ class Visualizer:
                             ci_high = event_data.get('future_return_period_ci_high', np.nan)
                             
                             if np.isfinite(rp_mean):
-                                # Auch Mean und CI müssen gemappt werden
-                                mean_plot = rp_mean if rp_mean <= BREAK_THRESHOLD else VISUAL_OUTLIER_POS
-                                
-                                low_plot = ci_low
-                                if ci_low > BREAK_THRESHOLD: low_plot = VISUAL_OUTLIER_POS
-                                if np.isnan(low_plot): low_plot = mean_plot 
-
-                                high_plot = ci_high
-                                if np.isinf(ci_high) or ci_high > BREAK_THRESHOLD: high_plot = VISUAL_OUTLIER_POS
-                                if np.isnan(high_plot): high_plot = mean_plot
-
                                 mean_ci_data.append({
                                     'Storyline': storyline,
                                     'GWL': gwl_label,
-                                    'Mean_Plot': mean_plot,
-                                    'Low_Plot': low_plot,
-                                    'High_Plot': high_plot
+                                    'Mean_Plot': rp_mean,
+                                    'Low_Plot': ci_low,
+                                    'High_Plot': ci_high
                                 })
 
                     except KeyError: continue
@@ -3749,15 +3787,17 @@ class Visualizer:
                     y_pos = y_center + y_off
                     
                     x = item['Mean_Plot']
-                    xerr_low = x - item['Low_Plot']
-                    xerr_high = item['High_Plot'] - x
+                    # Ensure non-negative error bar lengths
+                    xerr_low = max(0, x - item['Low_Plot'])
+                    xerr_high = max(0, item['High_Plot'] - x)
                     
                     # Plot CI
                     ax.errorbar(x, y_pos, xerr=[[xerr_low], [xerr_high]], 
-                                fmt='none', ecolor='black', elinewidth=1.8, capsize=4, zorder=20)
-                    # Plot Mean Marker
-                    ax.plot(x, y_pos, marker='D', color=gwl_colors[item['GWL']], 
-                            markeredgecolor='black', markersize=6, zorder=21)
+                                fmt='none', ecolor='black', elinewidth=2.0, capsize=5, zorder=20)
+                    # Plot Mean Marker - Larger for 3.0 GWL
+                    marker_size = 9 if item['GWL'] == '+3.0°C' else 6
+                    ax.plot(x, y_pos, marker='D', color=Visualizer.GWL_COLORS[float(item['GWL'][1:-2])], 
+                            markeredgecolor='black', markersize=marker_size, zorder=21)
 
             # --- Formatting ---
             ax.set_xscale('log')
@@ -3766,57 +3806,31 @@ class Visualizer:
             if config_item['ax_idx'] in [2, 3]: ax.set_xlabel('Return Period (Years)', fontsize=10)
             else: ax.set_xlabel('')
 
-            if hist_rp and hist_rp <= BREAK_THRESHOLD:
+            if hist_rp:
                 ax.axvline(hist_rp, color='black', linestyle='--', linewidth=1.5, label=f'Hist. ({hist_rp:.0f}yr)')
             
-            # --- BROKEN AXIS TICKS ---
-            has_outlier = not df.empty and (df['Return Period'] > BREAK_THRESHOLD).any()
-            
-            # Standard Ticks bis 500
-            standard_ticks = [1, 2, 5, 10, 20, 50, 100, 200, 500]
-            standard_labels = ['1', '2', '5', '10', '20', '50', '100', '200', '500']
-            
-            if has_outlier:
-                # Achse verlängern um den Ausreißer-Bereich einzuschließen
-                ax.set_xlim(left=0.8, right=VISUAL_OUTLIER_POS * 1.3)
-                final_ticks = standard_ticks + [VISUAL_OUTLIER_POS]
-                
-                # Label für den Ausreißer: Tatsächlicher Maximalwert (gerundet) oder >500
-                if max_real_period_in_plot > BREAK_THRESHOLD:
-                    outlier_label = f"{max_real_period_in_plot:.0f}"
-                else:
-                    outlier_label = f">{BREAK_THRESHOLD}"
-                
-                final_labels = standard_labels + [outlier_label]
-                
-                ax.set_xticks(final_ticks)
-                ax.set_xticklabels(final_labels)
-                
-                # Visueller Indikator für den Achsenbruch
-                break_pos = np.sqrt(BREAK_THRESHOLD * VISUAL_OUTLIER_POS)
-                ax.text(break_pos, ax.get_ylim()[0], "//", ha='center', va='center', fontsize=12, fontweight='bold', color='black')
-            else:
-                # Standardbereich, leicht erweitert für Klarheit
-                ax.set_xlim(left=0.8, right=600) 
-                ax.set_xticks(standard_ticks)
-                ax.set_xticklabels(standard_labels)
-                ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+            # Standard Log Scale Ticks
+            ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 200, 500, 1000])
+            ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
 
             if config_item['ax_idx'] % 2 != 0: 
                  ax.set_yticklabels([]); ax.set_ylabel('')
             
-            # Legend logic
-            if config_item['ax_idx'] == 0:
-                handles, labels = ax.get_legend_handles_labels()
-                handles.append(plt.Line2D([0], [0], marker='D', color='w', markerfacecolor='gray', markeredgecolor='k', label='Pooled Mean & 95% CI'))
-                handles.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.5, label='Individual Models'))
-                ax.legend(handles=handles, loc='lower right', fontsize=8, ncol=1)
-            else:
-                if ax.get_legend(): ax.get_legend().remove()
+            if ax.get_legend(): ax.get_legend().remove()
                 
             ax.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
 
-        plt.tight_layout(rect=[0, 0, 1, 0.96]) 
+        # Shared Legend at the bottom
+        handles = []
+        handles.append(plt.Line2D([0], [0], marker='D', color='w', markerfacecolor='gray', markeredgecolor='k', label='Pooled Mean & 95% CI'))
+        handles.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.5, label='Individual Models'))
+        # Add GWL colors
+        for gwl, color in gwl_colors.items():
+            handles.append(mpatches.Patch(color=color, label=gwl))
+            
+        fig.legend(handles=handles, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.02), frameon=True)
+
+        plt.tight_layout(rect=[0, 0.05, 1, 0.96]) 
         filename = os.path.join(config.PLOT_DIR, "Figure3_core_finding_regime_shift_ssp585.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -3839,17 +3853,18 @@ class Visualizer:
         axs = axs.flatten()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
-        gwl_colors = {f'+{gwls_to_plot[0]}°C': '#4575b4', f'+{gwls_to_plot[1]}°C': '#d73027'}
+        # gwl_colors = {f'+{gwls_to_plot[0]}°C': '#4575b4', f'+{gwls_to_plot[1]}°C': '#d73027'} # OLD
+        gwl_colors = {f'+{gwl}°C': Visualizer.GWL_COLORS[gwl] for gwl in gwls_to_plot}
         
         # Plot Configuration
         # Note: Order requested is Summer Temp, Summer Precip, Winter Temp, Winter Precip?
         # Let's check instructions: "(a) Summer Temp, (b) Summer Precip, (c) Winter Temp, (d) Winter Precip."
         # Plot Configuration
         plot_configs = [
-            {'key': 'JJA_tas', 'title': 'a) Summer (JJA) Temperature', 'unit': '°C', 'ax': axs[0], 'col': 0},
-            {'key': 'JJA_pr',  'title': 'b) Summer (JJA) Precipitation', 'unit': '%',  'ax': axs[1], 'col': 1},
-            {'key': 'DJF_tas', 'title': 'c) Winter (DJF) Temperature', 'unit': '°C', 'ax': axs[2], 'col': 0},
-            {'key': 'DJF_pr',  'title': 'd) Winter (DJF) Precipitation', 'unit': '%',  'ax': axs[3], 'col': 1},
+            {'key': 'JJA_tas', 'title': 'a) Summer Temperature', 'unit': '°C', 'ax': axs[0], 'col': 0},
+            {'key': 'JJA_pr',  'title': 'b) Summer Precipitation', 'unit': '%',  'ax': axs[1], 'col': 1},
+            {'key': 'DJF_tas', 'title': 'c) Winter Temperature', 'unit': '°C', 'ax': axs[2], 'col': 0},
+            {'key': 'DJF_pr',  'title': 'd) Winter Precipitation', 'unit': '%',  'ax': axs[3], 'col': 1},
         ]
 
         storyline_order = [
@@ -3915,10 +3930,14 @@ class Visualizer:
                  ax.set_ylabel('')
 
             # Legend
-            if p_conf['ax'] == axs[0]:
-                ax.legend(loc='lower right', fontsize=8)
-            else:
-                if ax.get_legend(): ax.get_legend().remove()
+            if ax.get_legend(): ax.get_legend().remove()
+
+        # Shared Legend at the bottom
+        handles, labels = axs[0].get_legend_handles_labels() # Get from first plot
+        # If empty (because we removed it above?), recreate manually or get before removing
+        # Better: Create custom patches
+        legend_patches = [mpatches.Patch(color=gwl_colors[label], label=label) for label in gwl_colors]
+        fig.legend(handles=legend_patches, loc='lower center', ncol=2, bbox_to_anchor=(0.5, 0.02), frameon=True)
         
         # Apply shared limits per column
         for col, limits in col_limits.items():
@@ -3930,7 +3949,7 @@ class Visualizer:
                     if p_conf['col'] == col:
                         p_conf['ax'].set_xlim(min_val, max_val)
 
-        plt.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust for suptitle
+        plt.tight_layout(rect=[0, 0.05, 1, 0.96]) # Adjust for suptitle and bottom legend
         filename = os.path.join(config.PLOT_DIR, "Figure4_mechanism_drivers_summary_ssp585.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)

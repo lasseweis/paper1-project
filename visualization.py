@@ -3605,6 +3605,8 @@ class Visualizer:
         """
         Creates ERL Figure 3: Core Finding - Regime Shift in Extremes (30Q100).
         Layout: 2x2 (Summer Low, Winter Low, Summer High, Winter High).
+        Uses a 'Broken Axis' simulation to handle extreme outliers > 500 years.
+        Overlays Bootstrap Confidence Intervals (CIs) for the Pooled Mean.
         """
         logging.info(f"Plotting Figure 3 (Core Finding GEV Panel) for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
@@ -3613,135 +3615,208 @@ class Visualizer:
             logging.warning("Missing data for Figure 3.")
             return
 
-        # Target Event: 30-Day Duration, 100-Year Return Period
-        # Keys might be '30Q100_low' and '30Q100_high' or similar.
-        # Based on typical naming: '30Q100' might be the duration/return period, type is low/high.
-        # Let's look for keys containing '30Q100' in the thresholds.
-        
+        # --- 1. Identify Events (30Q100) ---
         target_event_substring = "30Q100"
-        
-        # Identify specific keys for Low and High flow
-        # We expect keys like '30Q100_low' and '30Q100_high' in the 'winter'/'summer' dictionaries
-        # IMPROVED KEY MATCHING: Look for keys containing '30Q100' (or similar) and 'low'/'high'
         winter_keys = list(return_period_results['thresholds']['winter'].keys())
         summer_keys = list(return_period_results['thresholds']['summer'].keys())
         
-        logging.info(f"Available Winter Keys: {winter_keys}")
-        logging.info(f"Available Summer Keys: {summer_keys}")
-
         low_key_winter = next((k for k in winter_keys if target_event_substring in k and 'low' in k.lower()), None)
         high_key_winter = next((k for k in winter_keys if target_event_substring in k and 'high' in k.lower()), None)
         low_key_summer = next((k for k in summer_keys if target_event_substring in k and 'low' in k.lower()), None)
         high_key_summer = next((k for k in summer_keys if target_event_substring in k and 'high' in k.lower()), None)
         
         plot_configs = [
-            {'half_year': 'summer', 'event_key': low_key_summer,  'title': 'a) Summer (JJA) Low-Flow (30Q100)', 'ax_idx': 0},
-            {'half_year': 'winter', 'event_key': low_key_winter,  'title': 'b) Winter (DJF) Low-Flow (30Q100)', 'ax_idx': 1},
-            {'half_year': 'summer', 'event_key': high_key_summer, 'title': 'c) Summer (JJA) High-Flow (30Q100)', 'ax_idx': 2},
-            {'half_year': 'winter', 'event_key': high_key_winter, 'title': 'd) Winter (DJF) High-Flow (30Q100)', 'ax_idx': 3},
+            {'half_year': 'summer', 'event_key': low_key_summer,  'base_title': 'a) Summer (JJA) Low-Flow (30Q100)', 'ax_idx': 0},
+            {'half_year': 'winter', 'event_key': low_key_winter,  'base_title': 'b) Winter (DJF) Low-Flow (30Q100)', 'ax_idx': 1},
+            {'half_year': 'summer', 'event_key': high_key_summer, 'base_title': 'c) Summer (JJA) High-Flow (30Q100)', 'ax_idx': 2},
+            {'half_year': 'winter', 'event_key': high_key_winter, 'base_title': 'd) Winter (DJF) High-Flow (30Q100)', 'ax_idx': 3},
         ]
 
-        fig, axs = plt.subplots(2, 2, figsize=(14, 10), sharex=False) # ShareX False because Low/High magnitudes differ
+        fig, axs = plt.subplots(2, 2, figsize=(14, 10), sharex=False) 
         axs = axs.flatten()
         
-        # Main Title
-        fig.suptitle(f"Regime Shift in Extremes (30Q100) - {scenario.upper()}", fontsize=16, weight='bold', y=0.98)
+        fig.suptitle(f"Regime Shift in Return Periods of Extremes (30Q100) - {scenario.upper()}", fontsize=16, weight='bold', y=0.98)
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
-        # gwl_colors = {f'+{gwl}°C': color for gwl, color in zip(gwls_to_plot, ['#fdbf6f', '#ff7f00'])} # Example colors
-        # Better colors from config if available, or hardcoded standard
         gwl_colors = {f'+{gwls_to_plot[0]}°C': '#4575b4', f'+{gwls_to_plot[1]}°C': '#d73027'}
-
         storyline_order = [
-            'MMM',
-            'Slow Jet & Northward Shift',
-            'Fast Jet & Northward Shift',
-            'Slow Jet & Southward Shift',
-            'Fast Jet & Southward Shift',
+            'MMM', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
+            'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
         ]
+
+        # --- BROKEN AXIS SETTINGS ---
+        # Threshold ab dem die Achse "gebrochen" wird (jetzt 500 Jahre)
+        BREAK_THRESHOLD = 500  
+        # Visuelle Position für Ausreißer auf der Log-Skala (weit genug weg von 500)
+        VISUAL_OUTLIER_POS = 1000 
 
         for config_item in plot_configs:
             ax = axs[config_item['ax_idx']]
             half_year = config_item['half_year']
             event_key = config_item['event_key']
+            base_title = config_item['base_title']
             
             if not event_key:
                 ax.text(0.5, 0.5, "Event Not Found", ha='center', va='center')
-                ax.set_title(config_item['title'], weight='bold', loc='left')
-                continue
+                ax.set_title(base_title, weight='bold', loc='left'); continue
 
-            # Prepare data for boxplots
+            # Metadata
+            thresh_meta = return_period_results['thresholds'][half_year][event_key]
+            hist_val_q = thresh_meta.get('threshold_m3s')
+            op = '<' if thresh_meta.get('type', 'low') == 'low' else '>'
+            full_title = base_title
+            if hist_val_q is not None:
+                full_title += f"\n(Threshold: {op} {hist_val_q:.0f} m³/s)"
+
+            # Collect Data
             plot_data = []
+            mean_ci_data = [] # Store mean and CIs for overlay
+            hist_rp = thresh_meta.get('hist_return_period')
             
-            # Get Historical Return Period
-            hist_rp = return_period_results['thresholds'][half_year][event_key].get('hist_return_period')
-            
+            max_real_period_in_plot = 0 
+
             for storyline in storyline_order:
                 for gwl in gwls_to_plot:
                     gwl_label = f'+{gwl}°C'
-                    # Data structure: results['data'][gwl][half_year][storyline][event_key]['future_return_periods_all_models']
-                    # CORRECTED KEY: 'future_return_periods_all_models' instead of 'new_return_periods'
                     try:
                         event_data = return_period_results['data'][gwl][half_year][storyline][event_key]
-                        if event_data and 'future_return_periods_all_models' in event_data:
-                            rps = event_data['future_return_periods_all_models']
-                            # Filter NaNs and Infs
-                            rps = [rp for rp in rps if np.isfinite(rp)]
-                            for rp in rps:
-                                plot_data.append({
+                        if event_data:
+                            # 1. Individual Models (Boxplot)
+                            if 'future_return_periods_all_models' in event_data:
+                                rps = event_data['future_return_periods_all_models']
+                                rps = [rp for rp in rps if np.isfinite(rp)]
+                                for rp in rps:
+                                    if rp > max_real_period_in_plot: max_real_period_in_plot = rp
+                                    # Mapping der Datenpunkte: Alles > 500 wird auf VISUAL_OUTLIER_POS gesetzt
+                                    plot_data.append({
+                                        'Storyline': storyline,
+                                        'GWL': gwl_label,
+                                        'Return Period': rp,
+                                        'Plot Pos': rp if rp <= BREAK_THRESHOLD else VISUAL_OUTLIER_POS
+                                    })
+                            
+                            # 2. Pooled Mean + CI (Errorbar)
+                            rp_mean = event_data.get('future_return_period_mean', np.nan)
+                            ci_low = event_data.get('future_return_period_ci_low', np.nan)
+                            ci_high = event_data.get('future_return_period_ci_high', np.nan)
+                            
+                            if np.isfinite(rp_mean):
+                                # Auch Mean und CI müssen gemappt werden
+                                mean_plot = rp_mean if rp_mean <= BREAK_THRESHOLD else VISUAL_OUTLIER_POS
+                                
+                                low_plot = ci_low
+                                if ci_low > BREAK_THRESHOLD: low_plot = VISUAL_OUTLIER_POS
+                                if np.isnan(low_plot): low_plot = mean_plot 
+
+                                high_plot = ci_high
+                                if np.isinf(ci_high) or ci_high > BREAK_THRESHOLD: high_plot = VISUAL_OUTLIER_POS
+                                if np.isnan(high_plot): high_plot = mean_plot
+
+                                mean_ci_data.append({
                                     'Storyline': storyline,
                                     'GWL': gwl_label,
-                                    'Return Period': rp
+                                    'Mean_Plot': mean_plot,
+                                    'Low_Plot': low_plot,
+                                    'High_Plot': high_plot
                                 })
-                    except KeyError:
-                        continue
+
+                    except KeyError: continue
             
             df = pd.DataFrame(plot_data)
             
             if df.empty:
                 ax.text(0.5, 0.5, "No Data", ha='center', va='center')
             else:
-                # Plot - ROTATED: Storyline on Y, Return Period on X
-                sns.boxplot(data=df, y='Storyline', x='Return Period', hue='GWL', ax=ax,
+                # --- PLOT BOXPLOTS (Individual Models) ---
+                sns.boxplot(data=df, y='Storyline', x='Plot Pos', hue='GWL', ax=ax,
                             order=storyline_order, palette=gwl_colors,
-                            showfliers=False, linewidth=1.2, width=0.7, orient='h')
+                            showfliers=False, linewidth=1.0, width=0.7, orient='h',
+                            boxprops={'alpha': 0.4}) # Transparenter, damit Marker sichtbar bleiben
                 
-                # Add stripplot for individual models
-                sns.stripplot(data=df, y='Storyline', x='Return Period', hue='GWL', ax=ax,
+                sns.stripplot(data=df, y='Storyline', x='Plot Pos', hue='GWL', ax=ax,
                               order=storyline_order, palette=gwl_colors,
-                              dodge=True, jitter=0.15, size=3, alpha=0.6, legend=False, orient='h')
+                              dodge=True, jitter=0.15, size=2, alpha=0.5, legend=False, orient='h')
 
-            # Formatting
+                # --- OVERLAY MEAN + CI (Errorbars) ---
+                unique_gwls = sorted(list(gwl_colors.keys()))
+                dodge_width = 0.7
+                bar_height = dodge_width / len(unique_gwls)
+                
+                for item in mean_ci_data:
+                    y_center = storyline_order.index(item['Storyline'])
+                    gwl_idx = unique_gwls.index(item['GWL'])
+                    y_off = (gwl_idx - (len(unique_gwls) - 1) / 2) * bar_height
+                    y_pos = y_center + y_off
+                    
+                    x = item['Mean_Plot']
+                    xerr_low = x - item['Low_Plot']
+                    xerr_high = item['High_Plot'] - x
+                    
+                    # Plot CI
+                    ax.errorbar(x, y_pos, xerr=[[xerr_low], [xerr_high]], 
+                                fmt='none', ecolor='black', elinewidth=1.8, capsize=4, zorder=20)
+                    # Plot Mean Marker
+                    ax.plot(x, y_pos, marker='D', color=gwl_colors[item['GWL']], 
+                            markeredgecolor='black', markersize=6, zorder=21)
+
+            # --- Formatting ---
             ax.set_xscale('log')
-            ax.set_title(config_item['title'], weight='bold', loc='left', fontsize=12)
-            ax.set_ylabel('') # Storylines are self-explanatory
-            if config_item['ax_idx'] in [2, 3]: # Bottom row
-                ax.set_xlabel('Return Period (Years)', fontsize=10)
-            else:
-                ax.set_xlabel('')
-            
-            # Historical Line (Vertical now)
-            if hist_rp:
+            ax.set_title(full_title, weight='bold', loc='left', fontsize=11)
+            ax.set_ylabel('')
+            if config_item['ax_idx'] in [2, 3]: ax.set_xlabel('Return Period (Years)', fontsize=10)
+            else: ax.set_xlabel('')
+
+            if hist_rp and hist_rp <= BREAK_THRESHOLD:
                 ax.axvline(hist_rp, color='black', linestyle='--', linewidth=1.5, label=f'Hist. ({hist_rp:.0f}yr)')
             
-            # Ticks
-            ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 200, 500])
-            ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+            # --- BROKEN AXIS TICKS ---
+            has_outlier = not df.empty and (df['Return Period'] > BREAK_THRESHOLD).any()
             
-            # Y-axis labels (Storylines) - Only on left column
-            if config_item['ax_idx'] % 2 != 0: # Right column
-                 ax.set_yticklabels([])
-                 ax.set_ylabel('')
+            # Standard Ticks bis 500
+            standard_ticks = [1, 2, 5, 10, 20, 50, 100, 200, 500]
+            standard_labels = ['1', '2', '5', '10', '20', '50', '100', '200', '500']
             
-            # Legend only in first plot
+            if has_outlier:
+                # Achse verlängern um den Ausreißer-Bereich einzuschließen
+                ax.set_xlim(left=0.8, right=VISUAL_OUTLIER_POS * 1.3)
+                final_ticks = standard_ticks + [VISUAL_OUTLIER_POS]
+                
+                # Label für den Ausreißer: Tatsächlicher Maximalwert (gerundet) oder >500
+                if max_real_period_in_plot > BREAK_THRESHOLD:
+                    outlier_label = f"{max_real_period_in_plot:.0f}"
+                else:
+                    outlier_label = f">{BREAK_THRESHOLD}"
+                
+                final_labels = standard_labels + [outlier_label]
+                
+                ax.set_xticks(final_ticks)
+                ax.set_xticklabels(final_labels)
+                
+                # Visueller Indikator für den Achsenbruch
+                break_pos = np.sqrt(BREAK_THRESHOLD * VISUAL_OUTLIER_POS)
+                ax.text(break_pos, ax.get_ylim()[0], "//", ha='center', va='center', fontsize=12, fontweight='bold', color='black')
+            else:
+                # Standardbereich, leicht erweitert für Klarheit
+                ax.set_xlim(left=0.8, right=600) 
+                ax.set_xticks(standard_ticks)
+                ax.set_xticklabels(standard_labels)
+                ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+
+            if config_item['ax_idx'] % 2 != 0: 
+                 ax.set_yticklabels([]); ax.set_ylabel('')
+            
+            # Legend logic
             if config_item['ax_idx'] == 0:
-                ax.legend(loc='lower right', fontsize=8, ncol=1)
+                handles, labels = ax.get_legend_handles_labels()
+                handles.append(plt.Line2D([0], [0], marker='D', color='w', markerfacecolor='gray', markeredgecolor='k', label='Pooled Mean & 95% CI'))
+                handles.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.5, label='Individual Models'))
+                ax.legend(handles=handles, loc='lower right', fontsize=8, ncol=1)
             else:
                 if ax.get_legend(): ax.get_legend().remove()
                 
             ax.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
 
-        plt.tight_layout(rect=[0, 0, 1, 0.96]) # Adjust for suptitle
+        plt.tight_layout(rect=[0, 0, 1, 0.96]) 
         filename = os.path.join(config.PLOT_DIR, "Figure3_core_finding_regime_shift_ssp585.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)

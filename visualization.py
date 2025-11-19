@@ -1165,13 +1165,7 @@ class Visualizer:
         Visualizer.ensure_plot_dir_exists()
 
         # --- MODIFIED LAYOUT: 3 Rows ---
-        # Row 1: Global Temp (Full Width) - Reduced Height
-        # Row 2: Summer Jet Lat (Left), Summer Jet Speed (Right)
-        # Row 3: Winter Jet Lat (Left), Winter Jet Speed (Right)
-        
         fig = plt.figure(figsize=(12, 14))
-        # Reduced height ratio for the first row (Global Temp)
-        # Adjusted hspace to reduce gap between title and first plot
         gs = gridspec.GridSpec(3, 2, height_ratios=[0.6, 1, 1], hspace=0.2, top=0.93)
 
         # --- (a) Global Temperature Anomaly ---
@@ -1180,7 +1174,9 @@ class Visualizer:
             for member_tas in cmip6_plot_data['Global_Tas']['members']:
                 ax_a.plot(member_tas.year, member_tas, color='grey', alpha=0.3, linewidth=0.7)
         if cmip6_plot_data.get('Global_Tas') and cmip6_plot_data['Global_Tas']['mmm'] is not None:
-            ax_a.plot(cmip6_plot_data['Global_Tas']['mmm'].year, cmip6_plot_data['Global_Tas']['mmm'], color='black', linewidth=2.5, label='CMIP6 MMM')
+            # --- NAME CHANGE HERE ---
+            ax_a.plot(cmip6_plot_data['Global_Tas']['mmm'].year, cmip6_plot_data['Global_Tas']['mmm'], 
+                      color='black', linewidth=2.5, label='Multi-Model Mean')
         
         # Reanalysis for Global Temp
         if reanalysis_plot_data.get('Global_Tas'):
@@ -1193,7 +1189,6 @@ class Visualizer:
         
         ax_a.set_title('a) Global Temperature Change', fontsize=12, weight='bold', loc='left')
         ax_a.set_ylabel(f'Temp. Anomaly (°C)', fontsize=10)
-        # ax_a.legend(fontsize=9, loc='upper left') # Removed individual legend
         ax_a.grid(True, linestyle=':', alpha=0.6)
         ax_a.set_xlim(1850, 2100)
         ax_a.axhline(0, color='black', linewidth=0.5)
@@ -1214,7 +1209,9 @@ class Visualizer:
                 for member_jet in cmip6_plot_data[key]['members']:
                     ax.plot(member_jet.season_year, member_jet, color='grey', alpha=0.3, linewidth=0.7)
             if cmip6_plot_data.get(key) and cmip6_plot_data[key]['mmm'] is not None:
-                ax.plot(cmip6_plot_data[key]['mmm'].season_year, cmip6_plot_data[key]['mmm'], color='black', linewidth=2.5, label='CMIP6 MMM')
+                # --- NAME CHANGE HERE ---
+                ax.plot(cmip6_plot_data[key]['mmm'].season_year, cmip6_plot_data[key]['mmm'], 
+                        color='black', linewidth=2.5, label='Multi-Model Mean')
             
             if reanalysis_plot_data.get(key) and reanalysis_plot_data[key].get('20CRv3') is not None:
                 reanalysis_20crv3 = reanalysis_plot_data[key]['20CRv3']
@@ -1234,18 +1231,17 @@ class Visualizer:
         # Shared Legend at the bottom
         handles, labels = ax_a.get_legend_handles_labels()
         
-        # Re-construct handles/labels list for order
         final_handles = []
         final_labels = []
         
-        # Order: CMIP6 MMM, Individual Models, 20CRv3, ERA5
-        if 'CMIP6 MMM' in handles: # Check if CMIP6 MMM is present
-            idx = labels.index('CMIP6 MMM')
+        # Order: Multi-Model Mean, CMIP6 Models, 20CRv3, ERA5
+        if 'Multi-Model Mean' in labels:
+            idx = labels.index('Multi-Model Mean')
             final_handles.append(handles[idx])
             final_labels.append(labels[idx])
         
-        final_handles.append(plt.Line2D([0], [0], color='grey', linewidth=0.7, alpha=0.5, label='Individual Models'))
-        final_labels.append('Individual Models')
+        final_handles.append(plt.Line2D([0], [0], color='grey', linewidth=0.7, alpha=0.5, label='CMIP6 Models'))
+        final_labels.append('CMIP6 Models')
         
         if '20CRv3' in labels:
             idx = labels.index('20CRv3')
@@ -1258,8 +1254,9 @@ class Visualizer:
 
         fig.legend(final_handles, final_labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.02), frameon=True)
 
-        fig.suptitle('Evolution of Key Climate Indices (20-Year Rolling Mean)', fontsize=16, weight='bold')
-        fig.tight_layout(rect=[0, 0.05, 1, 0.96]) # Adjusted rect for bottom legend
+        fig.suptitle('Evolution of Key Climate Indices (20-Year Rolling Mean) - SSP5-8.5', fontsize=16, weight='bold')
+        
+        fig.tight_layout(rect=[0, 0.05, 1, 0.96])
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -3654,11 +3651,9 @@ class Visualizer:
     def plot_core_finding_gev_panel(return_period_results, config, scenario):
         """
         Creates ERL Figure 3: Core Finding - Regime Shift in Extremes (30Q100).
-        Layout: 2x2 (Summer Low, Winter Low, Summer High, Winter High).
-        Uses a 'Broken Axis' simulation to handle extreme outliers > 500 years.
-        Overlays Bootstrap Confidence Intervals (CIs) for the Pooled Mean.
+        Layout: 2x2 Grid, but each plot uses a BROKEN X-AXIS (Left: Normal, Right: Extreme).
         """
-        logging.info(f"Plotting Figure 3 (Core Finding GEV Panel) for {scenario}...")
+        logging.info(f"Plotting Figure 3 (Core Finding GEV Panel) with BROKEN AXIS for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
 
         if not return_period_results or 'data' not in return_period_results:
@@ -3675,281 +3670,318 @@ class Visualizer:
         low_key_summer = next((k for k in summer_keys if target_event_substring in k and 'low' in k.lower()), None)
         high_key_summer = next((k for k in summer_keys if target_event_substring in k and 'high' in k.lower()), None)
         
+        # Config for the 4 logical plots
         plot_configs = [
-            {'half_year': 'summer', 'event_key': low_key_summer,  'base_title': 'a) Summer Half-Year Low-Flow', 'ax_idx': 0},
-            {'half_year': 'winter', 'event_key': low_key_winter,  'base_title': 'b) Winter Half-Year Low-Flow', 'ax_idx': 1},
-            {'half_year': 'summer', 'event_key': high_key_summer, 'base_title': 'c) Summer Half-Year High-Flow', 'ax_idx': 2},
-            {'half_year': 'winter', 'event_key': high_key_winter, 'base_title': 'd) Winter Half-Year High-Flow', 'ax_idx': 3},
+            {'half_year': 'summer', 'event_key': low_key_summer,  'base_title': 'a) Summer Half-Year: 30-Day Low Flow', 'row': 0, 'col_group': 0},
+            {'half_year': 'winter', 'event_key': low_key_winter,  'base_title': 'b) Winter Half-Year: 30-Day Low Flow', 'row': 0, 'col_group': 1},
+            {'half_year': 'summer', 'event_key': high_key_summer, 'base_title': 'c) Summer Half-Year: 30-Day High Flow', 'row': 1, 'col_group': 0},
+            {'half_year': 'winter', 'event_key': high_key_winter, 'base_title': 'd) Winter Half-Year: 30-Day High Flow', 'row': 1, 'col_group': 1},
         ]
 
-        fig, axs = plt.subplots(2, 2, figsize=(14, 10), sharex=False) 
-        axs = axs.flatten()
+        # --- SETUP FIGURE WITH BROKEN AXIS GRID ---
+        fig = plt.figure(figsize=(16, 10))
+        # Ratios: [Main, Extreme, Main, Extreme]
+        gs = gridspec.GridSpec(2, 4, width_ratios=[3, 1, 3, 1], wspace=0.05, hspace=0.3)
         
-        fig.suptitle(f"Regime Shift in Return Periods of Extremes (30Q100) - {scenario.upper()}", fontsize=16, weight='bold', y=0.98)
+        fig.suptitle("Regime Shift in Return Periods of Extremes (30Q100) - SSP5-8.5", fontsize=16, weight='bold', y=0.98)
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
-        # gwl_colors = {f'+{gwls_to_plot[0]}°C': '#4575b4', f'+{gwls_to_plot[1]}°C': '#d73027'} # OLD
         gwl_colors = {f'+{gwl}°C': Visualizer.GWL_COLORS[gwl] for gwl in gwls_to_plot}
-        storyline_order = [
+        
+        storyline_data_keys = [
             'MMM', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
             'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
         ]
+        storyline_display_order = [
+            'Multi-Model Mean', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
+            'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
+        ]
 
-        # --- BROKEN AXIS SETTINGS REMOVED -> USING STANDARD LOG SCALE ---
-        # BREAK_THRESHOLD = 500  
-        # VISUAL_OUTLIER_POS = 1000 
-
-        for config_item in plot_configs:
-            ax = axs[config_item['ax_idx']]
-            half_year = config_item['half_year']
-            event_key = config_item['event_key']
-            base_title = config_item['base_title']
+        # Settings for the Axis Break
+        BREAK_POINT = 300  # Where the axis splits (300 years)
+        
+        # Loop through the 4 logical plots
+        for cfg in plot_configs:
+            row_idx = cfg['row']
+            col_start = cfg['col_group'] * 2 
             
-            if not event_key:
-                ax.text(0.5, 0.5, "Event Not Found", ha='center', va='center')
-                ax.set_title(base_title, weight='bold', loc='left'); continue
+            # Create the two sub-axes for the broken axis effect
+            ax_left = fig.add_subplot(gs[row_idx, col_start])
+            ax_right = fig.add_subplot(gs[row_idx, col_start + 1], sharey=ax_left)
 
-            # Metadata
+            event_key = cfg['event_key']
+            half_year = cfg['half_year']
+            
+            # Title Construction
             thresh_meta = return_period_results['thresholds'][half_year][event_key]
             hist_val_q = thresh_meta.get('threshold_m3s')
             op = '<' if thresh_meta.get('type', 'low') == 'low' else '>'
-            full_title = base_title
+            full_title = cfg['base_title']
             if hist_val_q is not None:
-                full_title += f"\n(Threshold: {op} {hist_val_q:.0f} m³/s)"
-
-            # Collect Data
-            plot_data = []
-            mean_ci_data = [] # Store mean and CIs for overlay
-            hist_rp = thresh_meta.get('hist_return_period')
+                full_title += f" {op} {hist_val_q:.0f} m³/s"
             
-            max_real_period_in_plot = 0 
+            ax_left.set_title(full_title, loc='left', fontsize=11, weight='bold', x=0)
 
-            for storyline in storyline_order:
+            # --- DATA COLLECTION ---
+            plot_data = []
+            mean_ci_data = []
+            hist_rp = thresh_meta.get('hist_return_period')
+            max_val_in_plot = 0
+
+            for storyline_key in storyline_data_keys:
+                display_name = 'Multi-Model Mean' if storyline_key == 'MMM' else storyline_key
                 for gwl in gwls_to_plot:
                     gwl_label = f'+{gwl}°C'
                     try:
-                        event_data = return_period_results['data'][gwl][half_year][storyline][event_key]
+                        event_data = return_period_results['data'][gwl][half_year][storyline_key][event_key]
                         if event_data:
-                            # 1. Individual Models (Boxplot)
                             if 'future_return_periods_all_models' in event_data:
                                 rps = event_data['future_return_periods_all_models']
                                 rps = [rp for rp in rps if np.isfinite(rp)]
                                 for rp in rps:
-                                    if rp > max_real_period_in_plot: max_real_period_in_plot = rp
-                                    # Mapping der Datenpunkte: Alles > 500 wird auf VISUAL_OUTLIER_POS gesetzt
-                                    plot_data.append({
-                                        'Storyline': storyline,
-                                        'GWL': gwl_label,
-                                        'Return Period': rp,
-                                        'Plot Pos': rp
-                                    })
+                                    if rp > max_val_in_plot: max_val_in_plot = rp
+                                    plot_data.append({'Storyline': display_name, 'GWL': gwl_label, 'Plot Pos': rp})
                             
-                            # 2. Pooled Mean + CI (Errorbar)
                             rp_mean = event_data.get('future_return_period_mean', np.nan)
-                            ci_low = event_data.get('future_return_period_ci_low', np.nan)
-                            ci_high = event_data.get('future_return_period_ci_high', np.nan)
-                            
                             if np.isfinite(rp_mean):
                                 mean_ci_data.append({
-                                    'Storyline': storyline,
-                                    'GWL': gwl_label,
-                                    'Mean_Plot': rp_mean,
-                                    'Low_Plot': ci_low,
-                                    'High_Plot': ci_high
+                                    'Storyline': display_name, 'GWL': gwl_label, 'Mean_Plot': rp_mean,
+                                    'Low_Plot': event_data.get('future_return_period_ci_low', np.nan),
+                                    'High_Plot': event_data.get('future_return_period_ci_high', np.nan)
                                 })
-
                     except KeyError: continue
             
             df = pd.DataFrame(plot_data)
             
             if df.empty:
-                ax.text(0.5, 0.5, "No Data", ha='center', va='center')
-            else:
-                # --- PLOT BOXPLOTS (Individual Models) ---
-                sns.boxplot(data=df, y='Storyline', x='Plot Pos', hue='GWL', ax=ax,
-                            order=storyline_order, palette=gwl_colors,
-                            showfliers=False, linewidth=1.0, width=0.7, orient='h',
-                            boxprops={'alpha': 0.4}) # Transparenter, damit Marker sichtbar bleiben
-                
-                sns.stripplot(data=df, y='Storyline', x='Plot Pos', hue='GWL', ax=ax,
-                              order=storyline_order, palette=gwl_colors,
-                              dodge=True, jitter=0.15, size=2, alpha=0.5, legend=False, orient='h')
+                ax_left.text(0.5, 0.5, "No Data", ha='center', va='center', transform=ax_left.transAxes)
+                ax_right.axis('off')
+                continue
 
-                # --- OVERLAY MEAN + CI (Errorbars) ---
-                unique_gwls = sorted(list(gwl_colors.keys()))
-                dodge_width = 0.7
-                bar_height = dodge_width / len(unique_gwls)
+            # --- PLOTTING ON BOTH AXES ---
+            for ax in [ax_left, ax_right]:
+                # Boxplots
+                sns.boxplot(data=df, y='Storyline', x='Plot Pos', hue='GWL', ax=ax,
+                            order=storyline_display_order, palette=gwl_colors,
+                            showfliers=False, linewidth=1.0, width=0.7, orient='h',
+                            boxprops={'alpha': 0.4})
+                # Stripplots
+                sns.stripplot(data=df, y='Storyline', x='Plot Pos', hue='GWL', ax=ax,
+                              order=storyline_display_order, palette=gwl_colors,
+                              dodge=True, jitter=0.15, size=2, alpha=0.5, legend=False, orient='h')
                 
+                # Errorbars
+                unique_gwls = sorted(list(gwl_colors.keys()))
+                bar_height = 0.7 / len(unique_gwls)
                 for item in mean_ci_data:
-                    y_center = storyline_order.index(item['Storyline'])
+                    if item['Storyline'] not in storyline_display_order: continue
+                    y_center = storyline_display_order.index(item['Storyline'])
                     gwl_idx = unique_gwls.index(item['GWL'])
-                    y_off = (gwl_idx - (len(unique_gwls) - 1) / 2) * bar_height
-                    y_pos = y_center + y_off
+                    y_pos = y_center + (gwl_idx - (len(unique_gwls)-1)/2) * bar_height
                     
                     x = item['Mean_Plot']
-                    # Ensure non-negative error bar lengths
                     xerr_low = max(0, x - item['Low_Plot'])
                     xerr_high = max(0, item['High_Plot'] - x)
                     
-                    # Plot CI
-                    ax.errorbar(x, y_pos, xerr=[[xerr_low], [xerr_high]], 
-                                fmt='none', ecolor='black', elinewidth=2.0, capsize=5, zorder=20)
-                    # Plot Mean Marker - Larger for 3.0 GWL
+                    ax.errorbar(x, y_pos, xerr=[[xerr_low], [xerr_high]], fmt='none', 
+                                ecolor='black', elinewidth=2.0, capsize=5, zorder=20)
                     marker_size = 9 if item['GWL'] == '+3.0°C' else 6
                     ax.plot(x, y_pos, marker='D', color=Visualizer.GWL_COLORS[float(item['GWL'][1:-2])], 
                             markeredgecolor='black', markersize=marker_size, zorder=21)
 
-            # --- Formatting ---
-            ax.set_xscale('log')
-            ax.set_title(full_title, weight='bold', loc='left', fontsize=11)
-            ax.set_ylabel('')
-            if config_item['ax_idx'] in [2, 3]: ax.set_xlabel('Return Period (Years)', fontsize=10)
-            else: ax.set_xlabel('')
-
-            if hist_rp:
-                ax.axvline(hist_rp, color='black', linestyle='--', linewidth=1.5, label=f'Hist. ({hist_rp:.0f}yr)')
-            
-            # Standard Log Scale Ticks
-            ax.set_xticks([1, 2, 5, 10, 20, 50, 100, 200, 500, 1000])
-            ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-
-            if config_item['ax_idx'] % 2 != 0: 
-                 ax.set_yticklabels([]); ax.set_ylabel('')
-            
-            if ax.get_legend(): ax.get_legend().remove()
+                # Historical Line
+                if hist_rp:
+                    ax.axvline(hist_rp, color='black', linestyle='--', linewidth=1.5)
                 
-            ax.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
+                # Remove Legend from individual subplots
+                if ax.get_legend(): ax.get_legend().remove()
 
-        # Shared Legend at the bottom
+            # --- AXIS LIMITS & SCALES ---
+            # LEFT Axis (Normal Range)
+            ax_left.set_xscale('log')
+            ax_left.set_xlim(0.8, BREAK_POINT)
+            ax_left.set_xticks([1, 10, 100])
+            ax_left.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+            
+            # RIGHT Axis (Extreme Range)
+            ax_right.set_xscale('log')
+            # If max data is less than break point, pad it a bit, otherwise go to max
+            right_max = max(max_val_in_plot * 1.5, BREAK_POINT * 10)
+            ax_right.set_xlim(BREAK_POINT, right_max)
+            ax_right.set_xticks([500, 1000, 5000, 10000])
+            ax_right.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+
+            # --- HIDE SPINES FOR BREAK EFFECT ---
+            ax_left.spines['right'].set_visible(False)
+            ax_right.spines['left'].set_visible(False)
+            
+            # Hide Y ticks/labels on right plot
+            ax_right.yaxis.set_ticks([])
+            ax_right.set_ylabel('')
+            
+            # Only show Y labels on the far left of the grid
+            if cfg['col_group'] == 0:
+                ax_left.set_ylabel('')
+            else:
+                ax_left.set_ylabel('')
+                ax_left.yaxis.set_ticks([])
+
+            # Grid
+            ax_left.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
+            ax_right.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
+            
+            # X-Labels only on bottom row
+            if cfg['row'] == 1:
+                ax_left.set_xlabel('Return Period (Years)', fontsize=10)
+                ax_right.set_xlabel('', fontsize=10)
+            else:
+                ax_left.set_xlabel('')
+                ax_right.set_xlabel('')
+
+            # --- DRAW DIAGONALS ("//") ---
+            d = .015  # size of diagonal lines
+            kwargs = dict(transform=ax_left.transAxes, color='k', clip_on=False)
+            ax_left.plot((1 - d, 1 + d), (-d, +d), **kwargs)
+            ax_left.plot((1 - d, 1 + d), (1 - d, 1 + d), **kwargs)
+
+            kwargs.update(transform=ax_right.transAxes) 
+            ax_right.plot((- d * 3, + d * 3), (1 - d, 1 + d), **kwargs) 
+            ax_right.plot((- d * 3, + d * 3), (-d, +d), **kwargs)
+
+        # Shared Legend
         handles = []
         handles.append(plt.Line2D([0], [0], marker='D', color='w', markerfacecolor='gray', markeredgecolor='k', label='Pooled Mean & 95% CI'))
         handles.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.5, label='Individual Models'))
-        # Add GWL colors
+        # --- LABEL CHANGED HERE ---
+        handles.append(plt.Line2D([0], [0], color='black', linestyle='--', linewidth=1.5, label='Historical Return Period'))
+        # --------------------------
         for gwl, color in gwl_colors.items():
             handles.append(mpatches.Patch(color=color, label=gwl))
             
-        fig.legend(handles=handles, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.02), frameon=True)
+        fig.legend(handles=handles, loc='lower center', ncol=5, bbox_to_anchor=(0.5, 0.02), frameon=True)
 
         plt.tight_layout(rect=[0, 0.05, 1, 0.96]) 
+        
         filename = os.path.join(config.PLOT_DIR, "Figure3_core_finding_regime_shift_ssp585.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved Figure 3 to {filename}")
 
     @staticmethod
-    def plot_mechanism_drivers_panel(storyline_impacts, config, scenario):
+    def plot_mechanism_drivers_panel(cmip6_results, config, scenario):
         """
-        Creates ERL Figure 4: Mechanism - Drivers (Temp & Precip).
+        Creates ERL Figure 4: Mechanism - Drivers (Temp & Precip) as BOXPLOTS.
         Layout: 2x2 (Summer Temp, Summer Precip, Winter Temp, Winter Precip).
+        Shows the spread of individual models within each storyline.
         """
-        logging.info(f"Plotting Figure 4 (Mechanism Drivers Panel) for {scenario}...")
+        logging.info(f"Plotting Figure 4 (Mechanism Drivers Panel) with Boxplots for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
 
-        if not storyline_impacts:
+        if not cmip6_results:
             logging.warning("Missing data for Figure 4.")
             return
 
-        fig, axs = plt.subplots(2, 2, figsize=(12, 10))
+        # Extract required data structures
+        all_deltas = cmip6_results.get('all_individual_model_deltas_for_plot', {})
+        classification = cmip6_results.get('storyline_classification_2d', {})
+        
+        if not all_deltas or not classification:
+            logging.warning("Missing delta or classification data for Figure 4.")
+            return
+
+        fig, axs = plt.subplots(2, 2, figsize=(14, 12))
         axs = axs.flatten()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
-        # gwl_colors = {f'+{gwls_to_plot[0]}°C': '#4575b4', f'+{gwls_to_plot[1]}°C': '#d73027'} # OLD
         gwl_colors = {f'+{gwl}°C': Visualizer.GWL_COLORS[gwl] for gwl in gwls_to_plot}
         
-        # Plot Configuration
-        # Note: Order requested is Summer Temp, Summer Precip, Winter Temp, Winter Precip?
-        # Let's check instructions: "(a) Summer Temp, (b) Summer Precip, (c) Winter Temp, (d) Winter Precip."
-        # Plot Configuration
         plot_configs = [
-            {'key': 'JJA_tas', 'title': 'a) Summer Temperature', 'unit': '°C', 'ax': axs[0], 'col': 0},
-            {'key': 'JJA_pr',  'title': 'b) Summer Precipitation', 'unit': '%',  'ax': axs[1], 'col': 1},
-            {'key': 'DJF_tas', 'title': 'c) Winter Temperature', 'unit': '°C', 'ax': axs[2], 'col': 0},
-            {'key': 'DJF_pr',  'title': 'd) Winter Precipitation', 'unit': '%',  'ax': axs[3], 'col': 1},
+            {'key': 'JJA_tas', 'title': 'a) Summer Temperature', 'unit': '°C', 'ax': axs[0]},
+            {'key': 'JJA_pr',  'title': 'b) Summer Precipitation', 'unit': '%',  'ax': axs[1]},
+            {'key': 'DJF_tas', 'title': 'c) Winter Temperature', 'unit': '°C', 'ax': axs[2]},
+            {'key': 'DJF_pr',  'title': 'd) Winter Precipitation', 'unit': '%',  'ax': axs[3]},
         ]
 
-        storyline_order = [
-            'MMM',
-            'Slow Jet & Northward Shift',
-            'Fast Jet & Northward Shift',
-            'Slow Jet & Southward Shift',
-            'Fast Jet & Southward Shift',
+        # Keys used in data structure
+        storyline_data_keys = [
+            'MMM', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
+            'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
+        ]
+        # Names for the X-axis labels
+        storyline_display_order = [
+            'Multi-Model Mean', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
+            'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
         ]
         
-        # Main Title
         fig.suptitle(f"Drivers of Change (Temperature & Precipitation) - {scenario.upper()}", fontsize=16, weight='bold', y=0.98)
-        
-        # Store limits for shared axes
-        col_limits = {0: [], 1: []}
 
         for p_conf in plot_configs:
             ax = p_conf['ax']
             key = p_conf['key']
+            season_prefix = key.split('_')[0] # 'JJA' or 'DJF'
             
-            # Prepare Data
             plot_data = []
             for gwl in gwls_to_plot:
                 gwl_label = f'+{gwl}°C'
-                for storyline in storyline_order:
-                    try:
-                        val = storyline_impacts[gwl][key][storyline]['total']
-                        plot_data.append({
-                            'Storyline': storyline,
-                            'GWL': gwl_label,
-                            'Change': val
-                        })
-                    except KeyError:
-                        continue
+                
+                for storyline_key_short in storyline_data_keys:
+                    # Construct the full key, e.g., 'JJA_MMM' or 'JJA_Fast Jet...'
+                    # Note: 'MMM' might be stored as 'JJA_MMM' in classification
+                    full_storyline_key = f"{season_prefix}_{storyline_key_short}"
+                    
+                    # Get list of models for this storyline/GWL/Season
+                    models = classification.get(gwl, {}).get(full_storyline_key, [])
+                    
+                    # Map data key to display name
+                    display_name = 'Multi-Model Mean' if storyline_key_short == 'MMM' else storyline_key_short
+                    
+                    for model in models:
+                         # Fetch the value for this specific model/GWL/metric
+                         val = all_deltas.get(key, {}).get(gwl, {}).get(model)
+                         if val is not None and np.isfinite(val):
+                             plot_data.append({
+                                 'Storyline': display_name,
+                                 'GWL': gwl_label,
+                                 'Change': val
+                             })
 
             df = pd.DataFrame(plot_data)
             
             if df.empty:
                 ax.text(0.5, 0.5, "No Data", ha='center', va='center')
             else:
-                # Plot - ROTATED: Storyline on Y, Change on X
-                sns.barplot(data=df, y='Storyline', x='Change', hue='GWL', ax=ax,
-                            order=storyline_order, palette=gwl_colors,
-                            edgecolor='black', linewidth=0.5, orient='h')
+                # Create Vertical Boxplot
+                sns.boxplot(data=df, x='Storyline', y='Change', hue='GWL', ax=ax,
+                            order=storyline_display_order, palette=gwl_colors,
+                            showfliers=False, linewidth=1.2, width=0.7)
                 
-                # Collect limits
-                col_limits[p_conf['col']].append(ax.get_xlim())
-            
+                # Add Stripplot for individual points
+                sns.stripplot(data=df, x='Storyline', y='Change', hue='GWL', ax=ax,
+                              order=storyline_display_order, palette=gwl_colors,
+                              dodge=True, jitter=0.15, size=3, alpha=0.6, legend=False,
+                              edgecolor='gray', linewidth=0.5)
+
             # Formatting
             ax.set_title(p_conf['title'], weight='bold', loc='left', fontsize=12)
-            ax.set_ylabel('')
-            if p_conf['ax'] in [axs[2], axs[3]]: # Bottom row
-                ax.set_xlabel(f"Change ({p_conf['unit']})", fontsize=10)
-            else:
-                ax.set_xlabel('')
+            ax.set_xlabel('')
+            ax.set_ylabel(f"Change ({p_conf['unit']})", fontsize=10)
             
-            ax.axvline(0, color='black', linewidth=0.8)
-            ax.grid(True, axis='x', linestyle=':', alpha=0.7)
+            ax.axhline(0, color='black', linewidth=0.8, linestyle='-')
+            ax.grid(True, axis='y', linestyle=':', alpha=0.7)
             
-            # Y-axis labels (Storylines) - Only on left column
-            if p_conf['ax'] in [axs[1], axs[3]]: # Right column
-                 ax.set_yticklabels([])
-                 ax.set_ylabel('')
-
-            # Legend
+            # Rotate X-axis labels for readability
+            # Using replace to break long lines if needed
+            labels = [l.replace(' & ', ' &\n') for l in storyline_display_order]
+            ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
+            
+            # Remove individual legends to use a shared one later
             if ax.get_legend(): ax.get_legend().remove()
 
-        # Shared Legend at the bottom
-        handles, labels = axs[0].get_legend_handles_labels() # Get from first plot
-        # If empty (because we removed it above?), recreate manually or get before removing
-        # Better: Create custom patches
-        legend_patches = [mpatches.Patch(color=gwl_colors[label], label=label) for label in gwl_colors]
-        fig.legend(handles=legend_patches, loc='lower center', ncol=2, bbox_to_anchor=(0.5, 0.02), frameon=True)
+        # Shared Legend
+        handles = [mpatches.Patch(color=gwl_colors[label], label=label) for label in sorted(gwl_colors.keys())]
+        fig.legend(handles=handles, loc='lower center', ncol=2, bbox_to_anchor=(0.5, 0.01), frameon=True)
         
-        # Apply shared limits per column
-        for col, limits in col_limits.items():
-            if limits:
-                min_val = min(l[0] for l in limits)
-                max_val = max(l[1] for l in limits)
-                # Apply to all axes in this column
-                for p_conf in plot_configs:
-                    if p_conf['col'] == col:
-                        p_conf['ax'].set_xlim(min_val, max_val)
-
-        plt.tight_layout(rect=[0, 0.05, 1, 0.96]) # Adjust for suptitle and bottom legend
+        plt.tight_layout(rect=[0, 0.08, 1, 0.96])
         filename = os.path.join(config.PLOT_DIR, "Figure4_mechanism_drivers_summary_ssp585.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)

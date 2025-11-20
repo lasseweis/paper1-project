@@ -1159,6 +1159,7 @@ class Visualizer:
         """
         Creates ERL Figure 2: Future Dynamical Uncertainty (Climate Indices Evolution).
         Layout: 3 Rows (Global Temp, Summer Jet, Winter Jet).
+        MODIFIED: Legend 'CMIP6 Models' -> 'Individual Models'.
         """
         filename = "Figure2_climate_indices_evolution_ssp585.png"
         logging.info(f"Plotting ERL Figure 2 to {filename}...")
@@ -1234,14 +1235,15 @@ class Visualizer:
         final_handles = []
         final_labels = []
         
-        # Order: Multi-Model Mean, CMIP6 Models, 20CRv3, ERA5
+        # Order: Multi-Model Mean, Individual Models, 20CRv3, ERA5
         if 'Multi-Model Mean' in labels:
             idx = labels.index('Multi-Model Mean')
             final_handles.append(handles[idx])
             final_labels.append(labels[idx])
         
-        final_handles.append(plt.Line2D([0], [0], color='grey', linewidth=0.7, alpha=0.5, label='CMIP6 Models'))
-        final_labels.append('CMIP6 Models')
+        # MODIFIED LABEL
+        final_handles.append(plt.Line2D([0], [0], color='grey', linewidth=0.7, alpha=0.5, label='Individual Models'))
+        final_labels.append('Individual Models')
         
         if '20CRv3' in labels:
             idx = labels.index('20CRv3')
@@ -3647,6 +3649,7 @@ class Visualizer:
         Creates ERL Figure 3: Core Finding - Regime Shift in Extremes (30Q100).
         Layout: 2x2 Grid, but each plot uses a BROKEN X-AXIS (Left: Normal, Right: Extreme).
         INCLUDES: Broken Axis Fixes (No duplicate Y-labels, No overlapping X-labels on top row).
+        MODIFIED: Corrected scenario title formatting (SSP5-8.5).
         """
         logging.info(f"Plotting Figure 3 (Core Finding GEV Panel) with BROKEN AXIS for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
@@ -3675,13 +3678,13 @@ class Visualizer:
 
         # --- SETUP FIGURE WITH BROKEN AXIS GRID ---
         fig = plt.figure(figsize=(16, 10))
-        # Ratios: [Main, Extreme, Main, Extreme]
         gs = gridspec.GridSpec(2, 4, width_ratios=[3, 1, 3, 1], wspace=0.08, hspace=0.35)
         
-        fig.suptitle(f"Regime Shift in Return Periods of Extremes (30Q100) - {scenario.upper()}", fontsize=16, weight='bold', y=0.98)
+        # MODIFIED: Format Scenario String correctly
+        scenario_title = scenario.upper().replace('585', '5-8.5').replace('245', '2-4.5')
+        fig.suptitle(f"Regime Shift in Return Periods of Extremes (30Q100) - {scenario_title}", fontsize=16, weight='bold', y=0.98)
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
-        # MODIFIED: Add " GWL" to keys
         gwl_colors = {f'+{gwl}°C GWL': Visualizer.GWL_COLORS[gwl] for gwl in gwls_to_plot}
         
         storyline_data_keys = [
@@ -3694,21 +3697,18 @@ class Visualizer:
         ]
 
         # Settings for the Axis Break
-        BREAK_POINT = 300  # Where the axis splits (300 years)
+        BREAK_POINT = 300 
         
-        # Loop through the 4 logical plots
         for cfg in plot_configs:
             row_idx = cfg['row']
             col_start = cfg['col_group'] * 2 
             
-            # Create the two sub-axes for the broken axis effect
             ax_left = fig.add_subplot(gs[row_idx, col_start])
             ax_right = fig.add_subplot(gs[row_idx, col_start + 1], sharey=ax_left)
 
             event_key = cfg['event_key']
             half_year = cfg['half_year']
             
-            # Title Construction
             thresh_meta = return_period_results['thresholds'][half_year][event_key]
             hist_val_q = thresh_meta.get('threshold_m3s')
             op = '<' if thresh_meta.get('type', 'low') == 'low' else '>'
@@ -3727,7 +3727,6 @@ class Visualizer:
             for storyline_key in storyline_data_keys:
                 display_name = 'Multi-Model Mean' if storyline_key == 'MMM' else storyline_key
                 for gwl in gwls_to_plot:
-                    # MODIFIED: Add " GWL" to label
                     gwl_label = f'+{gwl}°C GWL'
                     try:
                         event_data = return_period_results['data'][gwl][half_year][storyline_key][event_key]
@@ -3755,22 +3754,18 @@ class Visualizer:
                 ax_right.axis('off')
                 continue
 
-            # --- PLOTTING ON BOTH AXES ---
+            # --- PLOTTING ---
             for ax in [ax_left, ax_right]:
-                # Boxplots
                 sns.boxplot(data=df, y='Storyline', x='Plot Pos', hue='GWL', ax=ax,
                             order=storyline_display_order, palette=gwl_colors,
                             showfliers=False, linewidth=1.0, width=0.7, orient='h',
                             boxprops={'alpha': 0.4})
-                # Stripplots
                 sns.stripplot(data=df, y='Storyline', x='Plot Pos', hue='GWL', ax=ax,
                               order=storyline_display_order, palette=gwl_colors,
                               dodge=True, jitter=0.15, size=2, alpha=0.5, legend=False, orient='h')
                 
-                # MODIFIED: Remove seaborn's automatic Y-labels to prevent "Storyline" appearing on split
                 ax.set_ylabel('')
                 
-                # Errorbars
                 unique_gwls = sorted(list(gwl_colors.keys()))
                 bar_height = 0.7 / len(unique_gwls)
                 for item in mean_ci_data:
@@ -3786,80 +3781,66 @@ class Visualizer:
                     ax.errorbar(x, y_pos, xerr=[[xerr_low], [xerr_high]], fmt='none', 
                                 ecolor='black', elinewidth=2.0, capsize=5, zorder=20)
                     
-                    # Handle pure float extraction for color dict
                     gwl_val_float = float(item['GWL'].split('+')[1].split('°')[0])
                     marker_size = 9 if gwl_val_float == 3.0 else 6
                     ax.plot(x, y_pos, marker='D', color=Visualizer.GWL_COLORS[gwl_val_float], 
                             markeredgecolor='black', markersize=marker_size, zorder=21)
 
-                # Historical Line
                 if hist_rp:
                     ax.axvline(hist_rp, color='black', linestyle='--', linewidth=1.5)
                 
-                # Remove Legend from individual subplots
                 if ax.get_legend(): ax.get_legend().remove()
 
             # --- AXIS LIMITS & SCALES ---
-            # LEFT Axis (Normal Range)
             ax_left.set_xscale('log')
             ax_left.set_xlim(0.8, BREAK_POINT)
             ax_left.set_xticks([1, 10, 100])
             ax_left.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
             
-            # RIGHT Axis (Extreme Range)
             ax_right.set_xscale('log')
             right_max = max(max_val_in_plot * 1.5, BREAK_POINT * 10)
             ax_right.set_xlim(BREAK_POINT, right_max)
             ax_right.set_xticks([500, 1000, 5000, 10000])
             ax_right.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
 
-            # --- HIDE SPINES FOR BREAK EFFECT ---
             ax_left.spines['right'].set_visible(False)
             ax_right.spines['left'].set_visible(False)
             
-            # --- Y-Axis Labels Logic ---
-            # WICHTIG: Deaktiviere IMMER die Labels auf der rechten Teilachse (ax_right)
             ax_right.tick_params(axis='y', which='both', left=False, labelleft=False, right=False)
             
             if cfg['col_group'] == 0:
-                # Linke Spalte: Zeige Labels auf ax_left
                 labels = [l.replace(' & ', ' &\n') for l in storyline_display_order]
                 ax_left.set_yticks(range(len(labels)))
                 ax_left.set_yticklabels(labels, fontsize=10)
                 ax_left.tick_params(axis='y', which='both', left=True, labelleft=True)
             else:
-                # Rechte Spalte: Verstecke Labels auf ax_left komplett
                 ax_left.set_yticks([])
                 ax_left.set_yticklabels([])
                 ax_left.tick_params(axis='y', which='both', left=False, labelleft=False)
 
-            ax_left.invert_yaxis() # Ensure MMM is at the top
-
+            ax_left.invert_yaxis() 
             ax_left.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
             ax_right.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
             
-            # --- MODIFIED: X-Axis Labels & Ticks ---
-            # Enable ticks for all plots (removed condition checking cfg['row'])
+            # FORCE TICKS ON ALL SUBPLOTS
+            ax_left.tick_params(axis='x', labelbottom=True)
             ax_right.tick_params(axis='x', labelbottom=True) 
             plt.setp(ax_right.get_xticklabels(), rotation=30, ha='right')
             
-            # Set centered Label using coordinates
-            # We use ax_left to place the label centered across both axes
-            ax_left.set_xlabel("Return Period (Years)", fontsize=10)
-            # Calculate approximate center: 
-            # Width ratio is 3:1. Total visual width units = 4. Center is at 2.
-            # 2 units is 2/3 of the way along the left axis (width 3).
-            # Add small offset for gap. 0.70 looks about right.
-            ax_left.xaxis.set_label_coords(0.70, -0.12)
+            # LABEL ONLY BOTTOM ROW
+            if row_idx == 1:
+                ax_left.set_xlabel("Return Period (Years)", fontsize=10)
+                ax_left.xaxis.set_label_coords(0.70, -0.12)
+            else:
+                ax_left.set_xlabel("")
             
             ax_right.set_xlabel('')
 
-            # --- DRAW DIAGONALS ("//") ---
+            # DIAGONALS
             d = .015
             kwargs = dict(transform=ax_left.transAxes, color='k', clip_on=False)
             ax_left.plot((1 - d, 1 + d), (-d, +d), **kwargs)
             ax_left.plot((1 - d, 1 + d), (1 - d, 1 + d), **kwargs)
-
             kwargs.update(transform=ax_right.transAxes) 
             ax_right.plot((- d * 3, + d * 3), (1 - d, 1 + d), **kwargs) 
             ax_right.plot((- d * 3, + d * 3), (-d, +d), **kwargs)
@@ -3867,14 +3848,11 @@ class Visualizer:
         # Shared Legend
         handles = []
         handles.append(plt.Line2D([0], [0], marker='D', color='w', markerfacecolor='gray', markeredgecolor='k', label='Pooled Median & 95% CI'))
-        handles.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.5, label='Individual Models'))
         handles.append(plt.Line2D([0], [0], color='black', linestyle='--', linewidth=1.5, label='Historical Return Period'))
-        
-        # MODIFIED: Legend matches new keys with "GWL"
         for gwl_label, color in gwl_colors.items():
             handles.append(mpatches.Patch(color=color, label=gwl_label))
             
-        fig.legend(handles=handles, loc='lower center', ncol=5, bbox_to_anchor=(0.5, 0.02), frameon=True)
+        fig.legend(handles=handles, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.02), frameon=True)
 
         plt.tight_layout(rect=[0, 0.05, 1, 0.96]) 
         
@@ -3887,10 +3865,7 @@ class Visualizer:
     def plot_mechanism_drivers_panel(cmip6_results, config, scenario):
         """
         Creates ERL Figure 4: Mechanism - Drivers (Temp & Precip) as BOXPLOTS.
-        ROTATED: Variable changes on X-axis, Storylines on Y-axis.
-        MODIFIED: Applies offset to TAS to show warming relative to 1850-1900.
-        MODIFIED: Unified X-axes per column, Analysis Box Reference.
-        MODIFIED: VISUAL LEGEND (Schematic Boxplot) added.
+        MODIFIED: Corrected scenario title formatting (SSP5-8.5).
         """
         logging.info(f"Plotting Figure 4 (Mechanism Drivers Panel) with Boxplots (Horizontal) for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
@@ -3899,14 +3874,10 @@ class Visualizer:
             logging.warning("Missing data for Figure 4.")
             return
 
-        # Extract required data structures
         all_deltas = cmip6_results.get('all_individual_model_deltas_for_plot', {})
         classification = cmip6_results.get('storyline_classification_2d', {})
-        
-        # NEU: Zugriff auf Zeitreihen für Offset
         metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
         
-        # Referenzperioden
         ref_1850_1900 = (config.CMIP6_PRE_INDUSTRIAL_REF_START, config.CMIP6_PRE_INDUSTRIAL_REF_END)
         ref_1995_2014 = (config.CMIP6_ANOMALY_REF_START, config.CMIP6_ANOMALY_REF_END)
         
@@ -3914,20 +3885,17 @@ class Visualizer:
             logging.warning("Missing delta or classification data for Figure 4.")
             return
 
-        fig, axs = plt.subplots(2, 2, figsize=(16, 13))  # Increased height slightly for the visual legend
+        fig, axs = plt.subplots(2, 2, figsize=(16, 13))
         axs = axs.flatten()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
-        # MODIFIED: Add " GWL" to keys
         gwl_colors = {f'+{gwl}°C GWL': Visualizer.GWL_COLORS[gwl] for gwl in gwls_to_plot}
         
-        # Die Reihenfolge hier bestimmt den Index i in der Schleife unten:
-        # 0: Links oben, 1: Rechts oben, 2: Links unten, 3: Rechts unten
         plot_configs = [
-            {'key': 'JJA_tas', 'title': 'a) Summer Temperature', 'unit': '°C', 'ax': axs[0], 'type': 'TAS'},
-            {'key': 'JJA_pr',  'title': 'b) Summer Precipitation', 'unit': '%',  'ax': axs[1], 'type': 'PR'},
-            {'key': 'DJF_tas', 'title': 'c) Winter Temperature', 'unit': '°C', 'ax': axs[2], 'type': 'TAS'},
-            {'key': 'DJF_pr',  'title': 'd) Winter Precipitation', 'unit': '%',  'ax': axs[3], 'type': 'PR'},
+            {'key': 'JJA_tas', 'title': 'a) Local Summer Temperature Change', 'unit': '°C', 'ax': axs[0], 'type': 'TAS'},
+            {'key': 'JJA_pr',  'title': 'b) Local Summer Precipitation Change', 'unit': '%',  'ax': axs[1], 'type': 'PR'},
+            {'key': 'DJF_tas', 'title': 'c) Local Winter Temperature Change', 'unit': '°C', 'ax': axs[2], 'type': 'TAS'},
+            {'key': 'DJF_pr',  'title': 'd) Local Winter Precipitation Change', 'unit': '%',  'ax': axs[3], 'type': 'PR'},
         ]
 
         storyline_data_keys = [
@@ -3939,28 +3907,23 @@ class Visualizer:
             'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
         ]
         
-        # MODIFIED: Title with reference to Analysis Box
-        main_title = f"Drivers of Change (Temperature & Precipitation) - {scenario.upper()}"
-        subtitle = "Changes evaluated over the Central European analysis box (46-51°N, 8-18°E)"
-        fig.suptitle(f"{main_title}\n{subtitle}", fontsize=16, weight='bold', y=0.98)
+        # MODIFIED: Format Scenario Title correctly
+        scenario_title = scenario.upper().replace('585', '5-8.5').replace('245', '2-4.5')
+        fig.suptitle(f"Local drivers of change - {scenario_title}", fontsize=18, weight='bold', y=0.98)
 
         # Containers for collecting data limits
         all_tas_values = []
         all_pr_values = []
-
-        # First Pass: Collect Data
         plot_data_storage = {}
 
         for i, p_conf in enumerate(plot_configs):
             key = p_conf['key']
             season_prefix = key.split('_')[0] 
             is_temp = 'tas' in key
-            
             current_plot_data = []
             
             for gwl in gwls_to_plot:
-                gwl_label = f'+{gwl}°C GWL' # MODIFIED: Matches new color keys
-                
+                gwl_label = f'+{gwl}°C GWL'
                 for storyline_key_short in storyline_data_keys:
                     full_storyline_key = f"{season_prefix}_{storyline_key_short}"
                     models = classification.get(gwl, {}).get(full_storyline_key, [])
@@ -3968,48 +3931,34 @@ class Visualizer:
                     
                     for model in models:
                          val = all_deltas.get(key, {}).get(gwl, {}).get(model)
-                         
-                         # --- Offset-Berechnung für TAS ---
                          if is_temp and val is not None and np.isfinite(val):
                              ts = metric_timeseries.get(model, {}).get(key)
                              if ts is not None:
                                  try:
                                      mean_pi = ts.sel(season_year=slice(*ref_1850_1900)).mean().item()
                                      mean_ref = ts.sel(season_year=slice(*ref_1995_2014)).mean().item()
-                                     
                                      if not np.isnan(mean_pi) and not np.isnan(mean_ref):
-                                         # Offset: Wie viel wärmer war 1995-2014 im Vergleich zu 1850?
                                          offset = mean_ref - mean_pi
                                          val += offset
-                                 except Exception:
-                                     pass 
+                                 except Exception: pass 
                          
                          if val is not None and np.isfinite(val):
-                             current_plot_data.append({
-                                 'Storyline': display_name,
-                                 'GWL': gwl_label,
-                                 'Change': val
-                             })
-                             if is_temp:
-                                 all_tas_values.append(val)
-                             else:
-                                 all_pr_values.append(val)
+                             current_plot_data.append({'Storyline': display_name, 'GWL': gwl_label, 'Change': val})
+                             if is_temp: all_tas_values.append(val)
+                             else: all_pr_values.append(val)
             
             plot_data_storage[i] = pd.DataFrame(current_plot_data)
 
-        # Calculate common limits
+        # Common limits
         tas_min = min(all_tas_values) if all_tas_values else 0
         tas_max = max(all_tas_values) if all_tas_values else 0
         pr_min = min(all_pr_values) if all_pr_values else 0
         pr_max = max(all_pr_values) if all_pr_values else 0
-        
-        # Add some padding
         tas_pad = (tas_max - tas_min) * 0.05
         pr_pad = (pr_max - pr_min) * 0.05
         tas_lims = (tas_min - tas_pad, tas_max + tas_pad)
         pr_lims = (pr_min - pr_pad, pr_max + pr_pad)
 
-        # Second Pass: Plotting
         for i, p_conf in enumerate(plot_configs):
             ax = p_conf['ax']
             df = plot_data_storage[i]
@@ -4020,107 +3969,79 @@ class Visualizer:
                 sns.boxplot(data=df, y='Storyline', x='Change', hue='GWL', ax=ax,
                             order=storyline_display_order, palette=gwl_colors,
                             showfliers=False, linewidth=1.2, width=0.7, orient='h')
-                
                 sns.stripplot(data=df, y='Storyline', x='Change', hue='GWL', ax=ax,
                               order=storyline_display_order, palette=gwl_colors,
                               dodge=True, jitter=0.15, size=3, alpha=0.6, legend=False,
                               edgecolor='gray', linewidth=0.5, orient='h')
 
-            # Formatting
             ax.set_title(p_conf['title'], weight='bold', loc='left', fontsize=12)
             ax.set_ylabel('')
             
-            # Label angepasst je nach Variable
             if p_conf['type'] == 'TAS':
-                ax.set_xlabel(f"Warming rel. to 1850-1900 ({p_conf['unit']})", fontsize=10)
-                ax.set_xlim(tas_lims) # Apply Unified Limit
+                ax.set_xlim(tas_lims)
+                label_text = f"Warming rel. to 1850-1900 ({p_conf['unit']})"
             else:
-                ax.set_xlabel(f"Change rel. to 1995-2014 ({p_conf['unit']})", fontsize=10)
-                ax.set_xlim(pr_lims) # Apply Unified Limit
+                ax.set_xlim(pr_lims)
+                label_text = f"Change rel. to 1995-2014 ({p_conf['unit']})"
+            
+            if i >= 2:
+                ax.set_xlabel(label_text, fontsize=10)
+            else:
+                ax.set_xlabel('')
             
             ax.axvline(0, color='black', linewidth=0.8, linestyle='-') 
             ax.grid(True, axis='x', linestyle=':', alpha=0.7)
             
-            # Y-Achsen-Labels nur links
             labels = [l.replace(' & ', ' &\n') for l in storyline_display_order]
-            if i % 2 == 0:
-                ax.set_yticklabels(labels, fontsize=10)
-            else:
-                ax.set_yticklabels([]) 
+            if i % 2 == 0: ax.set_yticklabels(labels, fontsize=10)
+            else: ax.set_yticklabels([]) 
 
             ax.invert_yaxis()
-            
             if ax.get_legend(): ax.get_legend().remove()
 
-        # --- LEGEND SECTION ---
-        
-        # 1. GWL Legend (Standard)
+        # --- LEGEND ---
         legend_elements = []
         for label in sorted(gwl_colors.keys()):
              legend_elements.append(mpatches.Patch(color=gwl_colors[label], label=label))
         
         fig.legend(handles=legend_elements, loc='lower left', bbox_to_anchor=(0.08, 0.025), 
-                   ncol=2, frameon=True, title="Global Warming Levels", fontsize=11, title_fontsize=12)
+                   ncol=2, frameon=False, fontsize=11)
 
-        # 2. VISUAL SCHEMATIC KEY (Miniature Boxplot)
-        # Create a dedicated axes for the schematic in the bottom right area
-        # [left, bottom, width, height] in figure coordinates
+        # --- SCHEMATIC KEY ---
         key_ax = fig.add_axes([0.55, 0.01, 0.35, 0.08]) 
-        key_ax.set_axis_off()
-        key_ax.set_xlim(0, 1)
-        key_ax.set_ylim(0, 1)
+        key_ax.set_axis_off(); key_ax.set_xlim(0, 1); key_ax.set_ylim(0, 1)
 
-        # Drawing parameters for the schematic
-        box_y_min, box_y_max = 0.35, 0.65
+        box_y_min, box_y_max = 0.42, 0.58
         box_x_min, box_x_max = 0.35, 0.65
         median_x = 0.5
         whisker_left, whisker_right = 0.15, 0.85
         
-        # Draw Box
         rect = mpatches.Rectangle((box_x_min, box_y_min), box_x_max - box_x_min, box_y_max - box_y_min, 
                                   facecolor='white', edgecolor='black', lw=1.2, zorder=2)
         key_ax.add_patch(rect)
-        
-        # Draw Median Line
         key_ax.plot([median_x, median_x], [box_y_min, box_y_max], color='black', lw=2, zorder=3)
-        
-        # Draw Whiskers
-        key_ax.plot([whisker_left, box_x_min], [0.5, 0.5], color='black', lw=1.2, ls='-', zorder=1) # Left
-        key_ax.plot([box_x_max, whisker_right], [0.5, 0.5], color='black', lw=1.2, ls='-', zorder=1) # Right
-        key_ax.plot([whisker_left, whisker_left], [0.4, 0.6], color='black', lw=1.2, zorder=1) # Left Cap
-        key_ax.plot([whisker_right, whisker_right], [0.4, 0.6], color='black', lw=1.2, zorder=1) # Right Cap
+        key_ax.plot([whisker_left, box_x_min], [0.5, 0.5], color='black', lw=1.2, ls='-', zorder=1)
+        key_ax.plot([box_x_max, whisker_right], [0.5, 0.5], color='black', lw=1.2, ls='-', zorder=1)
+        key_ax.plot([whisker_left, whisker_left], [0.45, 0.55], color='black', lw=1.2, zorder=1)
+        key_ax.plot([whisker_right, whisker_right], [0.45, 0.55], color='black', lw=1.2, zorder=1)
 
-        # Draw Points (Simulated Models)
-        # Simulated points to look like a stripplot
         sim_points_x = [0.18, 0.25, 0.4, 0.48, 0.55, 0.75, 0.82]
-        # Add some jitter in Y
         sim_points_y = [0.5, 0.52, 0.48, 0.51, 0.49, 0.5, 0.48]
         key_ax.scatter(sim_points_x, sim_points_y, color='gray', alpha=0.6, s=15, zorder=4, edgecolors='none')
 
-        # --- Annotations with Lines ---
         fs_anno = 10
-        
-        # Annotation: Median
-        key_ax.annotate('Median', xy=(median_x, box_y_max), xytext=(median_x, 0.9),
+        key_ax.annotate('Median', xy=(median_x, box_y_max), xytext=(median_x, 0.85),
                         ha='center', va='bottom', fontsize=fs_anno,
                         arrowprops=dict(arrowstyle='-', lw=0.8, color='black'))
-        
-        # Annotation: IQR
-        key_ax.annotate('IQR (25-75%)', xy=(0.6, box_y_min), xytext=(0.6, 0.1),
+        key_ax.annotate('IQR (25-75%)', xy=(0.6, box_y_min), xytext=(0.6, 0.15),
                         ha='center', va='top', fontsize=fs_anno,
                         arrowprops=dict(arrowstyle='-', lw=0.8, color='black'))
-        
-        # Annotation: Range
         key_ax.annotate('Range', xy=(whisker_right, 0.5), xytext=(0.95, 0.5),
                         ha='left', va='center', fontsize=fs_anno,
                         arrowprops=dict(arrowstyle='-', lw=0.8, color='black', shrinkB=2))
-        
-        # Annotation: Individual Models
-        key_ax.annotate('Individual Models', xy=(0.18, 0.5), xytext=(0.18, 0.1),
+        key_ax.annotate('Individual Models', xy=(0.18, 0.5), xytext=(0.18, 0.15),
                         ha='center', va='top', fontsize=fs_anno,
                         arrowprops=dict(arrowstyle='-', lw=0.8, color='black'))
-        
-        key_ax.text(0.0, 0.9, "Plot Key:", fontsize=11, weight='bold', transform=key_ax.transAxes)
 
         plt.tight_layout(rect=[0, 0.1, 1, 0.95])
         filename = os.path.join(config.PLOT_DIR, "Figure4_mechanism_drivers_summary_ssp585.png")

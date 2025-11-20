@@ -3949,6 +3949,7 @@ class Visualizer:
         MODIFIED: Applies offset to TAS to show warming relative to 1850-1900.
         MODIFIED: Unified X-axes per column, Analysis Box Reference.
         MODIFIED: VISUAL LEGEND REMOVED and frameon=False applied.
+        MODIFIED: Added 'Individual Models' and 'Median' to legend.
         """
         logging.info(f"Plotting Figure 4 (Mechanism Drivers Panel) with Boxplots (Horizontal) for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
@@ -4119,17 +4120,27 @@ class Visualizer:
             
             if ax.get_legend(): ax.get_legend().remove()
 
-        # --- LEGEND SECTION (Original Style) ---
-        # KORREKTUR: Legende wieder wie im Original (unten zentriert) und OHNE Rahmen
+        # --- LEGEND SECTION ---
         handles, labels = axs[0].get_legend_handles_labels()
         # Sicherstellen, dass die Reihenfolge der GWLs stimmt
         unique_handles_labels = dict(zip(labels, handles))
         sorted_labels = sorted([l for l in unique_handles_labels.keys() if "GWL" in l])
+        
         final_handles = [unique_handles_labels[l] for l in sorted_labels]
         final_labels = sorted_labels
+
+        # --- NEU: Hinzufügen von 'Individual Models' und 'Median' ---
+        final_handles.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', 
+                                        markeredgecolor='gray', markersize=6, label='Individual Models'))
+        final_labels.append('Individual Models')
+
+        final_handles.append(plt.Line2D([0], [0], marker='|', color='black', linestyle='None', 
+                                        markersize=10, markeredgewidth=1.5, label='Median'))
+        final_labels.append('Median')
         
+        # KORREKTUR: ncol auf 4 erhöht, um die neuen Einträge unterzubringen
         fig.legend(final_handles, final_labels, loc='lower center', bbox_to_anchor=(0.5, 0.02), 
-                   ncol=2, fontsize=12, frameon=False) # KORREKTUR: frameon=False
+                   ncol=4, fontsize=12, frameon=False)
 
         plt.tight_layout(rect=[0, 0.08, 1, 0.95]) # Angepasstes Layout ohne die schematische Legende
         filename = os.path.join(config.PLOT_DIR, "Figure4_mechanism_drivers_summary_ssp585.png")

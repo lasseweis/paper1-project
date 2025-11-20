@@ -3698,7 +3698,6 @@ class Visualizer:
         Creates ERL Figure 3: Core Finding - Regime Shift in Extremes (30Q100).
         Layout: 2x2 Grid, but each plot uses a BROKEN X-AXIS (Left: Normal, Right: Extreme).
         INCLUDES: Broken Axis Fixes (No duplicate Y-labels, No overlapping X-labels on top row).
-        LEGEND FIX: No frame around the legend.
         """
         logging.info(f"Plotting Figure 3 (Core Finding GEV Panel) with BROKEN AXIS for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
@@ -3730,7 +3729,9 @@ class Visualizer:
         # Ratios: [Main, Extreme, Main, Extreme]
         gs = gridspec.GridSpec(2, 4, width_ratios=[3, 1, 3, 1], wspace=0.08, hspace=0.35)
         
-        fig.suptitle(f"Regime Shift in Return Periods of Extremes (30Q100) - {scenario.upper()}", fontsize=16, weight='bold', y=0.98)
+        # --- MODIFIED: Correct spelling for SSP5-8.5 ---
+        scenario_title = "SSP5-8.5" if "ssp585" in scenario.lower() else scenario.upper()
+        fig.suptitle(f"Regime Shift in Return Periods of Extremes (30Q100) - {scenario_title}", fontsize=16, weight='bold', y=0.98)
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         # MODIFIED: Add " GWL" to keys
@@ -3891,18 +3892,22 @@ class Visualizer:
             ax_right.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
             
             # --- MODIFIED: X-Axis Labels & Ticks ---
-            # Enable ticks for all plots (removed condition checking cfg['row'])
+            # 1. Ensure ticks are visible on ALL plots (top and bottom rows)
+            ax_left.tick_params(axis='x', labelbottom=True)
             ax_right.tick_params(axis='x', labelbottom=True) 
             plt.setp(ax_right.get_xticklabels(), rotation=30, ha='right')
             
-            # Set centered Label using coordinates
-            # We use ax_left to place the label centered across both axes
-            ax_left.set_xlabel("Return Period (Years)", fontsize=10)
-            # Calculate approximate center: 
-            # Width ratio is 3:1. Total visual width units = 4. Center is at 2.
-            # 2 units is 2/3 of the way along the left axis (width 3).
-            # Add small offset for gap. 0.70 looks about right.
-            ax_left.xaxis.set_label_coords(0.70, -0.12)
+            # 2. Set centered Label ONLY for the bottom row (row_idx == 1)
+            if row_idx == 1:
+                ax_left.set_xlabel("Return Period (Years)", fontsize=10)
+                # Calculate approximate center: 
+                # Width ratio is 3:1. Total visual width units = 4. Center is at 2.
+                # 2 units is 2/3 of the way along the left axis (width 3).
+                # Add small offset for gap. 0.70 looks about right.
+                ax_left.xaxis.set_label_coords(0.70, -0.12)
+            else:
+                # No label for top row
+                ax_left.set_xlabel('')
             
             ax_right.set_xlabel('')
 
@@ -3926,7 +3931,7 @@ class Visualizer:
         for gwl_label, color in gwl_colors.items():
             handles.append(mpatches.Patch(color=color, label=gwl_label))
             
-        # MODIFIKATION: frameon=False gesetzt
+        # --- KORREKTUR: frameon=False um den Rahmen zu entfernen ---
         fig.legend(handles=handles, loc='lower center', ncol=5, bbox_to_anchor=(0.5, 0.02), frameon=False)
 
         plt.tight_layout(rect=[0, 0.05, 1, 0.96]) 
@@ -3941,8 +3946,9 @@ class Visualizer:
         """
         Creates ERL Figure 4: Mechanism - Drivers (Temp & Precip) as BOXPLOTS.
         ROTATED: Variable changes on X-axis, Storylines on Y-axis.
-        - Unified X-axes per column.
-        - Standard Legend with Points (Models) and Line (Median), NO Frame.
+        MODIFIED: Applies offset to TAS to show warming relative to 1850-1900.
+        MODIFIED: Unified X-axes per column, Analysis Box Reference.
+        MODIFIED: VISUAL LEGEND REMOVED and frameon=False applied.
         """
         logging.info(f"Plotting Figure 4 (Mechanism Drivers Panel) with Boxplots (Horizontal) for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
@@ -3966,20 +3972,19 @@ class Visualizer:
             logging.warning("Missing delta or classification data for Figure 4.")
             return
 
-        fig, axs = plt.subplots(2, 2, figsize=(16, 12)) # Slightly reduced height as we removed the large key
+        fig, axs = plt.subplots(2, 2, figsize=(16, 13))
         axs = axs.flatten()
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         # MODIFIED: Add " GWL" to keys
         gwl_colors = {f'+{gwl}°C GWL': Visualizer.GWL_COLORS[gwl] for gwl in gwls_to_plot}
         
-        # Die Reihenfolge hier bestimmt den Index i in der Schleife unten:
-        # 0: Links oben, 1: Rechts oben, 2: Links unten, 3: Rechts unten
+        # --- MODIFIED: Updated Titles ---
         plot_configs = [
-            {'key': 'JJA_tas', 'title': 'a) Summer Temperature', 'unit': '°C', 'ax': axs[0], 'type': 'TAS'},
-            {'key': 'JJA_pr',  'title': 'b) Summer Precipitation', 'unit': '%',  'ax': axs[1], 'type': 'PR'},
-            {'key': 'DJF_tas', 'title': 'c) Winter Temperature', 'unit': '°C', 'ax': axs[2], 'type': 'TAS'},
-            {'key': 'DJF_pr',  'title': 'd) Winter Precipitation', 'unit': '%',  'ax': axs[3], 'type': 'PR'},
+            {'key': 'JJA_tas', 'title': 'a) Local summer temperature change', 'unit': '°C', 'ax': axs[0], 'type': 'TAS'},
+            {'key': 'JJA_pr',  'title': 'b) Local summer precipitation change', 'unit': '%',  'ax': axs[1], 'type': 'PR'},
+            {'key': 'DJF_tas', 'title': 'c) Local winter temperature change', 'unit': '°C', 'ax': axs[2], 'type': 'TAS'},
+            {'key': 'DJF_pr',  'title': 'd) Local winter precipitation change', 'unit': '%',  'ax': axs[3], 'type': 'PR'},
         ]
 
         storyline_data_keys = [
@@ -3991,10 +3996,9 @@ class Visualizer:
             'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
         ]
         
-        # Title with reference to Analysis Box
-        main_title = f"Drivers of Change (Temperature & Precipitation) - {scenario.upper()}"
-        subtitle = "Changes evaluated over the Central European analysis box (46-51°N, 8-18°E)"
-        fig.suptitle(f"{main_title}\n{subtitle}", fontsize=16, weight='bold', y=0.98)
+        # --- MODIFIED: New Title, No Subtitle ---
+        main_title = f"Local drivers of change - SSP5-8.5"
+        fig.suptitle(f"{main_title}", fontsize=16, weight='bold', y=0.98)
 
         # Containers for collecting data limits
         all_tas_values = []
@@ -4011,7 +4015,7 @@ class Visualizer:
             current_plot_data = []
             
             for gwl in gwls_to_plot:
-                gwl_label = f'+{gwl}°C GWL'
+                gwl_label = f'+{gwl}°C GWL' # MODIFIED: Matches new color keys
                 
                 for storyline_key_short in storyline_data_keys:
                     full_storyline_key = f"{season_prefix}_{storyline_key_short}"
@@ -4082,14 +4086,25 @@ class Visualizer:
             ax.set_title(p_conf['title'], weight='bold', loc='left', fontsize=12)
             ax.set_ylabel('')
             
-            # Label angepasst je nach Variable
-            if p_conf['type'] == 'TAS':
-                ax.set_xlabel(f"Warming rel. to 1850-1900 ({p_conf['unit']})", fontsize=10)
-                ax.set_xlim(tas_lims) # Apply Unified Limit
-            else:
-                ax.set_xlabel(f"Change rel. to 1995-2014 ({p_conf['unit']})", fontsize=10)
-                ax.set_xlim(pr_lims) # Apply Unified Limit
+            # --- MODIFIED: Label and Limits ---
+            ax.set_xlabel('') # Reset first
             
+            # Apply Unified Limit
+            if p_conf['type'] == 'TAS':
+                ax.set_xlim(tas_lims) 
+            else:
+                ax.set_xlim(pr_lims) 
+            
+            # Apply X-Label only for bottom row (indices 2 and 3)
+            if i >= 2:
+                if p_conf['type'] == 'TAS':
+                    ax.set_xlabel(f"Warming rel. to 1850-1900 ({p_conf['unit']})", fontsize=10)
+                else:
+                    ax.set_xlabel(f"Change rel. to 1995-2014 ({p_conf['unit']})", fontsize=10)
+            
+            # Ensure tick labels are visible on all plots
+            ax.tick_params(axis='x', labelbottom=True)
+
             ax.axvline(0, color='black', linewidth=0.8, linestyle='-') 
             ax.grid(True, axis='x', linestyle=':', alpha=0.7)
             
@@ -4104,27 +4119,19 @@ class Visualizer:
             
             if ax.get_legend(): ax.get_legend().remove()
 
-        # --- LEGEND SECTION ---
-        legend_elements = []
+        # --- LEGEND SECTION (Original Style) ---
+        # KORREKTUR: Legende wieder wie im Original (unten zentriert) und OHNE Rahmen
+        handles, labels = axs[0].get_legend_handles_labels()
+        # Sicherstellen, dass die Reihenfolge der GWLs stimmt
+        unique_handles_labels = dict(zip(labels, handles))
+        sorted_labels = sorted([l for l in unique_handles_labels.keys() if "GWL" in l])
+        final_handles = [unique_handles_labels[l] for l in sorted_labels]
+        final_labels = sorted_labels
         
-        # 1. GWL Entries
-        for label in sorted(gwl_colors.keys()):
-             legend_elements.append(mpatches.Patch(color=gwl_colors[label], label=label))
+        fig.legend(final_handles, final_labels, loc='lower center', bbox_to_anchor=(0.5, 0.02), 
+                   ncol=2, fontsize=12, frameon=False) # KORREKTUR: frameon=False
 
-        # 2. New Entries for Points and Median
-        # Individual Models (Grey Point)
-        legend_elements.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', 
-                                          markeredgecolor='gray', markersize=8, alpha=0.6, label='Individual Models'))
-        
-        # Median (Vertical Line)
-        legend_elements.append(plt.Line2D([0], [0], color='black', linewidth=0, marker='|', 
-                                          markersize=15, markeredgewidth=2, label='Median'))
-        
-        # Create the legend without a frame
-        fig.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5, 0.02), 
-                   ncol=4, frameon=False, fontsize=11)
-
-        plt.tight_layout(rect=[0, 0.05, 1, 0.96])
+        plt.tight_layout(rect=[0, 0.08, 1, 0.95]) # Angepasstes Layout ohne die schematische Legende
         filename = os.path.join(config.PLOT_DIR, "Figure4_mechanism_drivers_summary_ssp585.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)

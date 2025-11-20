@@ -3944,18 +3944,18 @@ class Visualizer:
     @staticmethod
     def plot_mechanism_drivers_panel(cmip6_results, config, scenario):
         """
-        Creates ERL Figure 4: Mechanism - Drivers (Temp & Precip) as BOXPLOTS.
+        Creates ERL Figure 5 (was Fig 4): Mechanism - Drivers (Temp & Precip) as BOXPLOTS.
         ROTATED: Variable changes on X-axis, Storylines on Y-axis.
         MODIFIED: Applies offset to TAS to show warming relative to 1850-1900.
         MODIFIED: Unified X-axes per column, Analysis Box Reference.
         MODIFIED: VISUAL LEGEND REMOVED and frameon=False applied.
         MODIFIED: Added 'Individual Models' and 'Median' to legend.
         """
-        logging.info(f"Plotting Figure 4 (Mechanism Drivers Panel) with Boxplots (Horizontal) for {scenario}...")
+        logging.info(f"Plotting Figure 5 (Mechanism Drivers Panel) with Boxplots (Horizontal) for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
 
         if not cmip6_results:
-            logging.warning("Missing data for Figure 4.")
+            logging.warning("Missing data for Figure 5.")
             return
 
         # Extract required data structures
@@ -3970,7 +3970,7 @@ class Visualizer:
         ref_1995_2014 = (config.CMIP6_ANOMALY_REF_START, config.CMIP6_ANOMALY_REF_END)
         
         if not all_deltas or not classification:
-            logging.warning("Missing delta or classification data for Figure 4.")
+            logging.warning("Missing delta or classification data for Figure 5.")
             return
 
         fig, axs = plt.subplots(2, 2, figsize=(16, 13))
@@ -4143,7 +4143,125 @@ class Visualizer:
                    ncol=4, fontsize=12, frameon=False)
 
         plt.tight_layout(rect=[0, 0.08, 1, 0.95]) # Angepasstes Layout ohne die schematische Legende
-        filename = os.path.join(config.PLOT_DIR, "Figure4_mechanism_drivers_summary_ssp585.png")
+        
+        # --- CHANGED FILENAME TO FIGURE 5 ---
+        filename = os.path.join(config.PLOT_DIR, "Figure5_mechanism_drivers_summary_ssp585.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved Figure 4 to {filename}")
+        logging.info(f"Saved Figure 5 (formerly Figure 4) to {filename}")
+
+    @staticmethod
+    def plot_erl_figure4_lnwl_summary(results, config, scenario, lnwl_threshold=970.0):
+        """
+        Creates ERL Figure 4: Projected impact on inland navigation (LNWL).
+        Layout: 1x2 Grid (Summer 30-Day, Summer 3-Month).
+        """
+        logging.info(f"Plotting ERL Figure 4 (Summer LNWL Impact) for {scenario}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        if not results or 'data' not in results:
+            logging.warning(f"Cannot plot Figure 4 for {scenario}: Missing LNWL data.")
+            return
+
+        # Config
+        gwls_to_plot = config.GLOBAL_WARMING_LEVELS
+        gwl_colors = {f'+{gwl}°C GWL': Visualizer.GWL_COLORS[gwl] for gwl in gwls_to_plot}
+        
+        # Plot structure: Only Summer, Only Long Duration events
+        plot_configs = [
+            {'event': 'Q_30day_low',  'title': 'a) Summer: 30-Day Low Water Events'},
+            {'event': 'Q_3month_low', 'title': 'b) Summer: 3-Month Low Water Events'}
+        ]
+        
+        half_year = 'summer'
+        storyline_order = [
+            'MMM', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
+            'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
+        ]
+        
+        fig, axs = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+        
+        # Prepare Data
+        for i, p_conf in enumerate(plot_configs):
+            ax = axs[i]
+            event_key = p_conf['event']
+            
+            # Collect data for this panel
+            plot_data_list = []
+            for gwl in gwls_to_plot:
+                for storyline in storyline_order:
+                    event_data = results['data'].get(gwl, {}).get(half_year, {}).get(storyline, {}).get(event_key)
+                    if event_data and 'future_return_periods_all_models' in event_data:
+                        for model_period in event_data['future_return_periods_all_models']:
+                            if np.isfinite(model_period):
+                                plot_data_list.append({
+                                    'storyline': storyline,
+                                    'GWL': f'+{gwl}°C GWL',
+                                    'return_period': model_period,
+                                })
+            
+            if not plot_data_list:
+                ax.text(0.5, 0.5, "Data Missing", ha='center', va='center', transform=ax.transAxes)
+                continue
+                
+            df = pd.DataFrame(plot_data_list)
+            
+            # Plot Boxplots
+            sns.boxplot(data=df, y='storyline', x='return_period', hue='GWL',
+                        order=storyline_order, palette=gwl_colors,
+                        ax=ax, linewidth=1.2, showfliers=False, orient='h',
+                        boxprops={'alpha': 0.7})
+            
+            sns.stripplot(data=df, y='storyline', x='return_period', hue='GWL',
+                          order=storyline_order, palette=gwl_colors,
+                          ax=ax, dodge=True, jitter=0.15, size=4,
+                          edgecolor='gray', linewidth=0.5, alpha=0.8, orient='h')
+            
+            # Historical Reference Line
+            threshold_data = results.get('thresholds', {}).get(half_year, {}).get(event_key, {})
+            hist_period = threshold_data.get('hist_return_period')
+            if hist_period and np.isfinite(hist_period):
+                ax.axvline(x=hist_period, color='skyblue', linestyle='--', linewidth=2.5, zorder=0, label='Historical Return Period')
+                # Add text annotation for hist value
+                ax.text(hist_period, -0.6, f'Hist: {hist_period:.1f} yrs', color='#1f77b4', 
+                        ha='center', fontsize=9, weight='bold', bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=1))
+
+            # Formatting
+            ax.set_title(p_conf['title'], weight='bold', loc='left', fontsize=12)
+            ax.set_xscale('log')
+            
+            # Specific Ticks for readability
+            ax.set_xticks([1, 2, 5, 10, 20, 50, 100])
+            ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+            ax.set_xlim(0.8, 150) # Zoom to relevant range
+            
+            ax.set_xlabel('Return Period (Years)', fontsize=11)
+            ax.grid(True, axis='x', linestyle=':', which='both')
+            
+            if i == 0:
+                labels = [s.replace(' & ', ' &\n') for s in storyline_order]
+                ax.set_yticklabels(labels, fontsize=10)
+                ax.set_ylabel('')
+            else:
+                ax.set_ylabel('')
+            
+            ax.invert_yaxis() # MMM top
+            if ax.get_legend(): ax.get_legend().remove()
+
+        # Shared Legend
+        handles = []
+        handles.append(plt.Line2D([0], [0], color='skyblue', linestyle='--', linewidth=2.5, label='Historical Return Period'))
+        for gwl_label, color in gwl_colors.items():
+            handles.append(mpatches.Patch(color=color, label=gwl_label))
+        
+        fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.5, 0.02), ncol=3, fontsize=12, frameon=False)
+        
+        fig.suptitle(f"Projected impact on inland navigation reliability (LNWL < {lnwl_threshold:.0f} m³/s) - SSP5-8.5", 
+                     fontsize=16, weight='bold', y=0.98)
+        
+        plt.tight_layout(rect=[0.02, 0.08, 0.98, 0.94])
+        
+        filename = os.path.join(config.PLOT_DIR, "Figure4_impact_navigation_lnwl_ssp585.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved ERL Figure 4 to {filename}")

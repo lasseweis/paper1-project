@@ -799,12 +799,13 @@ class ClimateAnalysis:
                 # --- END: NEW PLOT v2 ---
 
                 
-                # --- START: NEUER PLOT (LNWL Aggregation Comparison) ---
+                # --- START: NEUER PLOT (LNWL Aggregation Comparison & NEW FIGURE 4) ---
                 lnwl_agg_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_lnwl_aggregation_comparison_{scenario}.png")
-                lnwl_agg_results_for_plot = None # Initialize
-
-                if not os.path.exists(lnwl_agg_plot_filename):
-                    logging.info(f"Plot '{lnwl_agg_plot_filename}' not found. Calculating data...")
+                erl_fig4_filename = os.path.join(Config.PLOT_DIR, "Figure4_impact_navigation_lnwl_ssp585.png") # NEW
+                
+                # Check if we need to calculate (either big comparison OR Fig 4 missing)
+                if not os.path.exists(lnwl_agg_plot_filename) or (scenario == 'ssp585' and not os.path.exists(erl_fig4_filename)):
+                    logging.info(f"Calculating LNWL aggregation data...")
                     
                     # Hole die TÄGLICHEN QOBS-Daten (am Anfang von run_full_analysis geladen)
                     historical_da_daily = discharge_data_loaded.get('daily_historical_da') 
@@ -813,7 +814,7 @@ class ClimateAnalysis:
                         # Hole den LNWL-Schwellenwert
                         lnwl_threshold = discharge_data_loaded.get('winter_lowflow_lnwl', 970.0)
                         
-                        # Rufe die NEUE Analysefunktion auf
+                        # Rufe die Analysefunktion auf
                         lnwl_agg_results_for_plot = storyline_analyzer.analyze_storyline_lnwl_aggregation_metrics(
                             cmip6_results=cmip6_results, # Benötigt 'cmip6_model_data_loaded' mit TÄGLICHEN Daten
                             historical_discharge_da=historical_da_daily,
@@ -822,20 +823,41 @@ class ClimateAnalysis:
                         )
                         
                         if lnwl_agg_results_for_plot:
-                            # Rufe die NEUE Plot-Funktion auf
-                            Visualizer.plot_storyline_lnwl_aggregation_comparison(
-                                lnwl_agg_results_for_plot, 
-                                Config(), 
-                                scenario=scenario,
-                                lnwl_threshold=lnwl_threshold
-                            )
+                            # 1. Erstelle den großen Vergleichs-Plot (falls nicht existent)
+                            if not os.path.exists(lnwl_agg_plot_filename):
+                                Visualizer.plot_storyline_lnwl_aggregation_comparison(
+                                    lnwl_agg_results_for_plot, 
+                                    Config(), 
+                                    scenario=scenario,
+                                    lnwl_threshold=lnwl_threshold
+                                )
+                            
+                            # 2. Erstelle ERL Figure 4 (nur für SSP5-8.5)
+                            if scenario == 'ssp585' and not os.path.exists(erl_fig4_filename):
+                                Visualizer.plot_erl_figure4_lnwl_summary(
+                                    lnwl_agg_results_for_plot,
+                                    Config(),
+                                    scenario=scenario,
+                                    lnwl_threshold=lnwl_threshold
+                                )
+
                         else:
-                            logging.warning(f"Could not calculate LNWL aggregation results, skipping plot for {scenario}.")
+                            logging.warning(f"Could not calculate LNWL aggregation results, skipping plots for {scenario}.")
                     else:
                         logging.warning(f"Skipping LNWL aggregation plot: Missing DAILY QOBS or CMIP6 results.")
                 else:
-                    logging.info(f"Plot '{lnwl_agg_plot_filename}' already exists.")
-                # --- ENDE: NEUER PLOT (LNWL Aggregation Comparison) ---
+                    logging.info(f"LNWL plots already exists.")
+                # --- ENDE: NEUER PLOT ---
+
+
+                # --- PLOT: Figure 5 (Formerly Figure 4) (Mechanism Drivers Panel) ---
+                if scenario == 'ssp585' and cmip6_results:
+                    fig5_filename = os.path.join(Config.PLOT_DIR, "Figure5_mechanism_drivers_summary_ssp585.png")
+                    if not os.path.exists(fig5_filename):
+                        # Visualizer.plot_mechanism_drivers_panel now creates Figure 5
+                        Visualizer.plot_mechanism_drivers_panel(cmip6_results, Config(), scenario)
+                    else:
+                         logging.info(f"Figure 5 '{fig5_filename}' already exists.")
 
 
                 # --- PLOT: Model Fidelity and Scatter Plots (per scenario) ---

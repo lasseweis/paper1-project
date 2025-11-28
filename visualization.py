@@ -182,6 +182,7 @@ class Visualizer:
         """
         Creates ERL Figure 1: Historical Jet Influence (Regression Maps).
         Layout: 2x2 Grid (Winter/Summer x Precip/Temp).
+        MODIFIED: Now includes Jet Index Definition Boxes.
         """
         logging.info(f"Plotting ERL Figure 1 for {dataset_key}...")
         Visualizer.ensure_plot_dir_exists()
@@ -248,6 +249,27 @@ class Visualizer:
             set_title_in_helper=False
         )
         ax_tas_summer.set_title("d) Summer (JJA) Temperature", loc='left', fontweight='bold')
+
+        # --- NEW: Add Jet Definition Boxes to all subplots ---
+        # Get coordinates from Config
+        speed_box = [Config.JET_SPEED_BOX_LON_MIN, Config.JET_SPEED_BOX_LON_MAX,
+                     Config.JET_SPEED_BOX_LAT_MIN, Config.JET_SPEED_BOX_LAT_MAX]
+        lat_box = [Config.JET_LAT_BOX_LON_MIN, Config.JET_LAT_BOX_LON_MAX,
+                   Config.JET_LAT_BOX_LAT_MIN, Config.JET_LAT_BOX_LAT_MAX]
+
+        # Iterate over all axes to add the boxes
+        for ax in [ax_pr_winter, ax_tas_winter, ax_pr_summer, ax_tas_summer]:
+            # Jet Speed Box (Red, Solid)
+            ax.add_patch(mpatches.Rectangle(
+                (speed_box[0], speed_box[2]), speed_box[1] - speed_box[0], speed_box[3] - speed_box[2],
+                fill=False, edgecolor='darkred', linewidth=1.5, linestyle='-', zorder=12, transform=ccrs.PlateCarree()
+            ))
+            # Jet Latitude Box (Blue, Dashed)
+            ax.add_patch(mpatches.Rectangle(
+                (lat_box[0], lat_box[2]), lat_box[1] - lat_box[0], lat_box[3] - lat_box[2],
+                fill=False, edgecolor='darkblue', linewidth=1.5, linestyle='--', zorder=12, transform=ccrs.PlateCarree()
+            ))
+        # --- END NEW ---
 
         # --- Colorbars (Horizontal at bottom) ---
         # PR Colorbar (Left side)

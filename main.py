@@ -594,10 +594,10 @@ class ClimateAnalysis:
                 # --- PLOT: Climate Evolution Timeseries (per scenario) ---
                 # --- PLOT: Climate Evolution Timeseries (per scenario) ---
                 evolution_plot_filename = os.path.join(Config.PLOT_DIR, f"climate_indices_evolution_{scenario}.png")
-                erl_fig2_filename = os.path.join(Config.PLOT_DIR, "Figure2_climate_indices_evolution_ssp585.png")
+                erl_fig2_filename = os.path.join(Config.PLOT_DIR, f"Figure2_climate_indices_evolution_{scenario}.png")
                 
                 need_calc_evo = not os.path.exists(evolution_plot_filename)
-                if scenario == 'ssp585' and not os.path.exists(erl_fig2_filename):
+                if not os.path.exists(erl_fig2_filename):
                     need_calc_evo = True
 
                 if need_calc_evo:
@@ -608,9 +608,9 @@ class ClimateAnalysis:
                         if not os.path.exists(evolution_plot_filename):
                             Visualizer.plot_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, Config(), filename=os.path.basename(evolution_plot_filename))
                         
-                        # Plot ERL Figure 2 if missing (SSP5-8.5 only)
-                        if scenario == 'ssp585' and not os.path.exists(erl_fig2_filename):
-                            Visualizer.plot_erl_figure2_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, Config())
+                        # Plot ERL Figure 2 if missing
+                        if not os.path.exists(erl_fig2_filename):
+                            Visualizer.plot_erl_figure2_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, Config(), scenario=scenario)
                     else:
                          logging.warning(f"Skipping climate evolution plot for {scenario}, data preparation failed.")
                 else:
@@ -691,8 +691,8 @@ class ClimateAnalysis:
                     logging.info(f"Half-year return period plot '{return_period_plot_filename}' already exists.")
 
                 # --- PLOT: Figure 3 (Core Finding GEV Panel) ---
-                if scenario == 'ssp585' and return_period_results_for_plot:
-                     fig3_filename = os.path.join(Config.PLOT_DIR, "Figure3_core_finding_regime_shift_ssp585.png")
+                if return_period_results_for_plot:
+                     fig3_filename = os.path.join(Config.PLOT_DIR, f"Figure3_core_finding_regime_shift_{scenario}.png")
                      if not os.path.exists(fig3_filename):
                          Visualizer.plot_core_finding_gev_panel(return_period_results_for_plot, Config(), scenario)
                      else:
@@ -801,10 +801,10 @@ class ClimateAnalysis:
                 
                 # --- START: NEUER PLOT (LNWL Aggregation Comparison & NEW FIGURE 4) ---
                 lnwl_agg_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_lnwl_aggregation_comparison_{scenario}.png")
-                erl_fig4_filename = os.path.join(Config.PLOT_DIR, "Figure4_impact_navigation_lnwl_ssp585.png") # NEW
+                erl_fig4_filename = os.path.join(Config.PLOT_DIR, f"Figure4_impact_navigation_lnwl_{scenario}.png") # NEW
                 
                 # Check if we need to calculate (either big comparison OR Fig 4 missing)
-                if not os.path.exists(lnwl_agg_plot_filename) or (scenario == 'ssp585' and not os.path.exists(erl_fig4_filename)):
+                if not os.path.exists(lnwl_agg_plot_filename) or not os.path.exists(erl_fig4_filename):
                     logging.info(f"Calculating LNWL aggregation data...")
                     
                     # Hole die TÄGLICHEN QOBS-Daten (am Anfang von run_full_analysis geladen)
@@ -832,8 +832,8 @@ class ClimateAnalysis:
                                     lnwl_threshold=lnwl_threshold
                                 )
                             
-                            # 2. Erstelle ERL Figure 4 (nur für SSP5-8.5)
-                            if scenario == 'ssp585' and not os.path.exists(erl_fig4_filename):
+                            # 2. Erstelle ERL Figure 4
+                            if not os.path.exists(erl_fig4_filename):
                                 Visualizer.plot_erl_figure4_lnwl_summary(
                                     lnwl_agg_results_for_plot,
                                     Config(),
@@ -851,8 +851,8 @@ class ClimateAnalysis:
 
 
                 # --- PLOT: Figure 5 (Formerly Figure 4) (Mechanism Drivers Panel) ---
-                if scenario == 'ssp585' and cmip6_results:
-                    fig5_filename = os.path.join(Config.PLOT_DIR, "Figure5_mechanism_drivers_summary_ssp585.png")
+                if cmip6_results:
+                    fig5_filename = os.path.join(Config.PLOT_DIR, f"Figure5_mechanism_drivers_summary_{scenario}.png")
                     if not os.path.exists(fig5_filename):
                         # Visualizer.plot_mechanism_drivers_panel now creates Figure 5
                         Visualizer.plot_mechanism_drivers_panel(cmip6_results, Config(), scenario)

@@ -57,6 +57,13 @@ class Visualizer:
             logging.info(f"Created plot directory: {Config.PLOT_DIR}")
 
     @staticmethod
+    def _format_scenario_title(scenario):
+        """Helper to format scenario string for titles (e.g., 'ssp585' -> 'SSP5-8.5')."""
+        if scenario.lower() == 'ssp585': return 'SSP5-8.5'
+        if scenario.lower() == 'ssp245': return 'SSP2-4.5'
+        return scenario.upper()
+
+    @staticmethod
     def plot_regression_map(ax, slopes, p_values, lons, lats, title, box_coords,
                           season_label, variable, ua_seasonal_mean=None,
                           show_jet_boxes=False, significance_level=0.05, std_dev_predictor=None,
@@ -1177,19 +1184,25 @@ class Visualizer:
         logging.info(f"Saved climate projection timeseries plot to {filepath}")
 
     @staticmethod
-    def plot_erl_figure2_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, config):
+    def plot_erl_figure2_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, config, scenario='ssp585'):
         """
         Creates ERL Figure 2: Future Dynamical Uncertainty (Climate Indices Evolution).
         Layout: 3 Rows (Global Temp, Summer Jet, Winter Jet).
         - Unified Y-AXIS LIMITS per variable type (Lat/Speed).
         - Legend closer to plots, no frame.
         """
-        filename = "Figure2_climate_indices_evolution_ssp585.png"
+        filename = f"Figure2_climate_indices_evolution_{scenario}.png"
         logging.info(f"Plotting ERL Figure 2 to {filename}...")
         Visualizer.ensure_plot_dir_exists()
 
         # --- MODIFIED LAYOUT: 3 Rows ---
         fig = plt.figure(figsize=(12, 14))
+        
+        # Add Main Title with Scenario
+        scenario_title = Visualizer._format_scenario_title(scenario)
+        # [MOVED/REMOVED] Title set at the end
+
+        
         gs = gridspec.GridSpec(3, 2, height_ratios=[0.6, 1, 1], hspace=0.2, top=0.93)
 
         # --- (a) Global Temperature Anomaly ---
@@ -1325,7 +1338,7 @@ class Visualizer:
         # KORREKTUR: Legende näher an die Plots und ohne Rahmen
         fig.legend(final_handles, final_labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.04), frameon=False)
 
-        fig.suptitle('Evolution of Key Climate Indices (20-Year Rolling Mean) - SSP5-8.5', fontsize=16, weight='bold')
+        fig.suptitle(f'Evolution of Key Climate Indices (20-Year Rolling Mean) - {scenario_title}', fontsize=16, weight='bold')
         
         # Layout angepasst für engere Legende
         fig.tight_layout(rect=[0, 0.07, 1, 0.96])
@@ -3752,7 +3765,7 @@ class Visualizer:
         gs = gridspec.GridSpec(2, 4, width_ratios=[3, 1, 3, 1], wspace=0.08, hspace=0.35)
         
         # --- MODIFIED: Correct spelling for SSP5-8.5 ---
-        scenario_title = "SSP5-8.5" if "ssp585" in scenario.lower() else scenario.upper()
+        scenario_title = Visualizer._format_scenario_title(scenario)
         fig.suptitle(f"Regime Shift in Return Periods of Extremes (30Q100) - {scenario_title}", fontsize=16, weight='bold', y=0.98)
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
@@ -4020,7 +4033,8 @@ class Visualizer:
         ]
         
         # --- MODIFIED: New Title, No Subtitle ---
-        main_title = f"Local drivers of change - SSP5-8.5"
+        scenario_title = Visualizer._format_scenario_title(scenario)
+        main_title = f"Local drivers of change - {scenario_title}"
         fig.suptitle(f"{main_title}", fontsize=16, weight='bold', y=0.98)
 
         # Containers for collecting data limits
@@ -4167,7 +4181,7 @@ class Visualizer:
         plt.tight_layout(rect=[0, 0.08, 1, 0.95]) # Angepasstes Layout ohne die schematische Legende
         
         # --- CHANGED FILENAME TO FIGURE 5 ---
-        filename = os.path.join(config.PLOT_DIR, "Figure5_mechanism_drivers_summary_ssp585.png")
+        filename = os.path.join(config.PLOT_DIR, f"Figure5_mechanism_drivers_summary_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved Figure 5 (formerly Figure 4) to {filename}")
@@ -4278,12 +4292,13 @@ class Visualizer:
         
         fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.5, 0.02), ncol=3, fontsize=12, frameon=False)
         
-        fig.suptitle(f"Projected impact on inland navigation reliability (LNWL < {lnwl_threshold:.0f} m³/s) - SSP5-8.5", 
+        scenario_title = Visualizer._format_scenario_title(scenario)
+        fig.suptitle(f"Projected impact on inland navigation reliability (LNWL < {lnwl_threshold:.0f} m³/s) - {scenario_title}", 
                      fontsize=16, weight='bold', y=0.98)
         
         plt.tight_layout(rect=[0.02, 0.08, 0.98, 0.94])
         
-        filename = os.path.join(config.PLOT_DIR, "Figure4_impact_navigation_lnwl_ssp585.png")
+        filename = os.path.join(config.PLOT_DIR, f"Figure4_impact_navigation_lnwl_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved ERL Figure 4 to {filename}")

@@ -470,6 +470,17 @@ class ClimateAnalysis:
             else:
                 logging.info(f"Plot '{corr_barchart_filename}' already exists.")
 
+        # --- NEW: Danube Box Correlation Plot ---
+        danube_corr_filename = os.path.join(Config.PLOT_DIR, "danube_box_correlation_comparison.png")
+        if not os.path.exists(danube_corr_filename):
+            logging.info(f"Plot '{danube_corr_filename}' not found. Creating Danube Flow vs Box Indices correlation plot...")
+            if discharge_data_loaded:
+                Visualizer.plot_danube_box_correlation(datasets_reanalysis, discharge_data_loaded)
+            else:
+                 logging.warning("Skipping Danube box correlation plot: No discharge data loaded.")
+        else:
+             logging.info(f"Plot '{danube_corr_filename}' already exists.")
+
         logging.info("\n\n--- Checking for AMO-Jet Correlation Plot ---")
         window_size_amo = 15
         amo_plot_filename = os.path.join(Config.PLOT_DIR, f'amo_jet_correlations_comparison_rolling_{window_size_amo}yr.png')

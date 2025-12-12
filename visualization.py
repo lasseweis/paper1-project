@@ -938,6 +938,117 @@ class Visualizer:
         logging.info(f"Korrelations-Zeitreihenplot für {season} gespeichert unter: {filename}")
 
     @staticmethod
+    def plot_danube_box_correlation(datasets_reanalysis, discharge_data):
+        """
+        Creates a correlation plot between Danube flow (obs) and TAS/PR indices in the analysis box.
+        Layout: 2x2 Grid (Winter/Summer x Temperature/Precipitation).
+        """
+        logging.info("Creating Danube Flow vs TAS/PR Correlation Plot...")
+        Visualizer.ensure_plot_dir_exists()
+
+        seasons = ['Winter', 'Summer']
+        variables = ['tas', 'pr']
+        
+        fig, axs = plt.subplots(2, 2, figsize=(14, 10))
+        
+        for row_idx, var_key in enumerate(variables):
+            for col_idx, season in enumerate(seasons):
+                ax = axs[row_idx, col_idx]
+                season_lower = season.lower()
+                
+                # Get Discharge Data (QOBS)
+                discharge_ts = discharge_data.get(f'{season_lower}_discharge')
+                if discharge_ts is None:
+                    logging.warning(f"No discharge data found for {season}. Skipping subplot.")
+                    continue
+
+                # Get Climate Index Data (ERA5)
+                dataset_key = Config.DATASET_ERA5
+                climate_ts_full = datasets_reanalysis.get(f"{dataset_key}_{var_key}_box_mean")
+                
+                if climate_ts_full is None:
+                    logging.warning(f"No {var_key} data found for {dataset_key}. Skipping subplot.")
+                    continue
+                    
+                # Filter season and detrend
+                climate_ts_season = DataProcessor.filter_by_season(climate_ts_full, season)
+                climate_ts_detrended = DataProcessor.detrend_data(climate_ts_season)
+                
+                if climate_ts_detrended is None:
+                    logging.warning(f"Could not detrend {var_key} for {season}. Skipping.")
+                    continue
+
+                # Intersect Years
+                common_years, idx_d, idx_c = np.intersect1d(
+                    discharge_ts.season_year.values, 
+                    climate_ts_detrended.season_year.values, 
+                    return_indices=True
+                )
+                
+                if len(common_years) < 10:
+                    logging.warning(f"Not enough overlapping years for {season} {var_key}. Skipping.")
+                    continue
+                    
+                val_discharge = discharge_ts.values[idx_d]
+                val_climate = climate_ts_detrended.values[idx_c]
+                
+                # Normalize
+                val_d_norm = StatsAnalyzer.normalize(val_discharge)
+                val_c_norm = StatsAnalyzer.normalize(val_climate)
+                
+                # Calculate Correlation
+                _, _, r_val, p_val, _ = StatsAnalyzer.calculate_regression(val_climate, val_discharge)
+                
+                # Plot
+                color_discharge = 'black'
+                color_climate = 'red' if var_key == 'tas' else 'blue'
+                label_climate = 'Temperature' if var_key == 'tas' else 'Precipitation'
+                
+                ax.plot(common_years, val_d_norm, color=color_discharge, label='Danube Discharge (Obs)', linewidth=1.5)
+                ax.plot(common_years, val_c_norm, color=color_climate, label=f'Box {label_climate} (ERA5)', linestyle='--', linewidth=1.2)
+                
+                # Style
+                ax.set_title(f"{season} {label_climate} vs Discharge")
+                ax.grid(True, linestyle=':', alpha=0.6)
+                if row_idx == 1:
+                    ax.set_xlabel("Year")
+                if col_idx == 0:
+                    ax.set_ylabel("Normalized Anomalies")
+                    
+                # Annotate Correlation
+                p_str = ""
+                if p_val < 0.01: p_str = "***"
+                elif p_val < 0.05: p_str = "**"
+                elif p_val < 0.1: p_str = "*"
+                
+                ax.text(0.05, 0.90, f"r = {r_val:.2f}{p_str}", transform=ax.transAxes, 
+                        fontsize=12, fontweight='bold', 
+                        bbox=dict(facecolor='white', alpha=0.8, edgecolor='black', boxstyle='round,pad=0.3'))
+                
+            # Remove individual legend
+            # ax.legend(loc='lower left', fontsize=9)
+
+        # Add shared legend at the bottom
+        from matplotlib.lines import Line2D
+        legend_elements = [
+            Line2D([0], [0], color='black', lw=1.5, label='Danube Discharge (Obs)'),
+            Line2D([0], [0], color='red', lw=1.2, linestyle='--', label='Box Temperature (ERA5)'),
+            Line2D([0], [0], color='blue', lw=1.2, linestyle='--', label='Box Precipitation (ERA5)')
+        ]
+        
+        fig.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5, 0.02), 
+                   ncol=3, fontsize=10, frameon=False)
+
+        fig.suptitle("Correlation: Danube Flow (Obs) vs. Analysis Box Climate Indices (ERA5) [Detrended]", fontsize=16)
+        # Adjust layout to make room for legend at bottom
+        plt.tight_layout(rect=[0, 0.08, 1, 0.95])
+        
+        filename = os.path.join(Config.PLOT_DIR, "danube_box_correlation_comparison.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved Danube box correlation plot to {filename}")
+
+    @staticmethod
     def plot_correlation_bar_chart(correlation_df, season):
         """
         Creates a visually improved, grouped horizontal bar chart of correlation coefficients.

@@ -303,6 +303,27 @@ class StorylineAnalyzer:
             else:
                 logging.warning(f"Global TAS variable '{global_tas_key}' not found for {key}. Cannot calculate GWL thresholds.")
 
+        # --- NEW: Log GWL Timing and Window (User Request) ---
+        logging.info("\n--- GWL Timing and Analysis Window Details ---")
+        window = self.config.GWL_YEARS_WINDOW
+        for key, thresholds in gwl_thresholds.items():
+            # key format is "{model}_{scenario}"
+            parts = key.split('_')
+            if len(parts) >= 2:
+                model = parts[0]
+                scenario = parts[1]
+                
+                # Check if scenario is relevant (ssp245 or ssp585)
+                if scenario in ['ssp245', 'ssp585']:
+                    for gwl in [2.0, 3.0]:
+                        year = thresholds.get(gwl)
+                        if year is not None:
+                            start_year = year - window // 2
+                            end_year = year + (window - 1) // 2
+                            logging.info(f"GWL {gwl}°C reached in {year} for {model} ({scenario}). "
+                                         f"Analysis Window: {start_year}-{end_year} ({window} years)")
+        # --- END NEW ---
+
         # Step 3: Calculate time series of all metrics
         metric_timeseries = {}
         box_coords = (self.config.BOX_LAT_MIN, self.config.BOX_LAT_MAX, self.config.BOX_LON_MIN, self.config.BOX_LON_MAX)

@@ -410,3 +410,73 @@ class StatsAnalyzer:
             # --- ENDE: FALLBACK ---
                 
         return thresholds_m3s
+
+    @staticmethod
+    def calculate_empirical_thresholds(monthly_timeseries, q_type='30Q', eva_type='low', return_periods=[100], half_year_filter=None):
+        """
+        Calculates empirical thresholds for long-term data (e.g. >100 years).
+        No GEV fit is performed. Thresholds are derived directly from percentiles.
+        
+        Parameters:
+        -----------
+        monthly_timeseries : xr.DataArray
+            Monthly discharge data (long-term).
+        q_type : str
+            The metric type (e.g. '30Q'). Used only for naming the output keys.
+        eva_type : str
+            'low' for minima, 'high' for maxima.
+        return_periods : list
+            List of return periods to calculate (e.g. [100]).
+        half_year_filter : str
+            'winter', 'summer', or 'full_year'.
+
+        Returns:
+        --------
+        dict
+            Thresholds dict, e.g. {'30Q100': 850.0}
+        """
+        logging.info(f"Calculating EMPIRICAL thresholds for {q_type} ({eva_type}, {half_year_filter}) from long-term data...")
+        
+        if monthly_timeseries is None or monthly_timeseries.size < 50:
+             logging.warning("Long-term timeseries too short for empirical calculation.")
+             return {}
+
+        # 1. Filter by season
+        if half_year_filter and half_year_filter in ['winter', 'summer']:
+            months = []
+            if half_year_filter == 'winter':
+                months = [11, 12, 1, 2, 3, 4] 
+            elif half_year_filter == 'summer':
+                months = [5, 6, 7, 8, 9, 10]
+            
+            ts_filtered = monthly_timeseries.where(monthly_timeseries.time.dt.month.isin(months), drop=True)
+        else:
+            ts_filtered = monthly_timeseries
+
+        # 2. Extract Annual Extremes
+        # Since input is monthly mean, we group by year and take min/max of the monthly means
+        if eva_type == 'low':
+            annual_extremes = ts_filtered.groupby('time.year').min('time')
+        else:
+            annual_extremes = ts_filtered.groupby('time.year').max('time')
+            
+        clean_extremes = annual_extremes.dropna(dim='year').values
+        
+        if len(clean_extremes) < 80:
+             logging.warning(f"Warning: Only {len(clean_extremes)} years of data for empirical {q_type} analysis. Results may be unstable.")
+
+        thresholds = {}
+        for T in return_periods:
+            if eva_type == 'low':
+                # Return Period T => Exceedance Prob = 1/T for low flow means "non-exceedance" prob = 1/T
+                # quantile = 1/T (e.g. 1/100 = 0.01 = 1st percentile)
+                q_val = np.quantile(clean_extremes, 1.0/T, interpolation='linear')
+            else:
+                # Return Period T => Exceedance Prob = 1/T => Quantile = 1 - 1/T
+                q_val = np.quantile(clean_extremes, 1.0 - (1.0/T), interpolation='linear')
+            
+            key = f'{q_type}{T}'
+            thresholds[key] = q_val
+            logging.info(f"  -> Empirical {key}: {q_val:.2f} m3/s (from {len(clean_extremes)} years)")
+            
+        return thresholds

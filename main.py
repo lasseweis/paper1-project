@@ -296,6 +296,50 @@ class ClimateAnalysis:
             return None
 
     @staticmethod
+    def load_historical_qobs_long_term(config):
+        """
+        Loads the long-term monthly discharge data (1893-2021) from the Excel file.
+        Columns: Month (2), Year (3), Discharge (8).
+        1-based indices in description correspond to 0-based: Month=1, Year=2, Vol=7.
+        """
+        logging.info("Loading LONG-TERM MONTHLY historical QOBS discharge data from Excel...")
+        filepath = config.DISCHARGE_FILE
+
+        if not os.path.exists(filepath):
+            logging.error(f"Cannot load long-term QOBS data: File not found at {filepath}")
+            return None
+
+        try:
+            # Assuming header is in the first row (index 0), data starts from row 2
+            df = pd.read_excel(filepath, engine='openpyxl') 
+            
+            # Extract relevant columns by index (using .iloc)
+            # Month is col 1 (2nd col), Year is col 2 (3rd col), Discharge is col 7 (8th col)
+            df_subset = df.iloc[:, [1, 2, 7]].copy()
+            df_subset.columns = ['month', 'year', 'discharge']
+            
+            # Create datetime index (setting day to 15 to represent the month)
+            df_subset['time'] = pd.to_datetime(dict(year=df_subset['year'], month=df_subset['month'], day=15))
+            df_subset = df_subset.set_index('time').sort_index()
+            
+            # Create xarray DataArray
+            da = xr.DataArray(
+                df_subset['discharge'].values,
+                coords={'time': df_subset.index},
+                dims='time', 
+                name='discharge',
+                attrs={'units': 'm3/s', 'long_name': 'Observed Danube Discharge (Monthly 1893-2021)'}
+            )
+            
+            logging.info(f"Successfully loaded LONG-TERM QOBS data: {da.time.size} months ({da.time.dt.year.min().item()}-{da.time.dt.year.max().item()}).")
+            return da
+
+        except Exception as e:
+            logging.error(f"Error processing long-term QOBS from {filepath}: {e}")
+            logging.error(traceback.format_exc())
+            return None
+
+    @staticmethod
     def run_full_analysis():
         """
         Main static method to execute the entire analysis workflow.
@@ -345,11 +389,18 @@ class ClimateAnalysis:
         # 1. Lade QOBS-Daten (1960-2021, TÄGLICH) aus der .csv-Datei
         qobs_historical_da = ClimateAnalysis.load_historical_qobs_from_csv(Config())
         
-        # 2. Verarbeite QOBS-Daten, um historische Zeitreihen zu erstellen UND fixe Schwellenwerte hinzuzufügen
+        # 2. NEU: Lade QOBS-Daten (1893-2021, MONATLICH) aus der .excel-Datei
+        qobs_historical_long_term_da = ClimateAnalysis.load_historical_qobs_long_term(Config())
+
+        # 3. Verarbeite QOBS-Daten, um historische Zeitreihen zu erstellen UND fixe Schwellenwerte hinzuzufügen
         # Diese 'discharge_data_loaded' wird für alle historischen Plots (Korrelationen) 
         # UND für die fixen Schwellenwerte (LNWL) in den Zukunfts-Plots verwendet.
         # WICHTIG: Dieses dict enthält jetzt 'daily_historical_da' UND 'monthly_historical_da'
         discharge_data_loaded = ClimateAnalysis.process_historical_discharge_data(qobs_historical_da)
+        
+        # 4. Füge die Langzeit-Daten zum geladenen Dict hinzu (falls erfolgreich geladen)
+        if qobs_historical_long_term_da is not None:
+             discharge_data_loaded['monthly_historical_long_term_da'] = qobs_historical_long_term_da
         # --- ENDE: ÄNDERUNG ---
         
         amo_data_loaded = ClimateAnalysis.load_amo_index(Config.AMO_INDEX_FILE)
@@ -678,15 +729,18 @@ class ClimateAnalysis:
                 return_period_results_for_plot = None # Initialize
 
                 # Calculate the data (needed for this plot AND the next one)
+                # Calculate the data (needed for this plot AND the next one)
                 historical_da = discharge_data_loaded.get('daily_historical_da') # DAILY QOBS data
-                
+                historical_long_term_da = discharge_data_loaded.get('monthly_historical_long_term_da') # LONG-TERM MONTHLY data
+
                 if historical_da is not None:
                     logging.info(f"Calculating half-year EVA return period data for {scenario}...")
                     return_period_results_for_plot = storyline_analyzer.analyze_storyline_discharge_extremes(
                         cmip6_results=cmip6_results,
                         historical_discharge_da=historical_da, # <-- Pass DAILY QOBS here
                         config=Config(),
-                        discharge_thresholds=discharge_data_loaded # Pass fixed thresholds
+                        discharge_thresholds=discharge_data_loaded, # Pass fixed thresholds
+                        historical_discharge_long_term_da=historical_long_term_da # <-- Pass NEW Long-Term Data
                     )
                 else:
                     logging.warning(f"DAILY QOBS historical discharge data not available for return period analysis in {scenario}.")

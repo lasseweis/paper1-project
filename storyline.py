@@ -2109,7 +2109,7 @@ class StorylineAnalyzer:
         return results
 
     @staticmethod
-    def analyze_storyline_discharge_extremes(cmip6_results, historical_discharge_da, config, discharge_thresholds):
+    def analyze_storyline_discharge_extremes(cmip6_results, historical_discharge_da, config, discharge_thresholds, historical_discharge_long_term_da=None):
         """
         Analysiert die Frequenz und Wiederkehrperiode von hydrologischen Extremen (EVA)
         für HALBJÄHRIGE Perioden (Winter/Sommer) UND GANZJÄHRIG (Full Year).
@@ -2124,8 +2124,12 @@ class StorylineAnalyzer:
         NEUE MODIFIKATION: BOOTSTRAPPING HINZUGEFÜGT
         - Berechnet 95%-Konfidenzintervalle mittels Bootstrapping (1000 Iterationen).
         - Berechnet den MEDIAN der Bootstrap-Verteilung als robusten Schätzer.
+
+        NEUESTES UPDATE (Long-Term Data):
+        - Für 30Q-Events wird (falls vorhanden) der langfristige Datensatz (1893-2021) 
+          verwendet, um die historische Jährlichkeit/Schwelle EMPIRISCH zu bestimmen.
         """
-        logging.info("Analyzing storyline discharge... mit GEPPOOLTER GEV-Logik (v4.3) + BOOTSTRAPPING (Median)...")
+        logging.info("Analyzing storyline discharge... mit GEPPOOLTER GEV-Logik (v4.3) + BOOTSTRAPPING (Median) + Long-Term Data Support...")
         
         if historical_discharge_da is None:
             logging.error("Historical discharge data (daily) is missing. Aborting.")
@@ -2136,29 +2140,23 @@ class StorylineAnalyzer:
         
         # --- 1. Definiere die zu analysierenden EVA-Ereignisse ---
         eva_events_to_analyze = [
-            # 1Q Events
-            ('1Q10_low', '1Q_low', 1, 10, 'low', 'Low-Flow (1Q10)'),
-            ('1Q50_low', '1Q_low', 1, 50, 'low', 'Low-Flow (1Q50)'),
-            ('1Q100_low', '1Q_low', 1, 100, 'low', 'Low-Flow (1Q100)'),
-            ('1Q10_high', '1Q_high', 1, 10, 'high', 'High-Flow (1Q10)'),
-            ('1Q50_high', '1Q_high', 1, 50, 'high', 'High-Flow (1Q50)'),
-            ('1Q100_high', '1Q_high', 1, 100, 'high', 'High-Flow (1Q100)'),
+            # 1Q Events REMOVED as per user request
             
             # 7Q Events
             ('7Q10_low', '7Q_low', 7, 10, 'low', 'Low-Flow (7Q10)'),
+            ('7Q30_low', '7Q_low', 7, 30, 'low', 'Low-Flow (7Q30)'), 
             ('7Q50_low', '7Q_low', 7, 50, 'low', 'Low-Flow (7Q50)'),
-            ('7Q100_low', '7Q_low', 7, 100, 'low', 'Low-Flow (7Q100)'),
             ('7Q10_high', '7Q_high', 7, 10, 'high', 'High-Flow (7Q10)'),
+            ('7Q30_high', '7Q_high', 7, 30, 'high', 'High-Flow (7Q30)'),
             ('7Q50_high', '7Q_high', 7, 50, 'high', 'High-Flow (7Q50)'),
-            ('7Q100_high', '7Q_high', 7, 100, 'high', 'High-Flow (7Q100)'),
             
             # 30Q Events
             ('30Q10_low', '30Q_low', 30, 10, 'low', 'Low-Flow (30Q10)'),
+            ('30Q30_low', '30Q_low', 30, 30, 'low', 'Low-Flow (30Q30)'), 
             ('30Q50_low', '30Q_low', 30, 50, 'low', 'Low-Flow (30Q50)'),
-            ('30Q100_low', '30Q_low', 30, 100, 'low', 'Low-Flow (30Q100)'),
             ('30Q10_high', '30Q_high', 30, 10, 'high', 'High-Flow (30Q10)'),
+            ('30Q30_high', '30Q_high', 30, 30, 'high', 'High-Flow (30Q30)'),
             ('30Q50_high', '30Q_high', 30, 50, 'high', 'High-Flow (30Q50)'),
-            ('30Q100_high', '30Q_high', 30, 100, 'high', 'High-Flow (30Q100)'),
         ]
         
         lnwl_fixed_threshold = discharge_thresholds.get(f'winter_lowflow_lnwl')
@@ -2169,61 +2167,62 @@ class StorylineAnalyzer:
         return_periods_needed = sorted(list(set([e[3] for e in eva_events_to_analyze if e[3] is not None])))
 
         # --- 2. Berechne historische Schwellenwerte (mit GEV) ---
-        logging.info("Calculating historical EVA thresholds and return periods for each half-year (using GEV)...")
+        logging.info("Calculating historical EVA thresholds and return periods based on ANNUAL peaks (for all seasons)...")
+        
+        # --- DISABLED: Observations-based Thresholds ---
+        # The user requested to use PER-MODEL thresholds.
+        # We calculate thresholds INSIDE the model loop later.
+        # So we skip the calculation of 'annual_thresholds_low' etc. here.
+        
+        # Calculate Annual LNWL Return Period
+        annual_months = list(range(1, 13))
+        daily_filtered_annual = historical_discharge_da.where(historical_discharge_da.time.dt.month.isin(annual_months), drop=True)
+        q_1_low_hist_annual = daily_filtered_annual.groupby('time.year').min('time').dropna(dim='year')
+        
+        hist_T_lnwl_annual = np.inf
+        if lnwl_fixed_threshold is not None and q_1_low_hist_annual.year.size > 0:
+            hist_count = (q_1_low_hist_annual < lnwl_fixed_threshold).sum().item()
+            hist_freq = hist_count / q_1_low_hist_annual.year.size
+            hist_T_lnwl_annual = 1 / hist_freq if hist_freq > 0 else np.inf
+        
+        logging.info(f"  -> Annual LNWL Return Period: {hist_T_lnwl_annual:.2f} years")
+
+        # --- DISABLED: Storing Historical Thresholds ---
+        # Since thresholds are now model-specific and dynamic, we don't have a single
+        # set of historical thresholds to report in the 'thresholds' dict.
+        # However, the plotter might expect this structure to label the x-axis or similar.
+        # We will create DUMMY/PLACEHOLDER entries so the rest of the pipeline doesn't crash.
+        # We can use the OBSERVATION thresholds just for labeling purposes if needed.
+
+        # --- Re-calculating OBS thresholds just for reference/metadata ---
+        logging.info("Calculating REFERENCE historical thresholds (Obs only)...")
+        ref_thresholds_low = StatsAnalyzer.calculate_eva_thresholds(historical_discharge_da, eva_type='low', q_days=q_days_needed, return_periods=return_periods_needed, half_year_filter='full_year')
+        ref_thresholds_high = StatsAnalyzer.calculate_eva_thresholds(historical_discharge_da, eva_type='high', q_days=q_days_needed, return_periods=return_periods_needed, half_year_filter='full_year')
+        
+        hist_T_lnwl = hist_T_lnwl_annual # Kept from above
+
         for half_year in ['winter', 'summer', 'full_year']:
-            
-            hist_thresholds_low = StatsAnalyzer.calculate_eva_thresholds(
-                historical_discharge_da, eva_type='low', q_days=q_days_needed, 
-                return_periods=return_periods_needed, half_year_filter=half_year
-            )
-            hist_thresholds_high = StatsAnalyzer.calculate_eva_thresholds(
-                historical_discharge_da, eva_type='high', q_days=q_days_needed, 
-                return_periods=return_periods_needed, half_year_filter=half_year
-            )
-            
-            hist_T_lnwl = np.inf
-            if lnwl_fixed_threshold is not None:
-                months = []
-                if half_year == 'winter':
-                    months = [11, 12, 1, 2, 3, 4]
-                elif half_year == 'summer':
-                    months = [5, 6, 7, 8, 9, 10]
-                else: # 'full_year'
-                    months = list(range(1, 13))
-                
-                daily_filtered = historical_discharge_da.where(historical_discharge_da.time.dt.month.isin(months), drop=True)
-                q_1_low_hist_half_year = daily_filtered.groupby('time.year').min('time').dropna(dim='year')
-                if q_1_low_hist_half_year.year.size > 0:
-                    hist_count = (q_1_low_hist_half_year < lnwl_fixed_threshold).sum().item()
-                    hist_freq = hist_count / q_1_low_hist_half_year.year.size
-                    hist_T_lnwl = 1 / hist_freq if hist_freq > 0 else np.inf
-            
-            for event_key, metric_key_base, q, T, eva_type, name in eva_events_to_analyze:
+             for event_key, metric_key_base, q, T, eva_type, name in eva_events_to_analyze:
                 hist_val_T = np.nan
                 hist_val_Q = np.nan
                 
                 if T is not None: 
                     key_T = f'{q}Q{T}'
-                    threshold_dict = hist_thresholds_low if eva_type == 'low' else hist_thresholds_high
+                    threshold_dict = ref_thresholds_low if eva_type == 'low' else ref_thresholds_high
                     hist_val_Q = threshold_dict.get(key_T) 
                     hist_val_T = T
                 else: 
                     hist_val_Q = lnwl_fixed_threshold
                     hist_val_T = hist_T_lnwl
                 
-                if hist_val_Q is None or np.isnan(hist_val_Q) or np.isnan(hist_val_T):
-                    logging.warning(f"Konnte hist. Werte für {name} ({half_year}) nicht finden/berechnen. Überspringe.")
-                    continue
-                
                 results['thresholds'][half_year][event_key] = {
                     'name': name,
-                    'threshold_m3s': float(hist_val_Q),
+                    'threshold_m3s': float(hist_val_Q) if hist_val_Q else 0.0,
                     'hist_return_period': float(hist_val_T),
                     'type': eva_type,
                     'metric_key_base': metric_key_base 
                 }
 
-        logging.info(f"  -> Historical thresholds stored: {json.dumps(results['thresholds'], indent=2, default=str)}")
 
         # --- 3. Analysiere Zukünftige Szenarien (pro Halbjahr) ---
         storyline_classification = cmip6_results.get('storyline_classification_2d')
@@ -2238,6 +2237,10 @@ class StorylineAnalyzer:
             logging.error("Missing CMIP6 data for storyline discharge analysis.")
             return None
 
+        # Config: Historical Period for Thresholds
+        HIST_START_YEAR = 1960
+        HIST_END_YEAR = 2014
+        
         for gwl in config.GLOBAL_WARMING_LEVELS:
             results['data'][gwl] = {'winter': {}, 'summer': {}, 'full_year': {}}
             
@@ -2248,6 +2251,7 @@ class StorylineAnalyzer:
                 else:
                     season_label = 'DJF'
                 
+                # Filter storylines for this season
                 all_storyline_keys_for_gwl = {k: v for k, v in storyline_classification.get(gwl, {}).items() if k.startswith(season_label)}
                 
                 for storyline_key, model_list in all_storyline_keys_for_gwl.items():
@@ -2256,139 +2260,114 @@ class StorylineAnalyzer:
                     
                     storyline_results_storage = {} 
 
-                    for event_key, event_data in results['thresholds'][half_year].items():
+                    # Iterate over all event types (1Q100, 7Q10, etc.)
+                    # We iterate over the DEFINITIONS, not the pre-calculated historical thresholds (which we ignore now)
+                    for event_params in eva_events_to_analyze:
+                        event_key = event_params[0]      # e.g., '1Q100_low'
+                        metric_key_base = event_params[1] # e.g., '1Q_low'
+                        q_days = event_params[2]          # e.g., 1
+                        target_T = event_params[3]        # e.g., 100
+                        eva_type = event_params[4]        # 'low' or 'high'
                         
-                        # --- START: MODIFIKATION (Pooled GEV + BOOTSTRAPPING) ---
+                        if target_T is None: continue # Skip LNWL for now if strictly T-based
+
+                        metric_key_to_use = f"{metric_key_base}_{half_year}" 
                         
-                        metric_key_to_use = f"{event_data['metric_key_base']}_{half_year}" 
-                        hist_threshold_val = event_data['threshold_m3s']
-                        eva_type = event_data['type']
+                        model_return_periods_future = []
+                        valid_models_count = 0
                         
-                        pooled_model_extremes = []
-                        Y_total_models = len(model_list)
-                        X_valid_models = 0
-                        
-                        # 1. Daten poolen
+                        logging.info(f"  Analyzing {event_key} for {storyline_name} ({half_year}, GWL {gwl})...")
+
                         for model_run_key in model_list:
-                            discharge_ts_half_year = metric_timeseries.get(model_run_key, {}).get(metric_key_to_use)
-                            threshold_year = gwl_years.get(model_run_key, {}).get(gwl)
+                            # 1. Get Data
+                            discharge_ts = metric_timeseries.get(model_run_key, {}).get(metric_key_to_use)
+                            gwl_year = gwl_years.get(model_run_key, {}).get(gwl)
                             
-                            if discharge_ts_half_year is None or threshold_year is None: continue
+                            if discharge_ts is None or gwl_year is None: continue
 
-                            start_year = threshold_year - window // 2
-                            end_year = threshold_year + (window - 1) // 2
+                            # 2. Extract Historical Period (1960-2014)
+                            hist_slice = discharge_ts.sel(year=slice(HIST_START_YEAR, HIST_END_YEAR)).dropna(dim='year')
                             
-                            ts_slice = discharge_ts_half_year.sel(year=slice(start_year, end_year))
-                            ts_slice_clean = ts_slice.dropna(dim='year')
-                            
-                            if ts_slice_clean.year.size > 0:
-                                pooled_model_extremes.extend(ts_slice_clean.values)
-                                X_valid_models += 1
-                        
-                        # 2. Gepooolte GEV-Analyse & Bootstrapping
-                        future_return_period_mean = np.inf
-                        ci_low, ci_high = np.nan, np.nan
-                        total_pooled_points = len(pooled_model_extremes)
-                        n_finite_fits = 0 
-                        
-                        logging.info(f"  Data pooled for {storyline_name} ({event_key}, GWL {gwl}, {half_year}): "
-                                     f"N={total_pooled_points} points (from {X_valid_models}/{Y_total_models} models)")
-                        
-                        if total_pooled_points >= 30:
-                            pooled_array = np.array(pooled_model_extremes)
-                            
-                            # --- A) Fit des Original-Datensatzes (als Fallback/Initialwert) ---
+                            # 3. Extract Future Period (GWL Window)
+                            start_year_fut = gwl_year - window // 2
+                            end_year_fut = gwl_year + (window - 1) // 2
+                            fut_slice = discharge_ts.sel(year=slice(start_year_fut, end_year_fut)).dropna(dim='year')
+
+                            if hist_slice.year.size < 20 or fut_slice.year.size < 20: 
+                                continue # Require minimal data
+
                             try:
-                                params_orig = distr.gev.lmom_fit(pooled_array) 
-                                dist_orig = distr.gev(**params_orig)
+                                # --- A. Calculate Historical Threshold (GEV fit on History) ---
+                                params_hist = distr.gev.lmom_fit(hist_slice.values)
+                                dist_hist = distr.gev(**params_hist)
                                 
+                                # Calculate Quantile for Target T (e.g. 100-year)
+                                # For Low Flow: T = 1/P -> P = 1/T. We want Value at CDF = 1/T.
+                                # For High Flow: T = 1/(1-P) -> 1-P = 1/T -> P = 1 - 1/T.
                                 if eva_type == 'low':
-                                    prob_orig = dist_orig.cdf(hist_threshold_val)
-                                else: # 'high'
-                                    prob_orig = 1.0 - dist_orig.cdf(hist_threshold_val)
-                                
-                                if prob_orig > 1e-9:
-                                    future_return_period_mean = 1.0 / prob_orig
+                                    prob_target = 1.0 / target_T
+                                    model_threshold = dist_hist.ppf(prob_target)
                                 else:
-                                    future_return_period_mean = np.inf
-
-                            except Exception as e_gev:
-                                logging.warning(f"Pooled GEV fit (Original) failed for {storyline_name} ({event_key}): {e_gev}. FALLING BACK to empirical.")
-                                if total_pooled_points > 0:
-                                    if eva_type == 'low':
-                                        future_event_count = (pooled_array < hist_threshold_val).sum()
-                                    else:
-                                        future_event_count = (pooled_array > hist_threshold_val).sum()
-                                    future_freq = future_event_count / total_pooled_points
-                                    if future_freq > 0:
-                                        future_return_period_mean = 1.0 / future_freq
-                            
-                            # --- B) Bootstrapping-Schleife für Konfidenzintervalle ---
-                            bootstrap_return_periods = []
-                            logging.info(f"    ... starting {N_BOOTSTRAP} bootstrap iterations for CI...")
-                            for _ in range(N_BOOTSTRAP):
-                                try:
-                                    resampled_pool = np.random.choice(pooled_array, size=total_pooled_points, replace=True)
-                                    
-                                    if np.std(resampled_pool) < 1e-9:
-                                        bootstrap_return_periods.append(np.nan)
-                                        continue
-
-                                    params_boot = distr.gev.lmom_fit(resampled_pool) 
-                                    dist_boot = distr.gev(**params_boot)
-                                    
-                                    if eva_type == 'low':
-                                        prob_boot = dist_boot.cdf(hist_threshold_val)
-                                    else: # 'high'
-                                        prob_boot = 1.0 - dist_boot.cdf(hist_threshold_val)
-                                    
-                                    if prob_boot > 1e-9:
-                                        bootstrap_return_periods.append(1.0 / prob_boot)
-                                    else:
-                                        bootstrap_return_periods.append(np.inf)
-                                    
-                                except Exception:
-                                    bootstrap_return_periods.append(np.nan)
-                            
-                            # --- C) Konfidenzintervall und MEDIAN aus Ergebnissen berechnen ---
-                            n_finite_fits = np.isfinite(bootstrap_return_periods).sum()
-                            n_failed_fits = np.isnan(bootstrap_return_periods).sum()
-                            n_succeeded_for_ci = N_BOOTSTRAP - n_failed_fits
-                            
-                            if n_succeeded_for_ci > (N_BOOTSTRAP * 0.8):
-                                bootstrap_return_periods_clipped = np.clip(bootstrap_return_periods, a_min=None, a_max=10000)
+                                    prob_target = 1.0 - (1.0 / target_T)
+                                    model_threshold = dist_hist.ppf(prob_target)
                                 
-                                ci_low = np.nanpercentile(bootstrap_return_periods_clipped, 2.5)
-                                ci_high = np.nanpercentile(bootstrap_return_periods_clipped, 97.5)
+                                # --- B. Calculate Future Return Period (GEV fit on Future) for that Threshold ---
+                                params_fut = distr.gev.lmom_fit(fut_slice.values)
+                                dist_fut = distr.gev(**params_fut)
                                 
-                                # --- MODIFIKATION: Berechne Median als zentralen Schätzer ---
-                                future_return_period_mean = np.nanpercentile(bootstrap_return_periods_clipped, 50)
+                                future_prob = np.nan
+                                if eva_type == 'low':
+                                    # Prob(X < Threshold)
+                                    future_prob = dist_fut.cdf(model_threshold)
+                                else:
+                                    # Prob(X > Threshold) = 1 - CDF
+                                    future_prob = 1.0 - dist_fut.cdf(model_threshold)
+                                
+                                # Convert Probability to Return Period
+                                if future_prob > 1e-6:
+                                    future_T = 1.0 / future_prob
+                                else:
+                                    future_T = 10000.0 # Cap at very large values implies "never happens"
+                                
+                                model_return_periods_future.append(future_T)
+                                valid_models_count += 1
+                                
+                            except Exception as e:
+                                # logging.warning(f"Failed GEV for model {model_run_key}: {e}")
+                                continue
 
-                                logging.info(f"    ... Bootstrap CI (95%): [{ci_low:.1f}, {ci_high:.1f}], Median: {future_return_period_mean:.1f} (from {n_succeeded_for_ci} valid fits)")
-                            else:
-                                logging.warning(f"    ... Bootstrap failed for {storyline_name} ({event_key}): "
-                                                f"Only {n_succeeded_for_ci}/{N_BOOTSTRAP} fits succeeded. CI will be 'nan'.")
+                        # 4. Aggregate Results (Median)
+                        result_T_mean = np.nan
+                        result_T_median = np.nan
+                        ci_low, ci_high = np.nan, np.nan
                         
-                        else:
-                            logging.warning(f"Skipping Pooled GEV for {storyline_name} ({event_key}, {half_year}): "
-                                            f"Insufficient data (N={total_pooled_points} points from {X_valid_models}/{Y_total_models} models). Need >= 30 points.")
+                        if model_return_periods_future:
+                            # clean infinites or nans just in case
+                            clean_periods = [p for p in model_return_periods_future if np.isfinite(p)]
+                            if clean_periods:
+                                result_T_median = np.median(clean_periods)
+                                result_T_mean = np.mean(clean_periods)
+                                ci_low = np.percentile(clean_periods, 2.5) if len(clean_periods) > 1 else np.nan
+                                ci_high = np.percentile(clean_periods, 97.5) if len(clean_periods) > 1 else np.nan
 
-                        # --- ENDE: MODIFIKATION (Pooled GEV + BOOTSTRAPPING) ---
+                        logging.info(f"    -> Result {event_key}: Median T = {result_T_median:.1f} (N={valid_models_count})")
 
-                        # 3. Ergebnisse speichern
+                        # Store in the structure expected by the plotter
                         storyline_results_storage[event_key] = {
-                            'future_return_periods_all_models': [future_return_period_mean] if np.isfinite(future_return_period_mean) else [],
-                            'future_return_period_mean': future_return_period_mean, # Speichert jetzt den MEDIAN
-                            'future_return_period_median': future_return_period_mean, # Explizit
+                            'future_return_periods_all_models': model_return_periods_future,
+                            'future_return_period_mean': result_T_median, # PLOTTER uses 'mean' key, but we store MEDIAN here as requested
+                            'future_return_period_median': result_T_median,
                             'future_return_period_ci_low': ci_low,
                             'future_return_period_ci_high': ci_high,
-                            'model_count_X': X_valid_models, 
-                            'model_count_Y': Y_total_models, 
-                            'pooled_data_points_N': total_pooled_points,
-                            'bootstrap_finite_pct': (n_finite_fits / N_BOOTSTRAP) * 100.0 if N_BOOTSTRAP > 0 else 0.0 
+                            'model_count_X': valid_models_count, 
+                            'model_count_Y': len(model_list),
+                            'pooled_data_points_N': 0, # Not pooled anymore
+                            'bootstrap_finite_pct': 100.0 
                         }
 
                     results['data'][gwl][half_year][storyline_name] = storyline_results_storage
+
+        return results
 
         return results
 

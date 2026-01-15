@@ -2816,9 +2816,9 @@ class Visualizer:
                 op = '<' if threshold_data.get('type') == 'low' else '>'
                 
                 title = f"{event_name}"
-                if hist_val_q:
-                    # Add specific threshold value to title
-                    title += f"\n(Threshold: {op} {hist_val_q:.0f} m³/s)"
+                # if hist_val_q:
+                #     # Add specific threshold value to title
+                #     title += f"\n(Threshold: {op} {hist_val_q:.0f} m³/s)"
                 ax.set_title(title, fontsize=11, weight='bold')
                 
                 # Filter data for this subplot
@@ -2942,14 +2942,12 @@ class Visualizer:
         high_flow_events = sorted([k for k in unique_event_keys if get_event_type(k) == 'high'])
         
         event_plot_order_keys_low = [
-            '1Q10_low', '1Q50_low', '1Q100_low', 
-            '7Q10_low', '7Q50_low', '7Q100_low', 
-            '30Q10_low', '30Q50_low', '30Q100_low'
+            '7Q10_low', '7Q30_low', '7Q50_low', 
+            '30Q10_low', '30Q30_low', '30Q50_low'
         ] 
         event_plot_order_keys_high = [
-            '1Q10_high', '1Q50_high', '1Q100_high', 
-            '7Q10_high', '7Q50_high', '7Q100_high', 
-            '30Q10_high', '30Q50_high', '30Q100_high'
+            '7Q10_high', '7Q30_high', '7Q50_high', 
+            '30Q10_high', '30Q30_high', '30Q50_high'
         ]
 
         def get_ordered_events(base_list, available_keys):
@@ -3852,8 +3850,8 @@ class Visualizer:
             logging.warning("Missing data for Figure 3.")
             return
 
-        # --- 1. Identify Events (30Q100) ---
-        target_event_substring = "30Q100"
+        # --- 1. Identify Events (30Q30) ---
+        target_event_substring = "30Q30"
         winter_keys = list(return_period_results['thresholds']['winter'].keys())
         summer_keys = list(return_period_results['thresholds']['summer'].keys())
         
@@ -3877,7 +3875,7 @@ class Visualizer:
         
         # --- MODIFIED: Correct spelling for SSP5-8.5 ---
         scenario_title = Visualizer._format_scenario_title(scenario)
-        fig.suptitle(f"Regime Shift in Return Periods of Extremes (30Q100) - {scenario_title}", fontsize=16, weight='bold', y=0.98)
+        fig.suptitle(f"Shift in Return Periods of Extremes (30Q30) - {scenario_title}", fontsize=16, weight='bold', y=0.98)
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         # MODIFIED: Add " GWL" to keys
@@ -3909,11 +3907,11 @@ class Visualizer:
             
             # Title Construction
             thresh_meta = return_period_results['thresholds'][half_year][event_key]
-            hist_val_q = thresh_meta.get('threshold_m3s')
-            op = '<' if thresh_meta.get('type', 'low') == 'low' else '>'
+            # hist_val_q = thresh_meta.get('threshold_m3s') # DISABLED: Model specific thresholds
+            # op = '<' if thresh_meta.get('type', 'low') == 'low' else '>'
             full_title = cfg['base_title']
-            if hist_val_q is not None:
-                full_title += f" {op} {hist_val_q:.0f} m³/s"
+            # if hist_val_q is not None:
+            #     full_title += f" {op} {hist_val_q:.0f} m³/s"
             
             ax_left.set_title(full_title, loc='left', fontsize=11, weight='bold', x=0)
 
@@ -3969,27 +3967,9 @@ class Visualizer:
                 # MODIFIED: Remove seaborn's automatic Y-labels to prevent "Storyline" appearing on split
                 ax.set_ylabel('')
                 
-                # Errorbars
-                unique_gwls = sorted(list(gwl_colors.keys()))
-                bar_height = 0.7 / len(unique_gwls)
-                for item in mean_ci_data:
-                    if item['Storyline'] not in storyline_display_order: continue
-                    y_center = storyline_display_order.index(item['Storyline'])
-                    gwl_idx = unique_gwls.index(item['GWL'])
-                    y_pos = y_center + (gwl_idx - (len(unique_gwls)-1)/2) * bar_height
-                    
-                    x = item['Mean_Plot']
-                    xerr_low = max(0, x - item['Low_Plot'])
-                    xerr_high = max(0, item['High_Plot'] - x)
-                    
-                    ax.errorbar(x, y_pos, xerr=[[xerr_low], [xerr_high]], fmt='none', 
-                                ecolor='black', elinewidth=2.0, capsize=5, zorder=20)
-                    
-                    # Handle pure float extraction for color dict
-                    gwl_val_float = float(item['GWL'].split('+')[1].split('°')[0])
-                    marker_size = 9 if gwl_val_float == 3.0 else 6
-                    ax.plot(x, y_pos, marker='D', color=Visualizer.GWL_COLORS[gwl_val_float], 
-                            markeredgecolor='black', markersize=marker_size, zorder=21)
+                # Errorbars REMOVED as per user request (relying on boxplots now)
+                # unique_gwls = sorted(list(gwl_colors.keys()))
+                # ... (removed errorbar plotting code) ...
 
                 # Historical Line
                 if hist_rp:
@@ -4004,6 +3984,9 @@ class Visualizer:
             ax_left.set_xlim(0.8, BREAK_POINT)
             ax_left.set_xticks([1, 10, 100])
             ax_left.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+            # Add minor ticks (2, 3, ... 9)
+            ax_left.xaxis.set_minor_locator(matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10), numticks=100))
+            ax_left.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
             
             # RIGHT Axis (Extreme Range)
             ax_right.set_xscale('log')
@@ -4011,6 +3994,9 @@ class Visualizer:
             ax_right.set_xlim(BREAK_POINT, right_max)
             ax_right.set_xticks([500, 1000, 5000, 10000])
             ax_right.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+            # Add minor ticks
+            ax_right.xaxis.set_minor_locator(matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10), numticks=100))
+            ax_right.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
 
             # --- HIDE SPINES FOR BREAK EFFECT ---
             ax_left.spines['right'].set_visible(False)
@@ -4039,8 +4025,8 @@ class Visualizer:
             
             # --- MODIFIED: X-Axis Labels & Ticks ---
             # 1. Ensure ticks are visible on ALL plots (top and bottom rows)
-            ax_left.tick_params(axis='x', labelbottom=True)
-            ax_right.tick_params(axis='x', labelbottom=True) 
+            ax_left.tick_params(axis='x', which='both', bottom=True, labelbottom=True)
+            ax_right.tick_params(axis='x', which='both', bottom=True, labelbottom=True) 
             plt.setp(ax_right.get_xticklabels(), rotation=30, ha='right')
             
             # 2. Set centered Label ONLY for the bottom row (row_idx == 1)
@@ -4069,8 +4055,8 @@ class Visualizer:
 
         # Shared Legend
         handles = []
-        handles.append(plt.Line2D([0], [0], marker='D', color='w', markerfacecolor='gray', markeredgecolor='k', label='Pooled Median & 95% CI'))
-        handles.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.5, label='Individual Models'))
+        # handles.append(plt.Line2D([0], [0], marker='D', color='w', markerfacecolor='gray', markeredgecolor='k', label='Pooled Median & 95% CI')) # REMOVED
+        handles.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.5, label='Models')) # Renamed from 'Individual Models'
         handles.append(plt.Line2D([0], [0], color='black', linestyle='--', linewidth=1.5, label='Historical Return Period'))
         
         # MODIFIED: Legend matches new keys with "GWL"

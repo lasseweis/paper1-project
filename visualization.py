@@ -3201,7 +3201,7 @@ class Visualizer:
                     ax.axvline(x=hist_period, color='skyblue', linestyle='--', linewidth=3, zorder=5)
                     all_data_for_lims.append(hist_period)
 
-                ax.set_xscale('log')
+                ax.set_xscale('linear')
                 ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
                 ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
                 
@@ -3248,16 +3248,27 @@ class Visualizer:
                         event_data_gwl = results['data'].get(gwl, {}).get(half_year, {}).get(storyline, {}).get(event_key)
                         
                         # --- START: MODIFIZIERTE ANNOTATION ---
-                        if event_data_gwl and 'model_count_X' in event_data_gwl and 'model_count_Y' in event_data_gwl:
-                            X = event_data_gwl['model_count_X']
-                            Y = event_data_gwl['model_count_Y']
+                        # Explicitly handle MMM mapping if needed
+                        storyline_key = 'MMM' if storyline == 'Multi-Model Mean' else storyline
+                        
+                        # Fallback for MMM if not found directly
+                        data_source = results['data'].get(gwl, {}).get(half_year, {}).get(storyline_key, {}).get(event_key)
+                        if data_source is None and storyline == 'MMM': # Try direct 'MMM' key if 'Multi-Model Mean' failed
+                             data_source = results['data'].get(gwl, {}).get(half_year, {}).get('MMM', {}).get(event_key)
+
+                        if data_source and 'model_count_X' in data_source and 'model_count_Y' in data_source:
+                            X = data_source['model_count_X']
+                            Y = data_source['model_count_Y']
                             
                             text_to_display = f"n={X}/{Y}"
+                            
+                            # Ensure color exists
+                            text_color = gwl_colors.get(gwl_label, 'black')
                             
                             ax.text(0.98, y_base + y_offset, text_to_display, 
                                     transform=ax.get_yaxis_transform(), 
                                     horizontalalignment='right', fontsize=7, weight='bold', 
-                                    color=gwl_colors[gwl_label],
+                                    color=text_color,
                                     bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
                         # --- ENDE: MODIFIZIERTE ANNOTATION ---
         
@@ -3277,11 +3288,8 @@ class Visualizer:
                 
                 for row in [0, 1, 2]:
                     if col < axs.shape[1]: 
-                        axs[row, col].set_xlim(left=final_min_lim_low, right=final_max_lim_low)
-                        if final_max_lim_low <= 50: axs[row, col].set_xticks([1, 2, 5, 10, 20, 50])
-                        elif final_max_lim_low <= 200: axs[row, col].set_xticks([1, 5, 10, 20, 50, 100, 200])
-                        elif final_max_lim_low <= 1000: axs[row, col].set_xticks([1, 10, 50, 100, 200, 500, 1000])
-                        else: axs[row, col].set_xticks([1, 10, 100, 1000, 10000]) 
+                        axs[row, col].set_xlim(left=0, right=35)
+                        if True: pass # axs[row, col].set_xticks([1, 2, 5, 10, 20, 50]) 
 
         for col, limits_list in column_x_limits_highflow.items():
             if limits_list: 
@@ -3290,11 +3298,8 @@ class Visualizer:
                 
                 for row in [3, 4, 5]:
                      if col < axs.shape[1]:
-                        axs[row, col].set_xlim(left=final_min_lim_high, right=final_max_lim_high)
-                        if final_max_lim_high <= 50: axs[row, col].set_xticks([1, 2, 5, 10, 20, 50])
-                        elif final_max_lim_high <= 200: axs[row, col].set_xticks([1, 5, 10, 20, 50, 100, 200])
-                        elif final_max_lim_high <= 1000: axs[row, col].set_xticks([1, 10, 50, 100, 200, 500, 1000])
-                        else: axs[row, col].set_xticks([1, 10, 100, 1000, 10000]) 
+                        axs[row, col].set_xlim(left=0, right=35)
+                        if True: pass # axs[row, col].set_xticks([1, 2, 5, 10, 20, 50]) 
 
         # --- 4. Final Figure Formatting ---
         legend_handles = [
@@ -4014,6 +4019,59 @@ class Visualizer:
                               order=storyline_display_order, palette=gwl_colors,
                               dodge=True, jitter=0.15, size=6, alpha=0.6, legend=False, orient='h')
                 
+                # --- NEW: N=X/Y Annotations ---
+                # We reuse 'storyline_display_order' (which matches the Y-axis order)
+                # and 'gwls_to_plot' to position the text.
+                y_ticks_pos = np.arange(len(storyline_display_order)) # 0..N-1
+                
+                for i, storyline_display in enumerate(storyline_display_order):
+                    # Map display name back to key if necessary, or check data
+                    # storyline_data_keys: ['MMM', 'Slow Jet...', ...]
+                    # storyline_display_order: ['Multi-Model Mean', 'Slow Jet...', ...]
+                    # Mapping: 'Multi-Model Mean' -> 'MMM'
+                    storyline_key = 'MMM' if storyline_display == 'Multi-Model Mean' else storyline_display
+                    
+                    y_base = y_ticks_pos[i]
+                    
+                    for j, gwl in enumerate(gwls_to_plot):
+                        gwl_label = f'+{gwl}°C GWL' # Match formatting in plotting loop
+                        # Calculate dodge offset (similar to seaborn's dodge)
+                        # Boxplot width=0.7. Dodge simply separates hues.
+                        # With 2 hues (+1.5, +2.0, +3.0) -> depends on N hues.
+                        # Approximate visual offset. 
+                        # seaborn boxplot default dodge: width / n_hues roughly?
+                        # Manual tuning: -0.2, 0, +0.2 approx
+                        n_hues = len(gwls_to_plot)
+                        offset_step = 0.5 / n_hues # approx
+                        y_offset = -0.15 + (j * 0.25) # Tuned offset
+                        
+                        try:
+                            event_data_gwl = return_period_results['data'][gwl][half_year][storyline_key][event_key]
+                            if event_data_gwl and 'model_count_X' in event_data_gwl and 'model_count_Y' in event_data_gwl:
+                                X = event_data_gwl['model_count_X']
+                                Y = event_data_gwl['model_count_Y']
+                                text_to_display = f"n={X}/{Y}"
+                                
+                                # Use ax transform or data coordinates?
+                                # Data coordinates for Y (y_base + y_offset), transform for X (right edge)
+                                # Actually, place it at the far right of the LEFT axis or on the RIGHT axis?
+                                # Place it on ax_right (extreme side) or ax_left?
+                                # User wants it visible. Broken axis makes this tricky.
+                                # Let's place it on the RIGHT axis (extreme end) if meaningful, 
+                                # OR just hardcode x-position on the plot.
+                                # For Figure 3, maybe put it near the right edge of 'ax_right'?
+                                target_ax = ax_right
+                                
+                                target_ax.text(0.98, y_base + y_offset, text_to_display, 
+                                        transform=target_ax.get_yaxis_transform(), 
+                                        horizontalalignment='right', verticalalignment='center',
+                                        fontsize=7, weight='bold', 
+                                        color=gwl_colors[gwl_label],
+                                        bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
+                        except Exception:
+                            pass
+                # --- END NEW: N=X/Y Annotations ---
+                
                 # MODIFIED: Remove seaborn's automatic Y-labels to prevent "Storyline" appearing on split
                 ax.set_ylabel('')
                 
@@ -4030,22 +4088,24 @@ class Visualizer:
 
             # --- AXIS LIMITS & SCALES ---
             # LEFT Axis (Normal Range)
-            ax_left.set_xscale('log')
-            ax_left.set_xlim(0.8, BREAK_POINT)
-            ax_left.set_xticks([1, 10, 100])
+            ax_left.set_xscale('linear')
+            # LEFT Axis (Normal Range)
+            ax_left.set_xscale('linear')
+            ax_left.set_xlim(0, 35) # Fixed limit 0-35 as requested
+            # ax_left.set_xticks([1, 10, 100])
             ax_left.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
             # Add minor ticks (2, 3, ... 9)
-            ax_left.xaxis.set_minor_locator(matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10), numticks=100))
+            # ax_left.xaxis.set_minor_locator(matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10), numticks=100))
             ax_left.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
             
             # RIGHT Axis (Extreme Range)
-            ax_right.set_xscale('log')
-            right_max = max(max_val_in_plot * 1.5, BREAK_POINT * 10)
+            ax_right.set_xscale('linear')
+            right_max = max(max_val_in_plot * 1.5, BREAK_POINT * 1.5) # Reduced multiplier for linear
             ax_right.set_xlim(BREAK_POINT, right_max)
-            ax_right.set_xticks([500, 1000, 5000, 10000])
+            # ax_right.set_xticks([500, 1000, 5000, 10000])
             ax_right.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
             # Add minor ticks
-            ax_right.xaxis.set_minor_locator(matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10), numticks=100))
+            # ax_right.xaxis.set_minor_locator(matplotlib.ticker.LogLocator(base=10.0, subs=np.arange(2, 10), numticks=100))
             ax_right.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
 
             # --- HIDE SPINES FOR BREAK EFFECT ---

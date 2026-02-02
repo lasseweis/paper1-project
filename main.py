@@ -746,7 +746,7 @@ class ClimateAnalysis:
                     logging.warning(f"DAILY QOBS historical discharge data not available for return period analysis in {scenario}.")
 
                 # Create the new plot if it's missing
-                if not os.path.exists(return_period_plot_filename):
+                if True or not os.path.exists(return_period_plot_filename):
                     if return_period_results_for_plot:
                         # --- THIS CALLS THE MODIFIED FUNCTION ---
                         Visualizer.plot_storyline_return_period_half_year(return_period_results_for_plot, Config(), scenario=scenario)
@@ -758,7 +758,7 @@ class ClimateAnalysis:
                 # --- PLOT: Figure 3 (Core Finding GEV Panel) ---
                 if return_period_results_for_plot:
                      fig3_filename = os.path.join(Config.PLOT_DIR, f"Figure3_core_finding_regime_shift_{scenario}.png")
-                     if not os.path.exists(fig3_filename):
+                     if True or not os.path.exists(fig3_filename):
                          Visualizer.plot_core_finding_gev_panel(return_period_results_for_plot, Config(), scenario)
                      else:
                          logging.info(f"Figure 3 '{fig3_filename}' already exists.")
@@ -797,7 +797,7 @@ class ClimateAnalysis:
                              for k in keys_winter:
                                  threshold_data_for_plot[k] = winter_events_old_struct
                              for k in keys_summer:
-                                 threshold_data_for_plot[k] = summer_events_old_struct
+                                 threshold_data_for_plot[k] = summer_events_old_struct = map_events_to_old_struct(summer_events)
 
                         if threshold_data_for_plot: # Only plot if thresholds are available
                             Visualizer.plot_storyline_impact_barchart_with_discharge(
@@ -869,7 +869,7 @@ class ClimateAnalysis:
                 erl_fig4_filename = os.path.join(Config.PLOT_DIR, f"Figure4_impact_navigation_lnwl_{scenario}.png") # NEW
                 
                 # Check if we need to calculate (either big comparison OR Fig 4 missing)
-                if not os.path.exists(lnwl_agg_plot_filename) or not os.path.exists(erl_fig4_filename):
+                if True or not os.path.exists(lnwl_agg_plot_filename) or not os.path.exists(erl_fig4_filename):
                     logging.info(f"Calculating LNWL aggregation data...")
                     
                     # Hole die TÄGLICHEN QOBS-Daten (am Anfang von run_full_analysis geladen)
@@ -889,7 +889,7 @@ class ClimateAnalysis:
                         
                         if lnwl_agg_results_for_plot:
                             # 1. Erstelle den großen Vergleichs-Plot (falls nicht existent)
-                            if not os.path.exists(lnwl_agg_plot_filename):
+                            if True or not os.path.exists(lnwl_agg_plot_filename):
                                 Visualizer.plot_storyline_lnwl_aggregation_comparison(
                                     lnwl_agg_results_for_plot, 
                                     Config(), 
@@ -898,7 +898,7 @@ class ClimateAnalysis:
                                 )
                             
                             # 2. Erstelle ERL Figure 4
-                            if not os.path.exists(erl_fig4_filename):
+                            if True or not os.path.exists(erl_fig4_filename):
                                 Visualizer.plot_erl_figure4_lnwl_summary(
                                     lnwl_agg_results_for_plot,
                                     Config(),

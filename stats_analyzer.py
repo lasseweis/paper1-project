@@ -12,8 +12,7 @@ import logging
 import traceback
 from scipy.stats import linregress
 import statsmodels.api as sm
-import lmoments3 as lm  
-from lmoments3 import distr
+
 
 class StatsAnalyzer:
     """A collection of statistical analysis utilities."""
@@ -366,48 +365,21 @@ class StatsAnalyzer:
                 logging.warning(f"Skipping {q}Q analysis for {eva_type} ({half_year_filter}): Only {len(clean_extremes)} valid years. (Need > 20 for robust fit)")
                 continue
 
-            # --- START: GEV FIT METHOD (Priority) ---
-            try:
-                logging.info(f"Calculating EVA thresholds for {q}Q ({eva_type}, {half_year_filter or 'full_year'}) using GEV-Fit (L-Moments)...")
+            # --- EMPIRICAL QUANTILE METHOD (User Request: No GEV) ---
+            logging.info(f"Calculating EVA thresholds for {q}Q ({eva_type}, {half_year_filter or 'full_year'}) using Empirical Quantiles...")
+            
+            for T in return_periods:
+                if eva_type == 'low':
+                    prob = 1.0 / T
+                    quantile_to_find = prob
+                else: # 'high'
+                    prob = 1.0 / T
+                    quantile_to_find = 1.0 - prob
                 
-                # Fit GEV distribution using L-moments
-                # === KORRIGIERTE ZEILE (v4.3) ===
-                params = distr.gev.lmom_fit(clean_extremes) 
-                # === ENDE KORREKTUR ===
-                dist_gev = distr.gev(**params) # Renamed to avoid conflict
-
-                for T in return_periods:
-                    if eva_type == 'low':
-                        prob = 1.0 / T
-                        quantile_to_find = prob
-                    else: # 'high'
-                        prob = 1.0 / T
-                        quantile_to_find = 1.0 - prob
-                    
-                    # Calculate threshold from the fitted distribution (Percent Point Function)
-                    discharge_val = dist_gev.ppf(quantile_to_find)
-                    
-                    key = f'{q}Q{T}'
-                    thresholds_m3s[key] = discharge_val
-
-            # --- FALLBACK: QUANTILE METHOD ---
-            except Exception as e_gev:
-                # Loggen den *tatsächlichen* Fehler
-                logging.warning(f"GEV fit failed for {q}Q ({eva_type}, {half_year_filter or 'full_year'}): {e_gev}. FALLING BACK to empirical quantile method.")
+                discharge_val = np.quantile(clean_extremes, quantile_to_find, interpolation='linear')
                 
-                for T in return_periods:
-                    if eva_type == 'low':
-                        prob = 1.0 / T
-                        quantile_to_find = prob
-                    else: # 'high'
-                        prob = 1.0 / T
-                        quantile_to_find = 1.0 - prob
-                    
-                    discharge_val = np.quantile(clean_extremes, quantile_to_find, interpolation='linear')
-                    
-                    key = f'{q}Q{T}'
-                    thresholds_m3s[key] = discharge_val
-            # --- ENDE: FALLBACK ---
+                key = f'{q}Q{T}'
+                thresholds_m3s[key] = discharge_val
                 
         return thresholds_m3s
 

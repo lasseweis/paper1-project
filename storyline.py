@@ -18,8 +18,7 @@ import pandas as pd
 import logging
 import os
 import json
-import lmoments3 as lm
-from lmoments3 import distr
+
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from scipy.stats import chi2
 
@@ -434,6 +433,41 @@ class StorylineAnalyzer:
                 if discharge_seas is not None:
                     # This line is for the original seasonal discharge
                     metric_timeseries[key][f'{s_label}_discharge'] = DataProcessor.filter_by_season(discharge_seas, season)
+            
+            # --- START: NEW Annual Metrics ---
+            # Calculate Annual Means (using season_year to align with other metrics)
+            da_tas_ann = DataProcessor.assign_season_to_dataarray(data['tas'])
+            metric_timeseries[key]['Annual_tas'] = DataProcessor.calculate_spatial_mean(
+                da_tas_ann.groupby('season_year').mean('time'), *box_coords
+            )
+
+            da_pr_ann = DataProcessor.assign_season_to_dataarray(data['pr'])
+            metric_timeseries[key]['Annual_pr'] = DataProcessor.calculate_spatial_mean(
+                da_pr_ann.groupby('season_year').mean('time'), *box_coords
+            )
+
+            if discharge_monthly_full is not None:
+                # discharge_monthly_full already has season_year from assign_season_to_dataarray earlier
+                metric_timeseries[key]['Annual_discharge'] = discharge_monthly_full.groupby('season_year').mean('time')
+            
+            # Calculate Annual SPEI (mean of monthly SPEI)
+            # Need to re-calculate SPEI here if not already available, or use the da_pr/da_tas data
+            # NOTE: We can't reuse the seasonal SPEI logic directly, need a full time series
+            if 'pr' in data and 'tas' in data:
+                 pr_box_full = DataProcessor.calculate_spatial_mean(data['pr'], *box_coords)
+                 tas_box_full = DataProcessor.calculate_spatial_mean(data['tas'], *box_coords)
+                 if pr_box_full is not None and tas_box_full is not None:
+                     # Align time
+                     common_time = np.intersect1d(pr_box_full.time, tas_box_full.time)
+                     pr_box_full = pr_box_full.sel(time=common_time)
+                     tas_box_full = tas_box_full.sel(time=common_time)
+
+                     lat_center = (box_coords[0] + box_coords[1]) / 2
+                     spei_full = DataProcessor.calculate_spei(pr_box_full, tas_box_full, lat=lat_center, scale=4)
+                     if spei_full is not None:
+                         da_spei_ann = DataProcessor.assign_season_to_dataarray(spei_full)
+                         metric_timeseries[key]['Annual_spei'] = da_spei_ann.groupby('season_year').mean('time')
+            # --- END: NEW Annual Metrics ---
 
         # Step 4: Calculate absolute metric values at historical reference and at each GWL
         metrics_list = list(metric_timeseries.get(next(iter(metric_timeseries)), {}).keys())
@@ -573,8 +607,8 @@ class StorylineAnalyzer:
             logging.info(f"\n  Processing Impacts for GWL +{gwl}°C...")
             
             # Initialisiere die Dictionaries für diese GWL-Stufe
-            for season in ['DJF', 'JJA']:
-                for var in impact_vars_to_process:
+            for season in ['DJF', 'JJA', 'Annual']:
+                for var in ['tas', 'pr', 'spei', 'discharge']:
                     final_impacts[gwl][f'{season}_{var}'] = {}
 
             # Gehe durch die klassifizierten Storylines für diese GWL-Stufe
@@ -582,25 +616,53 @@ class StorylineAnalyzer:
                 if not model_list:
                     continue # Überspringe leere Storylines
                 
-                season = 'DJF' if 'DJF' in storyline_key else 'JJA'
-                storyline_name = storyline_key.replace(f'{season}_', '')
+                # Determine season from storyline key or default to current loop season context?
+                # The storyline_key is like 'DJF_MMM', 'JJA_Fast Jet...'
+                # We need to calculate impacts for ALL seasons (DJF, JJA, Annual) for EACH storyline group.
+                # BUT: Storylines are season-specific groupings. 'DJF_MMM' is a group of models defined by their DJF behavior.
+                # Does it make sense to calculate 'Annual_tas' for the 'DJF_MMM' group?
+                # YES, typically "What is the annual impact for models that act this way in Winter?" is a valid question.
+                # HOWEVER, for the "MMM" column in the plot, we usually want the "Annual" change of the "Annual MMM" (which is just the mean of all models for Annual).
+                #
+                # My 'MMM' storyline in 'classify_models_into_storylines_2d' contains ALL models (common_models).
+                # So 'DJF_MMM' has all models, and 'JJA_MMM' has all models. They should be identical lists if the model intersection logic is consistent.
                 
-                # Berechne die mittleren Auswirkungen für jede Variable
-                for var in impact_vars_to_process:
-                    impact_key = f'{season}_{var}'
-                    
-                    # Sammle die Delta-Werte der Modelle in dieser Storyline
-                    model_deltas_for_impact = []
-                    for model_run_key in model_list:
-                        delta_val = all_deltas.get(impact_key, {}).get(gwl, {}).get(model_run_key)
-                        if delta_val is not None and np.isfinite(delta_val):
-                            model_deltas_for_impact.append(delta_val)
-                    
-                    if model_deltas_for_impact:
-                        # Berechne den Mittelwert und speichere ihn
-                        mean_impact = np.mean(model_deltas_for_impact)
-                        final_impacts[gwl][impact_key][storyline_name] = {'total': mean_impact}
-                        logging.info(f"      -> {storyline_name:<28} ({impact_key}): Mean Impact = {mean_impact:+.2f} (from {len(model_deltas_for_impact)} models)")
+                # We iterate through storylines. 
+                # If we are processing 'DJF_MMM', we can calculate 'DJF_tas', 'DJF_pr', etc.
+                # Can we also calculate 'Annual_tas' for 'DJF_MMM'? Yes.
+                
+                storyline_season_prefix = 'DJF' if 'DJF' in storyline_key else 'JJA'
+                storyline_name_only = storyline_key.replace(f'{storyline_season_prefix}_', '')
+
+                # Extend the loop to include Annual
+                seasons_to_calc = [storyline_season_prefix, 'Annual']
+
+                for target_season in seasons_to_calc:
+                    for var in ['tas', 'pr', 'spei', 'discharge']:
+                        impact_key = f'{target_season}_{var}'
+                        
+                        # Fix for Annual: The impact_key 'Annual_tas' exists in all_deltas?
+                        # Yes, we added it in Step 3.
+                        
+                        # Sammle die Delta-Werte der Modelle in dieser Storyline
+                        model_deltas_for_impact = []
+                        for model_run_key in model_list:
+                             delta_val = all_deltas.get(impact_key, {}).get(gwl, {}).get(model_run_key)
+                             if delta_val is not None and np.isfinite(delta_val):
+                                 model_deltas_for_impact.append(delta_val)
+                        
+                        if model_deltas_for_impact:
+                             mean_impact = np.mean(model_deltas_for_impact)
+                             # Store it. Note: This might overwrite if 'DJF_MMM' and 'JJA_MMM' both calculate 'Annual_tas'.
+                             # That's fine if they are the same set of models.
+                             # If they differ slightly, we might want to be careful.
+                             # But usually MMM is calculated from the same set.
+                             
+                             if impact_key not in final_impacts[gwl]:
+                                 final_impacts[gwl][impact_key] = {}
+                                 
+                             final_impacts[gwl][impact_key][storyline_name_only] = {'total': mean_impact}
+                             # logging.info(f"      -> {storyline_name_only:<28} ({impact_key}): Mean = {mean_impact:+.2f}")
 
         return {gwl: impacts for gwl, impacts in final_impacts.items() if impacts}
     
@@ -2145,18 +2207,14 @@ class StorylineAnalyzer:
             # 7Q Events
             ('7Q10_low', '7Q_low', 7, 10, 'low', 'Low-Flow (7Q10)'),
             ('7Q30_low', '7Q_low', 7, 30, 'low', 'Low-Flow (7Q30)'), 
-            ('7Q50_low', '7Q_low', 7, 50, 'low', 'Low-Flow (7Q50)'),
             ('7Q10_high', '7Q_high', 7, 10, 'high', 'High-Flow (7Q10)'),
             ('7Q30_high', '7Q_high', 7, 30, 'high', 'High-Flow (7Q30)'),
-            ('7Q50_high', '7Q_high', 7, 50, 'high', 'High-Flow (7Q50)'),
             
             # 30Q Events
             ('30Q10_low', '30Q_low', 30, 10, 'low', 'Low-Flow (30Q10)'),
             ('30Q30_low', '30Q_low', 30, 30, 'low', 'Low-Flow (30Q30)'), 
-            ('30Q50_low', '30Q_low', 30, 50, 'low', 'Low-Flow (30Q50)'),
             ('30Q10_high', '30Q_high', 30, 10, 'high', 'High-Flow (30Q10)'),
             ('30Q30_high', '30Q_high', 30, 30, 'high', 'High-Flow (30Q30)'),
-            ('30Q50_high', '30Q_high', 30, 50, 'high', 'High-Flow (30Q50)'),
         ]
         
         lnwl_fixed_threshold = discharge_thresholds.get(f'winter_lowflow_lnwl')
@@ -2297,43 +2355,38 @@ class StorylineAnalyzer:
                                 continue # Require minimal data
 
                             try:
-                                # --- A. Calculate Historical Threshold (GEV fit on History) ---
-                                params_hist = distr.gev.lmom_fit(hist_slice.values)
-                                dist_hist = distr.gev(**params_hist)
-                                
-                                # Calculate Quantile for Target T (e.g. 100-year)
-                                # For Low Flow: T = 1/P -> P = 1/T. We want Value at CDF = 1/T.
-                                # For High Flow: T = 1/(1-P) -> 1-P = 1/T -> P = 1 - 1/T.
+                                # --- A. Calculate Historical Threshold (Empirical) ---
+                                # No GEV fit. Direct quantile from historical data.
                                 if eva_type == 'low':
                                     prob_target = 1.0 / target_T
-                                    model_threshold = dist_hist.ppf(prob_target)
+                                    model_threshold = np.quantile(hist_slice.values, prob_target, interpolation='linear')
                                 else:
                                     prob_target = 1.0 - (1.0 / target_T)
-                                    model_threshold = dist_hist.ppf(prob_target)
+                                    model_threshold = np.quantile(hist_slice.values, prob_target, interpolation='linear')
                                 
-                                # --- B. Calculate Future Return Period (GEV fit on Future) for that Threshold ---
-                                params_fut = distr.gev.lmom_fit(fut_slice.values)
-                                dist_fut = distr.gev(**params_fut)
+                                # --- B. FUTURE PERIOD (No Bootstrap) ---
+                                # Direct empirical count on the future slice
+                                fut_values = fut_slice.values
+                                n_fut = len(fut_values)
                                 
-                                future_prob = np.nan
+                                # Empirical Probability:
+                                # Count how many future years exceed (or fall below) the threshold.
                                 if eva_type == 'low':
                                     # Prob(X < Threshold)
-                                    future_prob = dist_fut.cdf(model_threshold)
+                                    count_exceed = (fut_values < model_threshold).sum()
                                 else:
-                                    # Prob(X > Threshold) = 1 - CDF
-                                    future_prob = 1.0 - dist_fut.cdf(model_threshold)
+                                    # Prob(X > Threshold)
+                                    count_exceed = (fut_values > model_threshold).sum()
                                 
-                                # Convert Probability to Return Period
+                                future_prob = count_exceed / n_fut
+                                
                                 if future_prob > 1e-6:
-                                    future_T = 1.0 / future_prob
-                                else:
-                                    future_T = 10000.0 # Cap at very large values implies "never happens"
-                                
-                                model_return_periods_future.append(future_T)
-                                valid_models_count += 1
+                                    T_future = 1.0 / future_prob
+                                    model_return_periods_future.append(T_future)
+                                    valid_models_count += 1
+                                # else: Event did not occur, excluded from return periods
                                 
                             except Exception as e:
-                                # logging.warning(f"Failed GEV for model {model_run_key}: {e}")
                                 continue
 
                         # 4. Aggregate Results (Median)
@@ -3031,19 +3084,39 @@ class StorylineAnalyzer:
                             annual_minima_ts_future = future_annual_minima.get(metric_key_base)
 
                             if annual_minima_ts_future is not None and annual_minima_ts_future.year.size > 0:
-                                total_future_years = annual_minima_ts_future.year.size
-                                future_event_count = (annual_minima_ts_future < lnwl_threshold).sum().item()
+                                # --- NEW LOGIC: Empirical Probability (No GEV, No Bootstrap) ---
+                                fut_values = annual_minima_ts_future.values
+                                n_fut = len(fut_values)
                                 
-                                future_freq = future_event_count / total_future_years
-                                future_return_period = 1 / future_freq if future_freq > 0 else np.inf
-                                model_return_periods.append(future_return_period)
+                                # Count exceedances (Low Flow: X < threshold)
+                                count_exceed = (fut_values < lnwl_threshold).sum()
+                                
+                                # Probability = n_exceed / n_years
+                                future_prob = count_exceed / n_fut
+                                
+                                # Return Period T = 1 / P
+                                if future_prob > 1e-6:
+                                    T_future = 1.0 / future_prob
+                                    model_return_periods.append(T_future)
+                                # else: Event did not occur, excluded
+                                # --- END NEW LOGIC ---
                         
                         if model_return_periods:
                             finite_periods = [p for p in model_return_periods if np.isfinite(p)]
                             X_finite_models = len(finite_periods)
+                            
+                            # Calculate Statistics matching other plots
+                            result_median = np.median(finite_periods) if finite_periods else np.nan
+                            result_mean = np.mean(finite_periods) if finite_periods else np.nan
+                            ci_low = np.percentile(finite_periods, 2.5) if len(finite_periods) > 1 else np.nan
+                            ci_high = np.percentile(finite_periods, 97.5) if len(finite_periods) > 1 else np.nan
+                            
                             storyline_results_storage[event_key] = {
                                 'future_return_periods_all_models': model_return_periods,
-                                'future_return_period_mean': np.mean(finite_periods) if finite_periods else np.inf,
+                                'future_return_period_mean': result_median, # Using Median as robust "center" for single-value consumers
+                                'future_return_period_median': result_median,
+                                'future_return_period_ci_low': ci_low,
+                                'future_return_period_ci_high': ci_high,
                                 'model_count_X': X_finite_models,
                                 'model_count_Y': Y_total_in_storyline
                             }

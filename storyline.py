@@ -2299,6 +2299,132 @@ class StorylineAnalyzer:
         HIST_START_YEAR = 1960
         HIST_END_YEAR = 2014
         
+        # --- 4. NEW: Verify Historical Seasonal Breakdown (Reference: Annual Threshold) ---
+        logging.info("Calculating historical seasonal breakdown for verification (Hydrological Half-Years: Nov-Apr, May-Oct)...")
+        historical_verification = {}
+        
+        # Access detailed model data (daily discharge) directly
+        cmip6_model_data = cmip6_results.get('cmip6_model_data_loaded', {})
+        all_models_runs = list(cmip6_model_data.keys())
+
+        for event_params in eva_events_to_analyze:
+             event_key = event_params[0]
+             metric_key_base = event_params[1]
+             # q_days = event_params[2] 
+             target_T = event_params[3]
+             eva_type = event_params[4]
+             
+             if target_T is None: continue
+
+             winter_periods = []
+             summer_periods = []
+             
+             for model_key in all_models_runs:
+                 # 1. Get Daily Data
+                 da_daily = cmip6_model_data.get(model_key, {}).get('discharge')
+                 if da_daily is None: continue
+                 
+                 # Only use historical period
+                 hist_daily = da_daily.sel(time=slice(str(HIST_START_YEAR), str(HIST_END_YEAR)))
+                 if hist_daily.time.size == 0: continue
+
+                 # 2. Calc Annual Threshold (Referenz)
+                 # Wir aggregieren jährlich (nach Wasserjahr oder Kalenderjahr ist hier zweitrangig für das globale Perzentil, 
+                 # solange es konsistent ist. Wir nehmen hier Kalenderjahr um nah am existierenden Code zu bleiben).
+                 # Für 7Q oder 30Q bilden wir den gleitenden Mittelwert.
+                 q_days = event_params[2]
+                 if q_days > 1:
+                     hist_daily_rolled = hist_daily.rolling(time=q_days, center=True).mean().dropna(dim='time')
+                 else:
+                     hist_daily_rolled = hist_daily
+                 
+                 # Jahresserien der Extreme
+                 if eva_type == 'low':
+                     annual_extremes = hist_daily_rolled.groupby('time.year').min(dim='time')
+                 else: # high
+                     annual_extremes = hist_daily_rolled.groupby('time.year').max(dim='time')
+                 
+                 if annual_extremes.year.size < 20: continue
+                 
+                 try:
+                     # Berechne den Annual Threshold
+                     if eva_type == 'low':
+                        thresh = np.quantile(annual_extremes.values, 1.0/target_T, interpolation='linear')
+                     else:
+                        thresh = np.quantile(annual_extremes.values, 1.0 - 1.0/target_T, interpolation='linear')
+                        
+                     # 3. Check Seasonal Recurrence (Hydrological Half-Years)
+                     
+                     # --- Winter Half-Year (Nov-Apr) ---
+                     # Wir selektieren Monate 11,12,1,2,3,4
+                     winter_mask = hist_daily_rolled.time.dt.month.isin([11, 12, 1, 2, 3, 4])
+                     winter_daily = hist_daily_rolled.sel(time=winter_mask)
+                     # Gruppiere nach 'hydrologischem Jahr' für Winter? 
+                     # Vereinfachung: Wir nehmen einfach alle Winter-Werte und schauen, wie oft das Jahres-Extrem unterschritten wird?
+                     # Nein, wir brauchen Jährlichkeiten. Also müssen wir auch hier jährliche Winter-Extreme bilden.
+                     # Trick: Shift um +2 Monate, dann ist Nov(11) -> Jan(1) des nächsten Jahres. 
+                     # Dann gruppieren nach time.year.
+                     winter_shifted = winter_daily.assign_coords(year_shifted=winter_daily.time.dt.year + (winter_daily.time.dt.month >= 11).astype(int))
+                     # Aber wir können auch einfach .resample(time='AS-NOV') nutzen oder manuell gruppieren.
+                     
+                     # Einfacherer Ansatz: Wir iterieren über die Jahre
+                     winter_extremes_list = []
+                     summer_extremes_list = []
+                     
+                     years = range(HIST_START_YEAR, HIST_END_YEAR + 1)
+                     for y in years:
+                         # Winter: Nov (y-1) bis Apr (y)
+                         t_start_win = f"{y-1}-11-01"
+                         t_end_win = f"{y}-04-30"
+                         # Summer: May (y) bis Oct (y)
+                         t_start_sum = f"{y}-05-01"
+                         t_end_sum = f"{y}-10-31"
+                         
+                         # Winter Cut
+                         try:
+                             win_slice = hist_daily_rolled.sel(time=slice(t_start_win, t_end_win))
+                             if win_slice.time.size > 150: # Genügend Daten (ca. 6 Monate)
+                                 val = win_slice.min().item() if eva_type == 'low' else win_slice.max().item()
+                                 winter_extremes_list.append(val)
+                         except: pass
+
+                         # Summer Cut
+                         try:
+                             sum_slice = hist_daily_rolled.sel(time=slice(t_start_sum, t_end_sum))
+                             if sum_slice.time.size > 150:
+                                 val = sum_slice.min().item() if eva_type == 'low' else sum_slice.max().item()
+                                 summer_extremes_list.append(val)
+                         except: pass
+
+                     winter_extremes = np.array(winter_extremes_list)
+                     summer_extremes = np.array(summer_extremes_list)
+
+                     # Berechne Wahrscheinlichkeit im Halbjahr
+                     if len(winter_extremes) > 10:
+                        count_win = (winter_extremes < thresh).sum() if eva_type == 'low' else (winter_extremes > thresh).sum()
+                        prob_win = count_win / len(winter_extremes)
+                        T_win = 1.0/prob_win if prob_win > 1e-6 else np.nan
+                        winter_periods.append(T_win)
+
+                     if len(summer_extremes) > 10:
+                        count_sum = (summer_extremes < thresh).sum() if eva_type == 'low' else (summer_extremes > thresh).sum()
+                        prob_sum = count_sum / len(summer_extremes)
+                        T_sum = 1.0/prob_sum if prob_sum > 1e-6 else np.nan
+                        summer_periods.append(T_sum)
+
+                 except Exception:
+                     continue
+
+             # Aggregate
+             historical_verification[event_key] = {
+                 'winter_periods': winter_periods,
+                 'summer_periods': summer_periods,
+                 'target_T': target_T,
+                 'type': eva_type
+             }
+        
+        results['historical_verification'] = historical_verification
+
         for gwl in config.GLOBAL_WARMING_LEVELS:
             results['data'][gwl] = {'winter': {}, 'summer': {}, 'full_year': {}}
             
@@ -2337,45 +2463,49 @@ class StorylineAnalyzer:
                         logging.info(f"  Analyzing {event_key} for {storyline_name} ({half_year}, GWL {gwl})...")
 
                         for model_run_key in model_list:
-                            # 1. Get Data
-                            discharge_ts = metric_timeseries.get(model_run_key, {}).get(metric_key_to_use)
+                            # 1. Get Data (Seasonal for Future Analysis)
+                            discharge_ts_seasonal = metric_timeseries.get(model_run_key, {}).get(metric_key_to_use)
                             gwl_year = gwl_years.get(model_run_key, {}).get(gwl)
                             
-                            if discharge_ts is None or gwl_year is None: continue
+                            # 1b. Get Data (Annual for Threshold Calculation) - ALWAYS use full_year for reference
+                            metric_key_annual = f"{metric_key_base}_full_year"
+                            discharge_ts_annual = metric_timeseries.get(model_run_key, {}).get(metric_key_annual)
 
-                            # 2. Extract Historical Period (1960-2014)
-                            hist_slice = discharge_ts.sel(year=slice(HIST_START_YEAR, HIST_END_YEAR)).dropna(dim='year')
+                            if discharge_ts_seasonal is None or discharge_ts_annual is None or gwl_year is None: continue
+
+                            # 2. Extract Historical Period from ANNUAL Data (for Thresholds)
+                            hist_slice_annual = discharge_ts_annual.sel(year=slice(HIST_START_YEAR, HIST_END_YEAR)).dropna(dim='year')
                             
-                            # 3. Extract Future Period (GWL Window)
+                            # 3. Extract Future Period from SEASONAL Data (for Analysis)
                             start_year_fut = gwl_year - window // 2
                             end_year_fut = gwl_year + (window - 1) // 2
-                            fut_slice = discharge_ts.sel(year=slice(start_year_fut, end_year_fut)).dropna(dim='year')
+                            fut_slice_seasonal = discharge_ts_seasonal.sel(year=slice(start_year_fut, end_year_fut)).dropna(dim='year')
 
-                            if hist_slice.year.size < 20 or fut_slice.year.size < 20: 
+                            if hist_slice_annual.year.size < 20 or fut_slice_seasonal.year.size < 20: 
                                 continue # Require minimal data
 
                             try:
-                                # --- A. Calculate Historical Threshold (Empirical) ---
-                                # No GEV fit. Direct quantile from historical data.
+                                # --- A. Calculate Historical Threshold (Empirical from ANNUAL) ---
+                                # Use ANNUAL distribution to determine the 1-in-X year threshold
+                                # (User Request: "also wird als referenz ein wert genommen, der in der vergangenheit 1 mal jährlich alle 10 jahre vorkommt")
                                 if eva_type == 'low':
                                     prob_target = 1.0 / target_T
-                                    model_threshold = np.quantile(hist_slice.values, prob_target, interpolation='linear')
+                                    model_threshold = np.quantile(hist_slice_annual.values, prob_target, interpolation='linear')
                                 else:
                                     prob_target = 1.0 - (1.0 / target_T)
-                                    model_threshold = np.quantile(hist_slice.values, prob_target, interpolation='linear')
+                                    model_threshold = np.quantile(hist_slice_annual.values, prob_target, interpolation='linear')
                                 
-                                # --- B. FUTURE PERIOD (No Bootstrap) ---
-                                # Direct empirical count on the future slice
-                                fut_values = fut_slice.values
+                                # --- B. FUTURE PERIOD (Apply Annual Threshold to Seasonal Data) ---
+                                # Count how often the ANNUAL threshold is exceeded in the FUTURE SEASON
+                                fut_values = fut_slice_seasonal.values
                                 n_fut = len(fut_values)
                                 
                                 # Empirical Probability:
-                                # Count how many future years exceed (or fall below) the threshold.
                                 if eva_type == 'low':
-                                    # Prob(X < Threshold)
+                                    # Prob(X_season < Threshold_annual)
                                     count_exceed = (fut_values < model_threshold).sum()
                                 else:
-                                    # Prob(X > Threshold)
+                                    # Prob(X_season > Threshold_annual)
                                     count_exceed = (fut_values > model_threshold).sum()
                                 
                                 future_prob = count_exceed / n_fut

@@ -4509,3 +4509,202 @@ class Visualizer:
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved ERL Figure 4 to {filename}")
+
+    @staticmethod
+    def plot_historical_seasonal_verification(results, config, scenario):
+        """
+        Plots a bar chart verifying the seasonal return periods.
+        Row 1: Historical Verification (based on Annual Threshold).
+        Row 2+: Future Projections at GWLs (Annual Threshold vs Future Seasonal Distributions).
+        """
+        try:
+            if not results or 'historical_verification' not in results:
+                logging.warning("No historical verification data found.")
+                return
+
+            logging.info("Plotting seasonal verification bar chart (Historical + Future GWLs)...")
+            Visualizer.ensure_plot_dir_exists()
+            
+            hist_data = results['historical_verification']
+            future_data = results.get('data', {})
+            
+            # 1. Determine Structure (Rows = Hist + GWLs)
+            gwls = sorted([g for g in future_data.keys() if g in config.GLOBAL_WARMING_LEVELS])
+            n_rows = 1 + len(gwls) # Historical + each GWL
+            
+            # 2. Filter Keys (Exclude Q30 as per previous request)
+            low_keys = [k for k in sorted(hist_data.keys()) 
+                        if hist_data[k]['type'] == 'low' 
+                        and 'LNWL' not in k 
+                        and 'Q30' not in k]
+                        
+            high_keys = [k for k in sorted(hist_data.keys()) 
+                         if hist_data[k]['type'] == 'high'
+                         and 'Q30' not in k]
+            
+            # Setup Figure: Rows = Scenarios (Hist, +2C, +3C), Cols = Event Types (Low, High)
+            fig, axs = plt.subplots(n_rows, 2, figsize=(14, 5 * n_rows), squeeze=False)
+            
+            # Helper to get median
+            def get_median(lst):
+                clean = [x for x in lst if np.isfinite(x)]
+                if not clean: return np.nan
+                return np.median(clean)
+            
+            # --- LOOP THROUGH ROWS (Scenarios) ---
+            scenario_labels = ['Historical (1960-2014)'] + [f'Future GWL +{g}°C' for g in gwls]
+            
+            for r in range(n_rows):
+                is_hist = (r == 0)
+                current_gwl = gwls[r-1] if not is_hist else None
+                row_label = scenario_labels[r]
+                
+                # --- LOOP THROUGH COLS (Low/High) ---
+                for c, (keys, type_title) in enumerate([(low_keys, 'Low-Flow Events'), (high_keys, 'High-Flow Events')]):
+                    ax = axs[r, c]
+                    if not keys: 
+                        ax.set_visible(False)
+                        continue
+                    
+                    x = np.arange(len(keys))
+                    width = 0.25
+                    
+                    # --- PREPARE DATA ---
+                    annual_targets = []
+                    winter_periods = [] # List of LISTS (for points) or median
+                    summer_periods = [] 
+                    
+                    winter_medians = []
+                    summer_medians = []
+                    
+                    winter_counts = [] # tuples (X, Y)
+                    summer_counts = []
+                    
+                    for k in keys:
+                        # Target is always the definition (e.g. 10yr) which comes from historical analysis
+                        target_T = hist_data[k]['target_T']
+                        annual_targets.append(target_T)
+                        
+                        if is_hist:
+                            # HISTORICAL DATA
+                            w_vals = hist_data[k]['winter_periods']
+                            s_vals = hist_data[k]['summer_periods']
+                            
+                            winter_periods.append(w_vals)
+                            summer_periods.append(s_vals)
+                            winter_medians.append(get_median(w_vals))
+                            summer_medians.append(get_median(s_vals))
+                            
+                            winter_counts.append((len([x for x in w_vals if np.isfinite(x)]), len(w_vals)))
+                            summer_counts.append((len([x for x in s_vals if np.isfinite(x)]), len(s_vals)))
+                            
+                            w_color = Visualizer.GWL_COLORS[2.0] # Reuse blue
+                            s_color = '#ff7f0e'
+                            
+                        else:
+                            # FUTURE DATA (MMM)
+                            try:
+                                # Note: storyline.py outputs 'winter' and 'summer' keys in 'data' dictionary
+                                # See line 2429 in storyline.py: results['data'][gwl] = {'winter': {}, 'summer': {}, ...}
+                                w_data_node = future_data[current_gwl]['winter']['MMM'][k]
+                                w_vals = w_data_node['future_return_periods_all_models']
+                                winter_periods.append(w_vals)
+                                winter_medians.append(get_median(w_vals))
+                                winter_counts.append((w_data_node['model_count_X'], w_data_node['model_count_Y']))
+                            except (KeyError, TypeError) as e:
+                                # logging.warning(f"Missing Future Data [{current_gwl}][Winter][{k}]: {e}")
+                                winter_periods.append([])
+                                winter_medians.append(np.nan)
+                                winter_counts.append((0,0))
+
+                            try:
+                                s_data_node = future_data[current_gwl]['summer']['MMM'][k]
+                                s_vals = s_data_node['future_return_periods_all_models']
+                                summer_periods.append(s_vals)
+                                summer_medians.append(get_median(s_vals))
+                                summer_counts.append((s_data_node['model_count_X'], s_data_node['model_count_Y']))
+                            except (KeyError, TypeError) as e:
+                                # logging.warning(f"Missing Future Data [{current_gwl}][Summer][{k}]: {e}")
+                                summer_periods.append([])
+                                summer_medians.append(np.nan)
+                                summer_counts.append((0,0))
+                                
+                            w_color = Visualizer.GWL_COLORS[2.0]
+                            s_color = '#ff7f0e'
+
+                    # --- PLOT BARS ---
+                    # Reference Annual
+                    rects1 = ax.bar(x - width, annual_targets, width, label='Annual Target T', color='black', alpha=0.7)
+                    
+                    # Winter Median
+                    label_w = 'Winter Median T' if is_hist else f'Future Winter Median T (+{current_gwl}°C)' 
+                    rects2 = ax.bar(x, winter_medians, width, label=label_w, color=w_color, alpha=0.9 if is_hist else 0.7)
+                    
+                    # Summer Median
+                    label_s = 'Summer Median T' if is_hist else f'Future Summer Median T (+{current_gwl}°C)'
+                    rects3 = ax.bar(x + width, summer_medians, width, label=label_s, color=s_color, alpha=0.9 if is_hist else 0.7)
+                    
+                    # --- FORMATTING ---
+                    ax.set_ylabel('Return Period (Years)')
+                    ax.set_title(f'{row_label} - {type_title}', weight='bold')
+                    ax.set_xticks(x)
+                    ax.set_xticklabels(keys)
+                    ax.grid(axis='y', linestyle='--', alpha=0.5)
+                    
+                    # Legend (only nice to have on first row or managed globally?)
+                    # Individual subplot legends are useful here as labels change slightly
+                    ax.legend(loc='upper left', fontsize='small')
+
+                    # --- ANNOTATIONS ---
+                    def autolabel(rects, counts):
+                        for i, rect in enumerate(rects):
+                            height = rect.get_height()
+                            
+                            X, Y = 0, 0
+                            if i < len(counts):
+                                X, Y = counts[i]
+                            
+                            label_text = f'{height:.1f}'
+                            if Y > 0:
+                                label_text += f"\n(n={X}/{Y})"
+                            
+                            if np.isfinite(height):
+                                ax.annotate(label_text,
+                                            xy=(rect.get_x() + rect.get_width() / 2, height),
+                                            xytext=(0, 3), 
+                                            textcoords="offset points",
+                                            ha='center', va='bottom', rotation=90, fontsize=7)
+                            else:
+                                ax.annotate('Inf',
+                                            xy=(rect.get_x() + rect.get_width() / 2, 0),
+                                            xytext=(0, 3), 
+                                            textcoords="offset points",
+                                            ha='center', va='bottom', fontsize=7, color='red', rotation=90)
+
+                    autolabel(rects2, winter_counts)
+                    autolabel(rects3, summer_counts)
+                    
+                    # --- SCATTER POINTS ---
+                    for j, sub_vals in enumerate(winter_periods):
+                        clean = [v for v in sub_vals if np.isfinite(v)]
+                        if clean:
+                            jitter = np.random.uniform(-0.05, 0.05, size=len(clean))
+                            ax.scatter(np.full_like(clean, x[j]) + jitter, clean, 
+                                     color='navy', s=8, alpha=0.4, zorder=5, marker='o')
+
+                    for j, sub_vals in enumerate(summer_periods):
+                        clean = [v for v in sub_vals if np.isfinite(v)]
+                        if clean:
+                            jitter = np.random.uniform(-0.05, 0.05, size=len(clean))
+                            ax.scatter(np.full_like(clean, x[j] + width) + jitter, clean, 
+                                     color='brown', s=8, alpha=0.4, zorder=5, marker='o')
+
+            plt.tight_layout()
+            filename = os.path.join(config.PLOT_DIR, f'historical_seasonal_verification_{scenario}.png')
+            plt.savefig(filename, dpi=150)
+            plt.close(fig)
+            logging.info(f"Saved seasonal verification plot to {filename}")
+
+        except Exception as e:
+            logging.error(f"Failed to plot historical seasonal verification: {e}")
+            logging.exception("Traceback:")

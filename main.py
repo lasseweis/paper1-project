@@ -750,6 +750,9 @@ class ClimateAnalysis:
                     if return_period_results_for_plot:
                         # --- THIS CALLS THE MODIFIED FUNCTION ---
                         Visualizer.plot_storyline_return_period_half_year(return_period_results_for_plot, Config(), scenario=scenario)
+                        
+                        # --- NEW: VERIFICATION PLOT ---
+                        Visualizer.plot_historical_seasonal_verification(return_period_results_for_plot, Config(), scenario=scenario)
                     else:
                         logging.warning(f"Could not calculate return period results, skipping plot for {scenario}.")
                 else:

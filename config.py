@@ -70,6 +70,18 @@ class Config:
     CMIP6_VARIABLES_TO_LOAD = ['ua', 'pr', 'tas', 'discharge']
     CMIP6_GLOBAL_TAS_VAR = 'tas'
     CMIP6_LEVEL = 850  # For U850
+    
+    # Raw Data Path for Composite Analysis (Z500)
+    # Pattern: /data/reloclim/normal/CMIP6/ScenarioMIP/*/{model}/{scenario}/*/Amon/zg/*/*/zg_*.nc
+    CMIP6_RAW_ZG_PATH_PATTERN = '/data/reloclim/normal/CMIP6/ScenarioMIP/*/{model}/{scenario}/*/Amon/zg/*/*/zg_*.nc'
+    COMPOSITE_EVENT_KEY = '30Q10_low'
+    COMPOSITE_QUANTILE = 0.25
+
+    # Raw Data Path for Composite Analysis (PSL - Sea Level Pressure)
+    CMIP6_RAW_PSL_PATH_PATTERN = '/data/reloclim/normal/CMIP6/ScenarioMIP/*/{model}/{scenario}/*/Amon/psl/*/*/psl_*.nc'
+
+    # Raw Data Path for Composite Analysis (PR - Precipitation)
+    CMIP6_RAW_PR_PATH_PATTERN = '/data/reloclim/normal/CMIP6/ScenarioMIP/*/{model}/{scenario}/*/Amon/pr/*/*/pr_*.nc'
 
     # CMIP6 reference periods
     CMIP6_PRE_INDUSTRIAL_REF_START = 1850

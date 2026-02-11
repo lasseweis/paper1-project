@@ -766,6 +766,80 @@ class ClimateAnalysis:
                      else:
                          logging.info(f"Figure 3 '{fig3_filename}' already exists.")
 
+                # --- PLOT: Z500 Composite Analysis (Extreme vs Non-Extreme) ---
+                # Added Feb 2026
+                composite_event_key = Config.COMPOSITE_EVENT_KEY
+                composite_quantile = Config.COMPOSITE_QUANTILE
+                
+                # Check for 30Q30/30Q10 data availability first to avoid useless calls
+                # But calculate_z500... checks internally.
+                
+                for gwl in Config.GLOBAL_WARMING_LEVELS:
+                    composite_plot_filename = os.path.join(Config.PLOT_DIR, f"composite_analysis_z500_{composite_event_key}_{scenario}_gwl{gwl}.png")
+                    if not os.path.exists(composite_plot_filename):
+                        logging.info(f"Running Z500 composite analysis for GWL +{gwl}°C, Event {composite_event_key}...")
+                        result_tuple = storyline_analyzer.calculate_z500_composites_for_extremes(
+                            cmip6_results, gwl=gwl, event_key=composite_event_key, quantile=composite_quantile
+                        )
+                        if result_tuple:
+                            composite_results, model_lists, model_rps, n_total_models = result_tuple
+                            if composite_results:
+                                Visualizer.plot_z500_composite_analysis_panel(
+                                    composite_results, gwl, composite_event_key, scenario, 
+                                    model_rps, model_lists, n_total_models
+                                )
+                            else:
+                                logging.warning(f"Z500 composite analysis returned empty results for GWL {gwl}.")
+                        else:
+                            logging.warning(f"Z500 composite analysis returned no results for GWL {gwl}.")
+                    else:
+                        logging.info(f"Z500 composite plot for GWL {gwl} already exists.")
+
+                # --- PLOT: PSL Composite Analysis (Extreme vs Non-Extreme) ---
+                # Added Feb 2026 - Mirrors Z500 composite but for sea level pressure
+                for gwl in Config.GLOBAL_WARMING_LEVELS:
+                    psl_composite_plot_filename = os.path.join(Config.PLOT_DIR, f"composite_analysis_psl_{composite_event_key}_{scenario}_gwl{gwl}.png")
+                    if not os.path.exists(psl_composite_plot_filename):
+                        logging.info(f"Running PSL composite analysis for GWL +{gwl}°C, Event {composite_event_key}...")
+                        psl_result_tuple = storyline_analyzer.calculate_psl_composites_for_extremes(
+                            cmip6_results, gwl=gwl, event_key=composite_event_key, quantile=composite_quantile
+                        )
+                        if psl_result_tuple:
+                            psl_composite_results, psl_model_lists, psl_model_rps, psl_n_total_models = psl_result_tuple
+                            if psl_composite_results:
+                                Visualizer.plot_psl_composite_analysis_panel(
+                                    psl_composite_results, gwl, composite_event_key, scenario, 
+                                    psl_model_rps, psl_model_lists, psl_n_total_models
+                                )
+                            else:
+                                logging.warning(f"PSL composite analysis returned empty results for GWL {gwl}.")
+                        else:
+                            logging.warning(f"PSL composite analysis returned no results for GWL {gwl}.")
+                    else:
+                        logging.info(f"PSL composite plot for GWL {gwl} already exists.")
+
+                # --- PLOT: PR Composite Analysis (Extreme vs Non-Extreme) ---
+                # Added Feb 2026 - Mirrors Z500 composite but for precipitation
+                for gwl in Config.GLOBAL_WARMING_LEVELS:
+                    pr_composite_plot_filename = os.path.join(Config.PLOT_DIR, f"composite_analysis_pr_{composite_event_key}_{scenario}_gwl{gwl}.png")
+                    if not os.path.exists(pr_composite_plot_filename):
+                        logging.info(f"Running PR composite analysis for GWL +{gwl}°C, Event {composite_event_key}...")
+                        pr_result_tuple = storyline_analyzer.calculate_pr_composites_for_extremes(
+                            cmip6_results, gwl=gwl, event_key=composite_event_key, quantile=composite_quantile
+                        )
+                        if pr_result_tuple:
+                            pr_composite_results, pr_model_lists, pr_model_rps, pr_n_total_models = pr_result_tuple
+                            if pr_composite_results:
+                                Visualizer.plot_pr_composite_analysis_panel(
+                                    pr_composite_results, gwl, composite_event_key, scenario, 
+                                    pr_model_rps, pr_model_lists, pr_n_total_models
+                                )
+                            else:
+                                logging.warning(f"PR composite analysis returned empty results for GWL {gwl}.")
+                        else:
+                            logging.warning(f"PR composite analysis returned no results for GWL {gwl}.")
+                    else:
+                        logging.info(f"PR composite plot for GWL {gwl} already exists.")
 
                 # --- PLOT: Storyline Impacts Bar Chart (per scenario) ---
                 # (This block remains the same, but it uses the 'return_period_results_for_plot' calculated above)

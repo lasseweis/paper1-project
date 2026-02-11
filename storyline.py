@@ -3254,3 +3254,850 @@ class StorylineAnalyzer:
                     results['data'][gwl][half_year][storyline_name] = storyline_results_storage
 
         return results
+
+    def find_cmip6_z500_file(self, model, scenario):
+        """
+        Searches for the raw Z500 (zg) file for a given model and scenario.
+        Uses the pattern defined in Config.
+        """
+        search_pattern = self.config.CMIP6_RAW_ZG_PATH_PATTERN.format(model=model, scenario=scenario)
+        found_files = glob.glob(search_pattern)
+        
+        if not found_files:
+            return []
+            
+        # Filter files to ensure we get a consistent member if multiple exist.
+        # Simple heuristic: Group by directory (member) and pick the first one.
+        # This assumes files are stored like .../r1i1p1f1/...
+        
+        # 1. Group files by their parent directory
+        member_groups = {}
+        for f in found_files:
+            parent_dir = os.path.dirname(f)
+            if parent_dir not in member_groups:
+                member_groups[parent_dir] = []
+            member_groups[parent_dir].append(f)
+            
+        if not member_groups: return []
+            
+        # 2. Sort directories (to prioritize r1... over r2...)
+        sorted_dirs = sorted(member_groups.keys())
+        target_dir = sorted_dirs[0]
+        
+        # 3. Return all files in that directory (e.g. time chunks)
+        member_files = sorted(member_groups[target_dir])
+        return member_files
+
+    def _calculate_permutation_significance(self, da_group1, da_group2, n_permutations=1000):
+        """
+        Calculates significance map using a Permutation Test (Monte Carlo).
+        
+        Args:
+            da_group1 (xr.DataArray): Data for group 1 (e.g., Extreme), shape (N1, Lat, Lon)
+            da_group2 (xr.DataArray): Data for group 2 (e.g., Non-Extreme), shape (N2, Lat, Lon)
+            n_permutations (int): Number of random permutations
+            
+        Returns:
+            xr.DataArray: P-values map (Lat, Lon)
+        """
+        # Observed difference
+        obs_mean1 = da_group1.mean(dim='model')
+        obs_mean2 = da_group2.mean(dim='model')
+        obs_diff = obs_mean1 - obs_mean2
+        
+        # Combine groups
+        combined = xr.concat([da_group1, da_group2], dim='model')
+        n1 = da_group1.sizes['model']
+        n_total = combined.sizes['model']
+        
+        # Convert to numpy for faster iteration
+        # shape: (n_models, lat, lon)
+        combined_np = combined.values
+        obs_diff_np = obs_diff.values
+        
+        count_exceed = np.zeros(obs_diff_np.shape)
+        
+        for _ in range(n_permutations):
+            # Shuffle indices along the model axis
+            indices = np.random.permutation(n_total)
+            
+            # Split into two pseudo-groups
+            d1 = combined_np[indices[:n1]]
+            d2 = combined_np[indices[n1:]]
+            
+            # Compute means
+            m1 = np.mean(d1, axis=0)
+            m2 = np.mean(d2, axis=0)
+            perm_diff = m1 - m2
+            
+            # Two-sided test: check if absolute permutation difference >= absolute observed difference
+            count_exceed += (np.abs(perm_diff) >= np.abs(obs_diff_np))
+            
+        # P-value = (number of exceedances + 1) / (number of permutations + 1)
+        p_values = (count_exceed + 1) / (n_permutations + 1)
+        
+        # Convert back to DataArray with correct coordinates
+        p_values_da = xr.DataArray(p_values, coords=obs_diff.coords, dims=obs_diff.dims)
+        
+        return p_values_da
+
+    def calculate_z500_composites_for_extremes(self, cmip6_results, gwl, event_key='30Q10_low', quantile=0.20):
+        """
+        Calculates Z500 composites for 'Short Return Period' (Extreme) vs 'Long Return Period' (Non-Extreme) models.
+        """
+        logging.info(f"Calculating Z500 composites for event '{event_key}' at GWL +{gwl}°C (Top/Bottom {quantile*100:.0f}%)...")
+        
+        model_data_loaded = cmip6_results.get('cmip6_model_data_loaded')
+        metric_timeseries = cmip6_results.get('model_metric_timeseries')
+        gwl_years = cmip6_results.get('gwl_threshold_years')
+        window = self.config.GWL_YEARS_WINDOW
+        
+        if not all([model_data_loaded, metric_timeseries, gwl_years]):
+             logging.error("Missing inputs for Z500 composite analysis.")
+             return None
+        
+        # 1. Calculate Return Periods for ALL models
+        # We assume 'summer' season for Low Flow events as default (May-Oct)
+        selection_season = 'summer' 
+        
+        model_rps = {}
+        all_models = list(model_data_loaded.keys()) # Keys like 'Access-CM2_ssp585'
+        
+        for model_run_key in all_models:
+            q_metrics = metric_timeseries.get(model_run_key, {})
+            # DEBUG: Print keys for the first model to verify structure
+            if model_run_key == all_models[0]:
+                logging.info(f"[Z500 DEBUG] Keys for {model_run_key}: {list(q_metrics.keys())}")
+
+            # Map event_key back to metric base matching the dict keys
+            # Keys seen in log: '30Q_low_full_year', '30Q_high_full_year', etc.
+            if '30Q' in event_key: duration = '30Q'
+            elif '7Q' in event_key: duration = '7Q'
+            elif '1Q' in event_key: duration = '1Q'
+            else: duration = 'Q_daily' # Fallback
+            
+            metric_type = 'low' if 'low' in event_key else 'high'
+            
+            ts_annual_key = f"{duration}_{metric_type}_full_year"
+            ts_seasonal_key = f"{duration}_{metric_type}_{selection_season}"
+            
+            ts_annual = q_metrics.get(ts_annual_key)
+            ts_seasonal = q_metrics.get(ts_seasonal_key)
+            
+            if ts_annual is None or ts_seasonal is None: 
+                logging.info(f"[Z500 DEBUG] Missing TS for {model_run_key}. Looking for {ts_annual_key}, {ts_seasonal_key}")
+                continue
+            
+            # Historical Threshold from Annual Data (1960-2014)
+            hist_annual = ts_annual.sel(year=slice(1960, 2014)).dropna(dim='year')
+            if hist_annual.year.size < 20: 
+                logging.info(f"[Z500 DEBUG] Short history for {model_run_key}: {hist_annual.year.size} years")
+                continue
+            
+            try:
+                target_T = int(event_key.split('Q')[1].split('_')[0])
+            except:
+                target_T = 10 # Fallback
+                
+            if metric_type == 'low':
+                thresh = np.quantile(hist_annual.values, 1.0/target_T)
+            else:
+                thresh = np.quantile(hist_annual.values, 1.0 - 1.0/target_T)
+                
+            # Future T at GWL
+            gwl_year = gwl_years.get(model_run_key, {}).get(gwl)
+            if gwl_year is None: 
+                logging.info(f"[Z500 DEBUG] No GWL val for {model_run_key} at {gwl}")
+                continue
+            
+            start, end = gwl_year - window // 2, gwl_year + (window - 1) // 2
+            fut_seasonal = ts_seasonal.sel(year=slice(start, end)).dropna(dim='year')
+            if fut_seasonal.year.size < 10: 
+                logging.info(f"[Z500 DEBUG] Short future for {model_run_key}: {fut_seasonal.year.size} years (Window: {start}-{end})")
+                continue
+            
+            values = fut_seasonal.values
+            if metric_type == 'low':
+                count = (values < thresh).sum()
+            else:
+                count = (values > thresh).sum()
+                
+            prob = count / len(values)
+        
+            if prob > 1e-6:
+                T_fut = 1.0 / prob
+                model_rps[model_run_key] = T_fut
+            else:
+                # If prob is essentially 0 (no events), do NOT include in model_rps (matching Figure 3 logic)
+                # logging.info(f"    Skipping {model_run_key}: No events found in {window}-year window.") # Optional clogging
+                continue
+            
+        logging.info(f"  Calculated Return Periods for {len(model_rps)} models.")
+        
+        if len(model_rps) < 1: # CHANGED from 10 to 1 based on user feedback
+            logging.warning("Not enough models for composite analysis (<1).")
+            return None
+            
+        # 2. Sort and Select Top/Bottom
+        # Sort by Return Period
+        sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
+        
+        n_select = int(len(sorted_models) * quantile)
+        if n_select < 1: n_select = 1
+        
+        extreme_models = sorted_models[:n_select]     # Shortest T
+        non_extreme_models = sorted_models[-n_select:] # Longest T
+        
+        logging.info(f"  Extreme Models (Shortest T): {[m[0] for m in extreme_models]}")
+        logging.info(f"  Non-Extreme Models (Longest T): {[m[0] for m in non_extreme_models]}")
+        
+        # 3. Compute Composites
+        target_lat = np.arange(-90, 90.1, 2.5)
+        target_lon = np.arange(-180, 180, 2.5)
+        
+        composites = {}
+        
+        for season_label in ['Winter', 'Summer']:
+            months = [11, 12, 1, 2, 3, 4] if season_label == 'Winter' else [5, 6, 7, 8, 9, 10]
+            
+            def get_group_mean_map(model_list):
+                maps = []
+                used_models = []
+                for model_key, _ in model_list:
+                    model_name = model_key.split('_')[0]
+                    scenario = model_key.split('_')[1]
+                    
+                    files = self.find_cmip6_z500_file(model_name, scenario)
+                    if not files: 
+                         logging.warning(f"    Missing Z500 file for {model_key}")
+                         continue
+                        
+                    try:
+                        # Load Data (lazy)
+                        ds = xr.open_mfdataset(files, combine='nested', concat_dim='time', chunks={'time': 12}, parallel=False)
+                        
+                        # Preprocess
+                        var_name = 'zg' if 'zg' in ds else 'z'
+                        if var_name not in ds: continue
+                        da = ds[var_name]
+                        
+                        # Level Selection (500 hPa)
+                        if 'plev' in da.dims or 'level' in da.dims:
+                            lev_dim = 'plev' if 'plev' in da.dims else 'level'
+                            sel_val = 50000 if da[lev_dim].max() > 2000 else 500
+                            da = da.sel({lev_dim: sel_val}, method='nearest')
+                            
+                        # Rename coords
+                        rename_map = {'latitude': 'lat', 'longitude': 'lon'}
+                        final_rename = {k:v for k,v in rename_map.items() if k in da.dims}
+                        da = da.rename(final_rename)
+                        
+                        # Fix Longitude
+                        if da.lon.max() > 180:
+                            da = da.assign_coords(lon=(((da.lon + 180) % 360) - 180)).sortby('lon')
+                            
+                        # Time Selection (GWL)
+                        gwl_y = gwl_years.get(model_key, {}).get(gwl)
+                        s, e = gwl_y - window // 2, gwl_y + (window - 1) // 2
+                        try:
+                            # Try standard string slicing (fast, works for most)
+                            da_gwl = da.sel(time=slice(str(s), str(e)))
+                        except (TypeError, KeyError, ValueError):
+                            # Fallback for object-dtype indexes where string slicing fails
+                            # e.g., Mixed cftime/numpy types or generic object Index
+                            try:
+                                time_ref = da.time.values[0] 
+                                date_type = type(time_ref)
+                                
+                                # Construct start date
+                                start_conf = date_type(s, 1, 1)
+                                
+                                # Construct end date (handle 360_day vs others)
+                                try:
+                                    end_conf = date_type(e, 12, 31)
+                                except ValueError:
+                                    # Cftime 360_day has no 31st (likely 30 days)
+                                    end_conf = date_type(e, 12, 30)
+                                    
+                                da_gwl = da.sel(time=slice(start_conf, end_conf))
+                            except Exception as e_fallback:
+                                logging.error(f"    Fatal time slicing error for {model_key}: {e_fallback}")
+                                continue
+
+                        
+                        # Season Selection (robust for object-dtype time coords)
+                        try:
+                            month_mask = da_gwl.time.dt.month.isin(months)
+                        except AttributeError:
+                            # Fallback: extract months manually from cftime objects
+                            time_months = np.array([t.month for t in da_gwl.time.values])
+                            month_mask = xr.DataArray(np.isin(time_months, months), dims='time', coords={'time': da_gwl.time})
+                        da_seas = da_gwl.where(month_mask, drop=True)
+                        
+                        if da_seas.time.size == 0: continue
+
+                        # Calculate Zonal Anomaly of the Mean Pattern (Eddy Geopotential)
+                        # We want to see the wave pattern difference.
+                        mean_map = da_seas.mean(dim='time').compute()
+                        zonal_mean = mean_map.mean(dim='lon')
+                        anom_map = mean_map - zonal_mean
+                        
+                        # Interpolate to common grid
+                        anom_regrid = anom_map.interp(lat=target_lat, lon=target_lon, method='linear')
+                        
+                        maps.append(anom_regrid)
+                        used_models.append(model_key)
+                        ds.close()
+                        
+                    except Exception as e:
+                        logging.error(f"    Error processing Z500 for {model_key}: {e}")
+                        continue
+                        
+                if not maps: return None, None, []
+                
+                # Stack
+                concatenated = xr.concat(maps, dim='model')
+                composite_mean = concatenated.mean(dim='model')
+                
+                return composite_mean, concatenated, used_models
+                
+            mean_extreme, stack_extreme, used_extreme = get_group_mean_map(extreme_models)
+            mean_non_extreme, stack_non_extreme, used_non_extreme = get_group_mean_map(non_extreme_models)
+            
+            if mean_extreme is not None:
+                logging.info(f"  Extreme Models used in composite (N={len(used_extreme)}): {used_extreme}")
+            if mean_non_extreme is not None:
+                logging.info(f"  Non-Extreme Models used in composite (N={len(used_non_extreme)}): {used_non_extreme}")
+            
+            if mean_extreme is not None and mean_non_extreme is not None:
+                diff = mean_extreme - mean_non_extreme
+                
+                # Permutation Test (Robuster than Welch's t-test for small N)
+                # Call helper method to compute p-values via permutation
+                # This handles small sample sizes and avoids normality assumptions
+                p_values_da = self._calculate_permutation_significance(stack_extreme, stack_non_extreme, n_permutations=1000)
+                p_values = p_values_da.values # Use numpy array for compatibility with downstream plotting logic
+                sig_mask = p_values < 0.05
+                
+                composites[season_label] = {
+                    'extreme_mean': mean_extreme,
+                    'non_extreme_mean': mean_non_extreme,
+                    'diff': diff,
+                    'p_values': p_values,
+                    'sig_mask': sig_mask
+                }
+                
+        return composites, (extreme_models, non_extreme_models), model_rps, len(all_models)
+
+    def find_cmip6_psl_file(self, model, scenario):
+        """
+        Searches for the raw PSL (sea level pressure) file for a given model and scenario.
+        Uses the pattern defined in Config. Identical logic to find_cmip6_z500_file.
+        """
+        search_pattern = self.config.CMIP6_RAW_PSL_PATH_PATTERN.format(model=model, scenario=scenario)
+        found_files = glob.glob(search_pattern)
+        
+        if not found_files:
+            return []
+            
+        # Filter files to ensure we get a consistent member if multiple exist.
+        # Group by directory (member) and pick the first one.
+        member_groups = {}
+        for f in found_files:
+            parent_dir = os.path.dirname(f)
+            if parent_dir not in member_groups:
+                member_groups[parent_dir] = []
+            member_groups[parent_dir].append(f)
+            
+        if not member_groups: return []
+            
+        # Sort directories (to prioritize r1... over r2...)
+        sorted_dirs = sorted(member_groups.keys())
+        target_dir = sorted_dirs[0]
+        
+        # Return all files in that directory (e.g. time chunks)
+        member_files = sorted(member_groups[target_dir])
+        return member_files
+
+    def calculate_psl_composites_for_extremes(self, cmip6_results, gwl, event_key='30Q10_low', quantile=0.20):
+        """
+        Calculates PSL (sea level pressure) composites for 'Short Return Period' (Extreme) vs 'Long Return Period' (Non-Extreme) models.
+        Identical logic to calculate_z500_composites_for_extremes, but loading PSL data instead of Z500.
+        """
+        logging.info(f"Calculating PSL composites for event '{event_key}' at GWL +{gwl}°C (Top/Bottom {quantile*100:.0f}%)...")
+        
+        model_data_loaded = cmip6_results.get('cmip6_model_data_loaded')
+        metric_timeseries = cmip6_results.get('model_metric_timeseries')
+        gwl_years = cmip6_results.get('gwl_threshold_years')
+        window = self.config.GWL_YEARS_WINDOW
+        
+        if not all([model_data_loaded, metric_timeseries, gwl_years]):
+             logging.error("Missing inputs for PSL composite analysis.")
+             return None
+        
+        # 1. Calculate Return Periods for ALL models (identical to Z500)
+        selection_season = 'summer' 
+        
+        model_rps = {}
+        all_models = list(model_data_loaded.keys())
+        
+        for model_run_key in all_models:
+            q_metrics = metric_timeseries.get(model_run_key, {})
+            if model_run_key == all_models[0]:
+                logging.info(f"[PSL DEBUG] Keys for {model_run_key}: {list(q_metrics.keys())}")
+
+            if '30Q' in event_key: duration = '30Q'
+            elif '7Q' in event_key: duration = '7Q'
+            elif '1Q' in event_key: duration = '1Q'
+            else: duration = 'Q_daily'
+            
+            metric_type = 'low' if 'low' in event_key else 'high'
+            
+            ts_annual_key = f"{duration}_{metric_type}_full_year"
+            ts_seasonal_key = f"{duration}_{metric_type}_{selection_season}"
+            
+            ts_annual = q_metrics.get(ts_annual_key)
+            ts_seasonal = q_metrics.get(ts_seasonal_key)
+            
+            if ts_annual is None or ts_seasonal is None: 
+                continue
+            
+            hist_annual = ts_annual.sel(year=slice(1960, 2014)).dropna(dim='year')
+            if hist_annual.year.size < 20: 
+                continue
+            
+            try:
+                target_T = int(event_key.split('Q')[1].split('_')[0])
+            except:
+                target_T = 10
+                
+            if metric_type == 'low':
+                thresh = np.quantile(hist_annual.values, 1.0/target_T)
+            else:
+                thresh = np.quantile(hist_annual.values, 1.0 - 1.0/target_T)
+                
+            gwl_year = gwl_years.get(model_run_key, {}).get(gwl)
+            if gwl_year is None: 
+                continue
+            
+            start, end = gwl_year - window // 2, gwl_year + (window - 1) // 2
+            fut_seasonal = ts_seasonal.sel(year=slice(start, end)).dropna(dim='year')
+            if fut_seasonal.year.size < 10: 
+                continue
+            
+            values = fut_seasonal.values
+            if metric_type == 'low':
+                count = (values < thresh).sum()
+            else:
+                count = (values > thresh).sum()
+                
+            prob = count / len(values)
+        
+            if prob > 1e-6:
+                T_fut = 1.0 / prob
+                model_rps[model_run_key] = T_fut
+            else:
+                continue
+            
+        logging.info(f"  Calculated Return Periods for {len(model_rps)} models.")
+        
+        if len(model_rps) < 1:
+            logging.warning("Not enough models for PSL composite analysis (<1).")
+            return None
+            
+        # 2. Sort and Select Top/Bottom (identical to Z500)
+        sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
+        
+        n_select = int(len(sorted_models) * quantile)
+        if n_select < 1: n_select = 1
+        
+        extreme_models = sorted_models[:n_select]     # Shortest T
+        non_extreme_models = sorted_models[-n_select:] # Longest T
+        
+        logging.info(f"  PSL Extreme Models (Shortest T): {[m[0] for m in extreme_models]}")
+        logging.info(f"  PSL Non-Extreme Models (Longest T): {[m[0] for m in non_extreme_models]}")
+        
+        # 3. Compute Composites (adapted for PSL)
+        target_lat = np.arange(-90, 90.1, 2.5)
+        target_lon = np.arange(-180, 180, 2.5)
+        
+        composites = {}
+        
+        for season_label in ['Winter', 'Summer']:
+            months = [11, 12, 1, 2, 3, 4] if season_label == 'Winter' else [5, 6, 7, 8, 9, 10]
+            
+            def get_group_mean_map(model_list):
+                maps = []
+                used_models = []
+                for model_key, _ in model_list:
+                    # Use pattern-based PSL file lookup (same as Z500)
+                    model_name = model_key.split('_')[0]
+                    scenario = model_key.split('_')[1]
+                    
+                    files = self.find_cmip6_psl_file(model_name, scenario)
+                    if not files: 
+                         logging.warning(f"    Missing PSL file for {model_key}")
+                         continue
+                        
+                    try:
+                        ds = xr.open_mfdataset(files, combine='nested', concat_dim='time', chunks={'time': 12}, parallel=False)
+                        
+                        # PSL variable name
+                        if 'psl' in ds:
+                            da = ds['psl']
+                        elif 'PSL' in ds:
+                            da = ds['PSL']
+                        elif 'msl' in ds:
+                            da = ds['msl']
+                        else:
+                            logging.warning(f"    No PSL variable found in {model_key}")
+                            continue
+                        
+                        # PSL is a single-level variable, no pressure level selection needed
+                            
+                        # Rename coords
+                        rename_map = {'latitude': 'lat', 'longitude': 'lon'}
+                        final_rename = {k:v for k,v in rename_map.items() if k in da.dims}
+                        da = da.rename(final_rename)
+                        
+                        # Fix Longitude
+                        if da.lon.max() > 180:
+                            da = da.assign_coords(lon=(((da.lon + 180) % 360) - 180)).sortby('lon')
+                            
+                        # Time Selection (GWL)
+                        gwl_y = gwl_years.get(model_key, {}).get(gwl)
+                        s, e = gwl_y - window // 2, gwl_y + (window - 1) // 2
+                        try:
+                            da_gwl = da.sel(time=slice(str(s), str(e)))
+                        except (TypeError, KeyError, ValueError):
+                            try:
+                                time_ref = da.time.values[0] 
+                                date_type = type(time_ref)
+                                start_conf = date_type(s, 1, 1)
+                                try:
+                                    end_conf = date_type(e, 12, 31)
+                                except ValueError:
+                                    end_conf = date_type(e, 12, 30)
+                                da_gwl = da.sel(time=slice(start_conf, end_conf))
+                            except Exception as e_fallback:
+                                logging.error(f"    Fatal time slicing error for {model_key}: {e_fallback}")
+                                continue
+
+                        # Season Selection
+                        try:
+                            month_mask = da_gwl.time.dt.month.isin(months)
+                        except AttributeError:
+                            time_months = np.array([t.month for t in da_gwl.time.values])
+                            month_mask = xr.DataArray(np.isin(time_months, months), dims='time', coords={'time': da_gwl.time})
+                        da_seas = da_gwl.where(month_mask, drop=True)
+                        
+                        if da_seas.time.size == 0: continue
+
+                        # Calculate mean map and convert Pa -> hPa if needed
+                        mean_map = da_seas.mean(dim='time').compute()
+                        
+                        # Convert Pa to hPa if values suggest Pa (typical PSL > 50000)
+                        if float(mean_map.mean()) > 50000:
+                            mean_map = mean_map / 100.0
+                        
+                        # Calculate Zonal Anomaly (same as Z500)
+                        zonal_mean = mean_map.mean(dim='lon')
+                        anom_map = mean_map - zonal_mean
+                        
+                        # Interpolate to common grid
+                        anom_regrid = anom_map.interp(lat=target_lat, lon=target_lon, method='linear')
+                        
+                        maps.append(anom_regrid)
+                        used_models.append(model_key)
+                        ds.close()
+                        
+                    except Exception as e:
+                        logging.error(f"    Error processing PSL for {model_key}: {e}")
+                        continue
+                        
+                if not maps: return None, None, []
+                
+                concatenated = xr.concat(maps, dim='model')
+                composite_mean = concatenated.mean(dim='model')
+                
+                return composite_mean, concatenated, used_models
+                
+            mean_extreme, stack_extreme, used_extreme = get_group_mean_map(extreme_models)
+            mean_non_extreme, stack_non_extreme, used_non_extreme = get_group_mean_map(non_extreme_models)
+            
+            if mean_extreme is not None:
+                logging.info(f"  PSL Extreme Models used in composite (N={len(used_extreme)}): {used_extreme}")
+            if mean_non_extreme is not None:
+                logging.info(f"  PSL Non-Extreme Models used in composite (N={len(used_non_extreme)}): {used_non_extreme}")
+            
+            if mean_extreme is not None and mean_non_extreme is not None:
+                diff = mean_extreme - mean_non_extreme
+                
+                # Permutation Test (same as Z500)
+                p_values_da = self._calculate_permutation_significance(stack_extreme, stack_non_extreme, n_permutations=1000)
+                p_values = p_values_da.values
+                sig_mask = p_values < 0.05
+                
+                composites[season_label] = {
+                    'extreme_mean': mean_extreme,
+                    'non_extreme_mean': mean_non_extreme,
+                    'diff': diff,
+                    'p_values': p_values,
+                    'sig_mask': sig_mask
+                }
+                
+        return composites, (extreme_models, non_extreme_models), model_rps, len(all_models)
+
+    def find_cmip6_pr_file(self, model, scenario):
+        """
+        Searches for the raw PR (precipitation) file for a given model and scenario.
+        Uses the pattern defined in Config. Identical logic to find_cmip6_z500_file.
+        """
+        search_pattern = self.config.CMIP6_RAW_PR_PATH_PATTERN.format(model=model, scenario=scenario)
+        found_files = glob.glob(search_pattern)
+        
+        if not found_files:
+            return []
+            
+        member_groups = {}
+        for f in found_files:
+            parent_dir = os.path.dirname(f)
+            if parent_dir not in member_groups:
+                member_groups[parent_dir] = []
+            member_groups[parent_dir].append(f)
+            
+        if not member_groups: return []
+            
+        sorted_dirs = sorted(member_groups.keys())
+        target_dir = sorted_dirs[0]
+        
+        member_files = sorted(member_groups[target_dir])
+        return member_files
+
+    def calculate_pr_composites_for_extremes(self, cmip6_results, gwl, event_key='30Q10_low', quantile=0.20):
+        """
+        Calculates PR (precipitation) composites for 'Short Return Period' (Extreme) vs 'Long Return Period' (Non-Extreme) models.
+        Identical logic to calculate_z500_composites_for_extremes, but loading PR data instead of Z500.
+        """
+        logging.info(f"Calculating PR composites for event '{event_key}' at GWL +{gwl}°C (Top/Bottom {quantile*100:.0f}%)...")
+        
+        model_data_loaded = cmip6_results.get('cmip6_model_data_loaded')
+        metric_timeseries = cmip6_results.get('model_metric_timeseries')
+        gwl_years = cmip6_results.get('gwl_threshold_years')
+        window = self.config.GWL_YEARS_WINDOW
+        
+        if not all([model_data_loaded, metric_timeseries, gwl_years]):
+             logging.error("Missing inputs for PR composite analysis.")
+             return None
+        
+        # 1. Calculate Return Periods for ALL models (identical to Z500)
+        selection_season = 'summer' 
+        
+        model_rps = {}
+        all_models = list(model_data_loaded.keys())
+        
+        for model_run_key in all_models:
+            q_metrics = metric_timeseries.get(model_run_key, {})
+            if model_run_key == all_models[0]:
+                logging.info(f"[PR DEBUG] Keys for {model_run_key}: {list(q_metrics.keys())}")
+
+            if '30Q' in event_key: duration = '30Q'
+            elif '7Q' in event_key: duration = '7Q'
+            elif '1Q' in event_key: duration = '1Q'
+            else: duration = 'Q_daily'
+            
+            metric_type = 'low' if 'low' in event_key else 'high'
+            
+            ts_annual_key = f"{duration}_{metric_type}_full_year"
+            ts_seasonal_key = f"{duration}_{metric_type}_{selection_season}"
+            
+            ts_annual = q_metrics.get(ts_annual_key)
+            ts_seasonal = q_metrics.get(ts_seasonal_key)
+            
+            if ts_annual is None or ts_seasonal is None: 
+                continue
+            
+            hist_annual = ts_annual.sel(year=slice(1960, 2014)).dropna(dim='year')
+            if hist_annual.year.size < 20: 
+                continue
+            
+            try:
+                target_T = int(event_key.split('Q')[1].split('_')[0])
+            except:
+                target_T = 10
+                
+            if metric_type == 'low':
+                thresh = np.quantile(hist_annual.values, 1.0/target_T)
+            else:
+                thresh = np.quantile(hist_annual.values, 1.0 - 1.0/target_T)
+                
+            gwl_year = gwl_years.get(model_run_key, {}).get(gwl)
+            if gwl_year is None: 
+                continue
+            
+            start, end = gwl_year - window // 2, gwl_year + (window - 1) // 2
+            fut_seasonal = ts_seasonal.sel(year=slice(start, end)).dropna(dim='year')
+            if fut_seasonal.year.size < 10: 
+                continue
+            
+            values = fut_seasonal.values
+            if metric_type == 'low':
+                count = (values < thresh).sum()
+            else:
+                count = (values > thresh).sum()
+                
+            prob = count / len(values)
+        
+            if prob > 1e-6:
+                T_fut = 1.0 / prob
+                model_rps[model_run_key] = T_fut
+            else:
+                continue
+            
+        logging.info(f"  Calculated Return Periods for {len(model_rps)} models.")
+        
+        if len(model_rps) < 1:
+            logging.warning("Not enough models for PR composite analysis (<1).")
+            return None
+            
+        # 2. Sort and Select Top/Bottom (identical to Z500)
+        sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
+        
+        n_select = int(len(sorted_models) * quantile)
+        if n_select < 1: n_select = 1
+        
+        extreme_models = sorted_models[:n_select]     # Shortest T
+        non_extreme_models = sorted_models[-n_select:] # Longest T
+        
+        logging.info(f"  PR Extreme Models (Shortest T): {[m[0] for m in extreme_models]}")
+        logging.info(f"  PR Non-Extreme Models (Longest T): {[m[0] for m in non_extreme_models]}")
+        
+        # 3. Compute Composites (adapted for PR)
+        target_lat = np.arange(-90, 90.1, 2.5)
+        target_lon = np.arange(-180, 180, 2.5)
+        
+        composites = {}
+        
+        for season_label in ['Winter', 'Summer']:
+            months = [11, 12, 1, 2, 3, 4] if season_label == 'Winter' else [5, 6, 7, 8, 9, 10]
+            
+            def get_group_mean_map(model_list):
+                maps = []
+                used_models = []
+                for model_key, _ in model_list:
+                    model_name = model_key.split('_')[0]
+                    scenario = model_key.split('_')[1]
+                    
+                    files = self.find_cmip6_pr_file(model_name, scenario)
+                    if not files: 
+                         logging.warning(f"    Missing PR file for {model_key}")
+                         continue
+                        
+                    try:
+                        ds = xr.open_mfdataset(files, combine='nested', concat_dim='time', chunks={'time': 12}, parallel=False)
+                        
+                        # PR variable name
+                        if 'pr' in ds:
+                            da = ds['pr']
+                        elif 'PR' in ds:
+                            da = ds['PR']
+                        elif 'precip' in ds:
+                            da = ds['precip']
+                        else:
+                            logging.warning(f"    No PR variable found in {model_key}")
+                            continue
+                        
+                        # PR is a single-level variable, no pressure level selection needed
+                            
+                        # Rename coords
+                        rename_map = {'latitude': 'lat', 'longitude': 'lon'}
+                        final_rename = {k:v for k,v in rename_map.items() if k in da.dims}
+                        da = da.rename(final_rename)
+                        
+                        # Fix Longitude
+                        if da.lon.max() > 180:
+                            da = da.assign_coords(lon=(((da.lon + 180) % 360) - 180)).sortby('lon')
+                            
+                        # Time Selection (GWL)
+                        gwl_y = gwl_years.get(model_key, {}).get(gwl)
+                        s, e = gwl_y - window // 2, gwl_y + (window - 1) // 2
+                        try:
+                            da_gwl = da.sel(time=slice(str(s), str(e)))
+                        except (TypeError, KeyError, ValueError):
+                            try:
+                                time_ref = da.time.values[0] 
+                                date_type = type(time_ref)
+                                start_conf = date_type(s, 1, 1)
+                                try:
+                                    end_conf = date_type(e, 12, 31)
+                                except ValueError:
+                                    end_conf = date_type(e, 12, 30)
+                                da_gwl = da.sel(time=slice(start_conf, end_conf))
+                            except Exception as e_fallback:
+                                logging.error(f"    Fatal time slicing error for {model_key}: {e_fallback}")
+                                continue
+
+                        # Season Selection
+                        try:
+                            month_mask = da_gwl.time.dt.month.isin(months)
+                        except AttributeError:
+                            time_months = np.array([t.month for t in da_gwl.time.values])
+                            month_mask = xr.DataArray(np.isin(time_months, months), dims='time', coords={'time': da_gwl.time})
+                        da_seas = da_gwl.where(month_mask, drop=True)
+                        
+                        if da_seas.time.size == 0: continue
+
+                        # Calculate mean map and convert kg/m²/s -> mm/day if needed
+                        mean_map = da_seas.mean(dim='time').compute()
+                        
+                        # Convert kg/m²/s to mm/day if values suggest SI units (typical PR < 1 in kg/m²/s)
+                        if float(mean_map.mean()) < 1:
+                            mean_map = mean_map * 86400.0
+                        
+                        # Calculate Zonal Anomaly (same as Z500)
+                        zonal_mean = mean_map.mean(dim='lon')
+                        anom_map = mean_map - zonal_mean
+                        
+                        # Interpolate to common grid
+                        anom_regrid = anom_map.interp(lat=target_lat, lon=target_lon, method='linear')
+                        
+                        maps.append(anom_regrid)
+                        used_models.append(model_key)
+                        ds.close()
+                        
+                    except Exception as e:
+                        logging.error(f"    Error processing PR for {model_key}: {e}")
+                        continue
+                        
+                if not maps: return None, None, []
+                
+                concatenated = xr.concat(maps, dim='model')
+                composite_mean = concatenated.mean(dim='model')
+                
+                return composite_mean, concatenated, used_models
+                
+            mean_extreme, stack_extreme, used_extreme = get_group_mean_map(extreme_models)
+            mean_non_extreme, stack_non_extreme, used_non_extreme = get_group_mean_map(non_extreme_models)
+            
+            if mean_extreme is not None:
+                logging.info(f"  PR Extreme Models used in composite (N={len(used_extreme)}): {used_extreme}")
+            if mean_non_extreme is not None:
+                logging.info(f"  PR Non-Extreme Models used in composite (N={len(used_non_extreme)}): {used_non_extreme}")
+            
+            if mean_extreme is not None and mean_non_extreme is not None:
+                diff = mean_extreme - mean_non_extreme
+                
+                # Permutation Test (same as Z500)
+                p_values_da = self._calculate_permutation_significance(stack_extreme, stack_non_extreme, n_permutations=1000)
+                p_values = p_values_da.values
+                sig_mask = p_values < 0.05
+                
+                composites[season_label] = {
+                    'extreme_mean': mean_extreme,
+                    'non_extreme_mean': mean_non_extreme,
+                    'diff': diff,
+                    'p_values': p_values,
+                    'sig_mask': sig_mask
+                }
+                
+        return composites, (extreme_models, non_extreme_models), model_rps, len(all_models)

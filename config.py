@@ -75,13 +75,21 @@ class Config:
     # Pattern: /data/reloclim/normal/CMIP6/ScenarioMIP/*/{model}/{scenario}/*/Amon/zg/*/*/zg_*.nc
     CMIP6_RAW_ZG_PATH_PATTERN = '/data/reloclim/normal/CMIP6/ScenarioMIP/*/{model}/{scenario}/*/Amon/zg/*/*/zg_*.nc'
     COMPOSITE_EVENT_KEY = '30Q10_low'
-    COMPOSITE_QUANTILE = 0.25
+    # COMPOSITE_QUANTILE = 0.25 # Deprecated in favor of fixed N
+    COMPOSITE_N_MODELS = 10
 
     # Raw Data Path for Composite Analysis (PSL - Sea Level Pressure)
     CMIP6_RAW_PSL_PATH_PATTERN = '/data/reloclim/normal/CMIP6/ScenarioMIP/*/{model}/{scenario}/*/Amon/psl/*/*/psl_*.nc'
 
     # Raw Data Path for Composite Analysis (PR - Precipitation)
     CMIP6_RAW_PR_PATH_PATTERN = '/data/reloclim/normal/CMIP6/ScenarioMIP/*/{model}/{scenario}/*/Amon/pr/*/*/pr_*.nc'
+
+    # Historical Raw Data Paths for Composite Analysis
+    CMIP6_HISTORICAL_ZG_PATH_PATTERN = '/data/reloclim/normal/CMIP6/CMIP/*/{model}/historical/*/Amon/zg/*/*/zg_*.nc'
+    CMIP6_HISTORICAL_PSL_PATH_PATTERN = '/data/reloclim/normal/CMIP6/CMIP/*/{model}/historical/*/Amon/psl/*/*/psl_*.nc'
+    CMIP6_HISTORICAL_PR_PATH_PATTERN = '/data/reloclim/normal/CMIP6/CMIP/*/{model}/historical/*/Amon/pr/*/*/pr_*.nc'
+    COMPOSITE_HIST_PERIOD_START = 1960
+    COMPOSITE_HIST_PERIOD_END = 2014
 
     # CMIP6 reference periods
     CMIP6_PRE_INDUSTRIAL_REF_START = 1850

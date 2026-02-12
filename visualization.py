@@ -4609,586 +4609,257 @@ class Visualizer:
             logging.exception("Traceback:")
 
     @staticmethod
-    @staticmethod
-    def plot_z500_composite_analysis_panel(composite_results, gwl, event_key, scenario, model_rps=None, model_lists=None, n_total_models=None):
+    def _plot_composite_3x3_panel(composite_results, gwl, event_key, scenario, season,
+                                      var_label, diff_unit, cmap_diff='PuOr',
+                                      contour_fmt='%.0f', model_rps=None, model_lists=None, 
+                                      n_total_models=None):
         """
-        Plots a multipanel figure for the Z500 composite analysis.
-        Layout: 2 Rows (Winter, Summer) x 4 Columns (Boxplot, Ext, Non, Diff)
-        Boxplot: Shows return period distribution with selected models highlighted.
+        Generic 3×3 composite panel for any variable.
+        
+        Rows: Future | Historical | Diff (Future − Historical)
+        Columns: Extreme | Non-Extreme | Diff (Extreme − Non-Extreme)
+        
+        - Row 0, Row 1: contour maps of absolute values (shared levels across all 4 absolute panels)
+        - Column 2 (all rows): filled difference maps with significance stippling
+        - Row 2, Cols 0-1: filled difference maps with significance stippling
+        - Row 2, Col 2: left empty (or could be double-difference)
         """
-        logging.info(f"Plotting Z500 composite analysis for GWL +{gwl}°C...")
+        logging.info(f"Plotting {var_label} composite 3×3 for {season}, GWL +{gwl}°C...")
         Visualizer.ensure_plot_dir_exists()
         
         if not composite_results:
-            logging.warning("No composite results to plot.")
+            logging.warning(f"No {var_label} composite results to plot.")
             return
 
-        fig = plt.figure(figsize=(20, 10))
-        # 2 Rows, 4 Cols. First col slightly wider for the boxplot clarity
-        gs = gridspec.GridSpec(2, 4, width_ratios=[0.8, 1, 1, 1], wspace=0.15, hspace=0.15)
+        extent = [-105, 40, 0, 90]
         
-        seasons = ['Winter', 'Summer']
+        fig = plt.figure(figsize=(18, 15))
+        gs = gridspec.GridSpec(3, 3, wspace=0.12, hspace=0.2)
         
-        # Prepare Dataframe once
-        df = pd.DataFrame()
-        if model_rps and model_lists:
-            extreme_models_list, non_extreme_models_list = model_lists
-            extreme_keys = [m[0] for m in extreme_models_list]
-            non_extreme_keys = [m[0] for m in non_extreme_models_list]
+        # Unpack results
+        fut_ext = composite_results.get('future_extreme_mean')
+        fut_non = composite_results.get('future_non_extreme_mean')
+        hist_ext = composite_results.get('hist_extreme_mean')
+        hist_non = composite_results.get('hist_non_extreme_mean')
+        
+        diff_ext_non_fut = composite_results.get('diff_ext_non_future')
+        diff_ext_non_hist = composite_results.get('diff_ext_non_hist')
+        diff_fut_hist_ext = composite_results.get('diff_fut_hist_ext')
+        diff_fut_hist_non = composite_results.get('diff_fut_hist_non')
+        
+        sig_ext_non_fut = composite_results.get('sig_mask_ext_non_future')
+        sig_ext_non_hist = composite_results.get('sig_mask_ext_non_hist')
+        sig_fut_hist_ext = composite_results.get('sig_mask_fut_hist_ext')
+        sig_fut_hist_non = composite_results.get('sig_mask_fut_hist_non')
+        
+        # --- Shared contour levels for absolute value panels (Row 0, 1, Cols 0, 1) ---
+        abs_maps = [m for m in [fut_ext, fut_non, hist_ext, hist_non] if m is not None]
+        if abs_maps:
+            all_abs_vals = np.concatenate([m.values.ravel() for m in abs_maps])
+            all_abs_vals = all_abs_vals[np.isfinite(all_abs_vals)]
+            contour_levels = np.linspace(np.percentile(all_abs_vals, 2), np.percentile(all_abs_vals, 98), 15)
+        else:
+            contour_levels = None
+        
+        # --- Shared color limits for difference panels ---
+        diff_maps = [m for m in [diff_ext_non_fut, diff_ext_non_hist, diff_fut_hist_ext, diff_fut_hist_non] if m is not None]
+        if diff_maps:
+            max_diff_val = max(max(abs(float(m.min())), abs(float(m.max()))) for m in diff_maps)
+            diff_limit = np.ceil(max_diff_val / 5) * 5
+            if diff_limit == 0:
+                diff_limit = 1
+        else:
+            diff_limit = 1
+        
+        def _add_map_features(ax):
+            ax.set_extent(extent, crs=ccrs.PlateCarree())
+            ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
+            ax.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
+        
+        def _plot_contour(ax, data_map, title):
+            _add_map_features(ax)
+            if data_map is not None and contour_levels is not None:
+                cs = ax.contour(data_map.lon, data_map.lat, data_map, levels=contour_levels,
+                                colors='black', linewidths=0.8, transform=ccrs.PlateCarree())
+                ax.clabel(cs, inline=True, fontsize=6, fmt=contour_fmt)
+            ax.set_title(title, fontsize=10)
+        
+        def _plot_diff(ax, diff_map, sig_mask, title):
+            _add_map_features(ax)
+            cf = None
+            if diff_map is not None:
+                cf = ax.pcolormesh(diff_map.lon, diff_map.lat, diff_map, cmap=cmap_diff,
+                                   vmin=-diff_limit, vmax=diff_limit, transform=ccrs.PlateCarree())
+                if sig_mask is not None:
+                    skip = 4
+                    lons_mesh, lats_mesh = np.meshgrid(diff_map.lon, diff_map.lat)
+                    mask_sub = sig_mask[::skip, ::skip]
+                    lons_sub = lons_mesh[::skip, ::skip]
+                    lats_sub = lats_mesh[::skip, ::skip]
+                    ax.scatter(lons_sub[mask_sub], lats_sub[mask_sub], s=1, color='black', 
+                              alpha=0.5, transform=ccrs.PlateCarree())
+            ax.set_title(title, fontsize=10)
+            return cf
+        
+        # --- Row 0: Future ---
+        ax00 = fig.add_subplot(gs[0, 0], projection=ccrs.PlateCarree())
+        _plot_contour(ax00, fut_ext, "Future – Extreme")
+        
+        ax01 = fig.add_subplot(gs[0, 1], projection=ccrs.PlateCarree())
+        _plot_contour(ax01, fut_non, "Future – Non-Extreme")
+        
+        ax02 = fig.add_subplot(gs[0, 2], projection=ccrs.PlateCarree())
+        cf_r0 = _plot_diff(ax02, diff_ext_non_fut, sig_ext_non_fut, "Future: Ext − Non")
+        
+        # --- Row 1: Historical ---
+        ax10 = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
+        _plot_contour(ax10, hist_ext, "Historical – Extreme")
+        
+        ax11 = fig.add_subplot(gs[1, 1], projection=ccrs.PlateCarree())
+        _plot_contour(ax11, hist_non, "Historical – Non-Extreme")
+        
+        ax12 = fig.add_subplot(gs[1, 2], projection=ccrs.PlateCarree())
+        cf_r1 = _plot_diff(ax12, diff_ext_non_hist, sig_ext_non_hist, "Historical: Ext − Non")
+        
+        # --- Row 2: Difference (Future − Historical) ---
+        ax20 = fig.add_subplot(gs[2, 0], projection=ccrs.PlateCarree())
+        cf_r2a = _plot_diff(ax20, diff_fut_hist_ext, sig_fut_hist_ext, "Δ(Fut−Hist) – Extreme")
+        
+        ax21 = fig.add_subplot(gs[2, 1], projection=ccrs.PlateCarree())
+        cf_r2b = _plot_diff(ax21, diff_fut_hist_non, sig_fut_hist_non, "Δ(Fut−Hist) – Non-Extreme")
+        
+        # Row 2, Col 2: Return Period Boxplot
+        ax22 = fig.add_subplot(gs[2, 2])
+        
+        if model_rps:
+            # Get actually used models from composites (those that didn't fail during loading)
+            used_ext_keys = composite_results.get('used_extreme_models', [])
+            used_non_keys = composite_results.get('used_non_extreme_models', [])
             
             records = []
             for m_key, rp in model_rps.items():
+                if np.isinf(rp):
+                    rp = 35  # Clamp for display
                 category = 'Other'
                 color = 'gray'
-                zorder = 1
                 marker = 'o'
                 size = 5
-                alpha = 0.5
-                
-                if m_key in extreme_keys:
-                    category = 'Extreme'
-                    color = '#b2182b' # Red
-                    zorder = 3
-                    marker = 'D'
-                    size = 7
-                    alpha = 1.0
-                elif m_key in non_extreme_keys:
-                    category = 'Non-Extreme'
-                    color = '#2166ac' # Blue
-                    zorder = 3
-                    marker = 'D'
-                    size = 7
-                    alpha = 1.0
-                
-                records.append({
-                    'Model': m_key,
-                    'Return Period': rp,
-                    'Category': category,
-                    'Color': color,
-                    'Z': zorder,
-                    'Marker': marker,
-                    'Size': size,
-                    'Alpha': alpha,
-                    'DummyY': 0 # For single boxplot
-                })
-            df = pd.DataFrame(records)
-
-        for i, season in enumerate(seasons):
-            # --- Column 0: Return Period Boxplot (Figure 3 Style) ---
-            ax0 = fig.add_subplot(gs[i, 0])
-            
-            if not df.empty:
-                # Boxplot (MMM style)
-                sns.boxplot(data=df, x='Return Period', y='DummyY', ax=ax0, 
-                            color='lightgray', width=0.3, showfliers=False, orient='h')
-                
-                # Stripplot - Plot in layers
-                # 1. Other
-                other = df[df['Category'] == 'Other']
-                if not other.empty:
-                    sns.stripplot(data=other, x='Return Period', y='DummyY', ax=ax0, 
-                                  color='gray', alpha=0.5, size=5, jitter=True, orient='h')
-                # 2. Key Models
-                key_models = df[df['Category'] != 'Other']
-                if not key_models.empty:
-                    # Using hue to map colors manually not trivial with stripplot if we want specific distinct colors easily
-                    # Just iterate or use palette. Simple iteration:
-                    for _, row in key_models.iterrows():
-                         y_pos = 0 + np.random.uniform(-0.05, 0.05) # Manual jitter
-                         ax0.plot(row['Return Period'], y_pos, marker='D', color=row['Color'], 
-                                  markersize=7, alpha=1.0, linestyle='None')
-
-                # Formatting
-                ax0.set_xlim(0, 35)
-                ax0.set_yticks([])
-                ax0.set_ylabel(f"{season}-half year", fontsize=12, fontweight='bold') # Row Label
-                ax0.invert_yaxis()
-                ax0.grid(axis='x', linestyle=':', alpha=0.7)
-                
-                if i == 1:
-                    ax0.set_xlabel("Return Period (Years)", fontsize=10)
-                else:
-                    ax0.set_xlabel("")
-                    ax0.tick_params(labelbottom=False)
-                    
-                ax0.set_title("Model Selection (Return Period)", fontsize=10)
-                
-                # Annotation
-                n_ext = len(df[df['Category'] == 'Extreme'])
-                n_non = len(df[df['Category'] == 'Non-Extreme'])
-                total_with_events = len(df)
-                total_denom = n_total_models if n_total_models else total_with_events
-                
-                # n = Models with Events / Total Available Models
-                ax0.text(0.95, 0.9, f"n={total_with_events}/{total_denom}", transform=ax0.transAxes, ha='right', fontsize=9, fontweight='bold')
-
-
-            # --- Columns 1-3: Composites ---
-            data = composite_results.get(season)
-            if not data: continue
-            
-            # Unpack
-            mean_ext = data['extreme_mean']
-            mean_non = data['non_extreme_mean']
-            diff = data['diff']
-            sig_mask = data['sig_mask']
-            
-            # Extent
-            extent = [-105, 40, 0, 90]
-            
-            # Panel 1: Extreme
-            ax1 = fig.add_subplot(gs[i, 1], projection=ccrs.PlateCarree())
-            ax1.set_extent(extent, crs=ccrs.PlateCarree())
-            ax1.add_feature(cfeature.COASTLINE, linewidth=0.5)
-            ax1.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
-            
-            limit = max(abs(mean_ext.min()), abs(mean_ext.max()), abs(mean_non.min()), abs(mean_non.max()))
-            limit = np.ceil(limit / 10) * 10
-            if limit < 10: limit = 50
-            
-            cf1 = ax1.pcolormesh(mean_ext.lon, mean_ext.lat, mean_ext, cmap='RdBu_r', 
-                                 vmin=-limit, vmax=limit, transform=ccrs.PlateCarree())
-            ax1.set_title(f"Extreme Models (Short RP)", fontsize=10)
-            
-            # Panel 2: Non-Extreme
-            ax2 = fig.add_subplot(gs[i, 2], projection=ccrs.PlateCarree())
-            ax2.set_extent(extent, crs=ccrs.PlateCarree())
-            ax2.add_feature(cfeature.COASTLINE, linewidth=0.5)
-            ax2.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
-            
-            cf2 = ax2.pcolormesh(mean_non.lon, mean_non.lat, mean_non, cmap='RdBu_r', 
-                                 vmin=-limit, vmax=limit, transform=ccrs.PlateCarree())
-            ax2.set_title(f"Non-Extreme Models (Long RP)", fontsize=10)
-            
-            # Panel 3: Diff
-            ax3 = fig.add_subplot(gs[i, 3], projection=ccrs.PlateCarree())
-            ax3.set_extent(extent, crs=ccrs.PlateCarree())
-            ax3.add_feature(cfeature.COASTLINE, linewidth=0.5)
-            ax3.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
-            
-            diff_limit = max(abs(diff.min()), abs(diff.max()))
-            diff_limit = np.ceil(diff_limit / 5) * 5
-            
-            cf3 = ax3.pcolormesh(diff.lon, diff.lat, diff, cmap='PuOr', 
-                                 vmin=-diff_limit, vmax=diff_limit, transform=ccrs.PlateCarree())
-            
-            if sig_mask is not None:
-                skip = 4
-                lons_mesh, lats_mesh = np.meshgrid(diff.lon, diff.lat)
-                mask_sub = sig_mask[::skip, ::skip]
-                lons_sub = lons_mesh[::skip, ::skip]
-                lats_sub = lats_mesh[::skip, ::skip]
-                ax3.scatter(lons_sub[mask_sub], lats_sub[mask_sub], s=1, color='black', alpha=0.5, transform=ccrs.PlateCarree())
-            
-            ax3.set_title(f"Difference (Ext - Non)", fontsize=10)
-            
-            # Colorbars (Bottom)
-            if i == 1:
-                # Mean Colorbar (Span cols 1-2)
-                cax_mean = fig.add_axes([0.33, 0.06, 0.28, 0.02])
-                fig.colorbar(cf1, cax=cax_mean, orientation='horizontal', label='Z500 Zonal Anomaly (m)', extend='both')
-                
-                # Diff Colorbar (Span col 3)
-                cax_diff = fig.add_axes([0.72, 0.06, 0.15, 0.02])
-                fig.colorbar(cf3, cax=cax_diff, orientation='horizontal', label='Difference (m)', extend='both')
-
-        # Legend
-        from matplotlib.lines import Line2D
-        legend_elements = [
-            Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b', label='Extreme Models', markersize=8),
-            Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac', label='Non-Extreme Models', markersize=8),
-            Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', label='All Models', markersize=6, alpha=0.5)
-        ]
-        fig.legend(handles=legend_elements, loc='lower left', bbox_to_anchor=(0.08, 0.06), frameon=False, title="Selection")
-
-        plt.subplots_adjust(bottom=0.12)
-        plt.suptitle(f"Z500 Composite Analysis: Extreme vs Non-Extreme Models ({event_key})\nGWL +{gwl}°C | {scenario.upper()}", 
-                     fontsize=14, weight='bold', y=0.98)
-
-        plt.subplots_adjust(bottom=0.15) # Make room for colorbars
-        plt.suptitle(f"Z500 Composite Analysis: Extreme vs Non-Extreme Models ({event_key})\nGWL +{gwl}°C | {scenario.upper()}", 
-                     fontsize=14, weight='bold', y=0.98)
-                     
-        filename = f"composite_analysis_z500_{event_key}_{scenario}_gwl{gwl}.png"
-        filepath = os.path.join(Config.PLOT_DIR, filename)
-        plt.savefig(filepath, dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        logging.info(f"Saved Z500 composite plot to {filepath}")
-
-    @staticmethod
-    def plot_psl_composite_analysis_panel(composite_results, gwl, event_key, scenario, model_rps=None, model_lists=None, n_total_models=None):
-        """
-        Plots a multipanel figure for the PSL composite analysis.
-        Layout: 2 Rows (Winter, Summer) x 4 Columns (Boxplot, Ext, Non, Diff)
-        Identical to plot_z500_composite_analysis_panel but for PSL data.
-        """
-        logging.info(f"Plotting PSL composite analysis for GWL +{gwl}°C...")
-        Visualizer.ensure_plot_dir_exists()
-        
-        if not composite_results:
-            logging.warning("No PSL composite results to plot.")
-            return
-
-        fig = plt.figure(figsize=(20, 10))
-        gs = gridspec.GridSpec(2, 4, width_ratios=[0.8, 1, 1, 1], wspace=0.15, hspace=0.15)
-        
-        seasons = ['Winter', 'Summer']
-        
-        # Prepare Dataframe once
-        df = pd.DataFrame()
-        if model_rps and model_lists:
-            extreme_models_list, non_extreme_models_list = model_lists
-            extreme_keys = [m[0] for m in extreme_models_list]
-            non_extreme_keys = [m[0] for m in non_extreme_models_list]
-            
-            records = []
-            for m_key, rp in model_rps.items():
-                category = 'Other'
-                color = 'gray'
+                alpha = 0.4
                 zorder = 1
-                marker = 'o'
-                size = 5
-                alpha = 0.5
                 
-                if m_key in extreme_keys:
-                    category = 'Extreme'
+                if m_key in used_ext_keys:
+                    category = 'Extreme (used)'
                     color = '#b2182b'
-                    zorder = 3
                     marker = 'D'
                     size = 7
                     alpha = 1.0
-                elif m_key in non_extreme_keys:
-                    category = 'Non-Extreme'
+                    zorder = 3
+                elif m_key in used_non_keys:
+                    category = 'Non-Extreme (used)'
                     color = '#2166ac'
-                    zorder = 3
                     marker = 'D'
                     size = 7
                     alpha = 1.0
-                
-                records.append({
-                    'Model': m_key,
-                    'Return Period': rp,
-                    'Category': category,
-                    'Color': color,
-                    'Z': zorder,
-                    'Marker': marker,
-                    'Size': size,
-                    'Alpha': alpha,
-                    'DummyY': 0
-                })
-            df = pd.DataFrame(records)
-
-        for i, season in enumerate(seasons):
-            # --- Column 0: Return Period Boxplot ---
-            ax0 = fig.add_subplot(gs[i, 0])
-            
-            if not df.empty:
-                sns.boxplot(data=df, x='Return Period', y='DummyY', ax=ax0, 
-                            color='lightgray', width=0.3, showfliers=False, orient='h')
-                
-                other = df[df['Category'] == 'Other']
-                if not other.empty:
-                    sns.stripplot(data=other, x='Return Period', y='DummyY', ax=ax0, 
-                                  color='gray', alpha=0.5, size=5, jitter=True, orient='h')
-                key_models = df[df['Category'] != 'Other']
-                if not key_models.empty:
-                    for _, row in key_models.iterrows():
-                         y_pos = 0 + np.random.uniform(-0.05, 0.05)
-                         ax0.plot(row['Return Period'], y_pos, marker='D', color=row['Color'], 
-                                  markersize=7, alpha=1.0, linestyle='None')
-
-                ax0.set_xlim(0, 35)
-                ax0.set_yticks([])
-                ax0.set_ylabel(f"{season}-half year", fontsize=12, fontweight='bold')
-                ax0.invert_yaxis()
-                ax0.grid(axis='x', linestyle=':', alpha=0.7)
-                
-                if i == 1:
-                    ax0.set_xlabel("Return Period (Years)", fontsize=10)
-                else:
-                    ax0.set_xlabel("")
-                    ax0.tick_params(labelbottom=False)
+                    zorder = 3
                     
-                ax0.set_title("Model Selection (Return Period)", fontsize=10)
-                
-                n_ext = len(df[df['Category'] == 'Extreme'])
-                n_non = len(df[df['Category'] == 'Non-Extreme'])
-                total_with_events = len(df)
-                total_denom = n_total_models if n_total_models else total_with_events
-                
-                ax0.text(0.95, 0.9, f"n={total_with_events}/{total_denom}", transform=ax0.transAxes, ha='right', fontsize=9, fontweight='bold')
-
-
-            # --- Columns 1-3: Composites ---
-            data = composite_results.get(season)
-            if not data: continue
+                records.append({'Model': m_key, 'Return Period': rp, 'Category': category,
+                               'Color': color, 'Marker': marker, 'Size': size, 'Alpha': alpha,
+                               'Z': zorder, 'DummyY': 0})
             
-            mean_ext = data['extreme_mean']
-            mean_non = data['non_extreme_mean']
-            diff = data['diff']
-            sig_mask = data['sig_mask']
+            df_rp = pd.DataFrame(records)
             
-            extent = [-105, 40, 0, 90]
+            import seaborn as sns
+            sns.boxplot(data=df_rp, x='Return Period', y='DummyY', ax=ax22,
+                        color='lightgray', width=0.3, showfliers=False, orient='h')
             
-            # Panel 1: Extreme
-            ax1 = fig.add_subplot(gs[i, 1], projection=ccrs.PlateCarree())
-            ax1.set_extent(extent, crs=ccrs.PlateCarree())
-            ax1.add_feature(cfeature.COASTLINE, linewidth=0.5)
-            ax1.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
+            # Plot other models
+            other = df_rp[df_rp['Category'] == 'Other']
+            if not other.empty:
+                sns.stripplot(data=other, x='Return Period', y='DummyY', ax=ax22,
+                              color='gray', alpha=0.4, size=5, jitter=True, orient='h')
             
-            limit = max(abs(mean_ext.min()), abs(mean_ext.max()), abs(mean_non.min()), abs(mean_non.max()))
-            limit = np.ceil(limit / 10) * 10
-            if limit < 10: limit = 50
+            # Plot key models (actually used)
+            key = df_rp[df_rp['Category'] != 'Other']
+            if not key.empty:
+                for _, row in key.iterrows():
+                    y_pos = np.random.uniform(-0.05, 0.05)
+                    ax22.plot(row['Return Period'], y_pos, marker='D', color=row['Color'],
+                             markersize=7, alpha=1.0, linestyle='None', zorder=3)
             
-            cf1 = ax1.pcolormesh(mean_ext.lon, mean_ext.lat, mean_ext, cmap='RdBu_r', 
-                                 vmin=-limit, vmax=limit, transform=ccrs.PlateCarree())
-            ax1.set_title(f"Extreme Models (Short RP)", fontsize=10)
+            ax22.set_xlim(0, 35)
+            ax22.set_yticks([])
+            ax22.set_ylabel('')
+            ax22.invert_yaxis()
+            ax22.grid(axis='x', linestyle=':', alpha=0.7)
+            ax22.set_xlabel('Return Period (Years)', fontsize=10)
+            ax22.set_title('Model Selection (Return Period)', fontsize=10)
             
-            # Panel 2: Non-Extreme
-            ax2 = fig.add_subplot(gs[i, 2], projection=ccrs.PlateCarree())
-            ax2.set_extent(extent, crs=ccrs.PlateCarree())
-            ax2.add_feature(cfeature.COASTLINE, linewidth=0.5)
-            ax2.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
+            # Annotation & Legend
+            n_total = n_total_models if n_total_models else len(model_rps)
+            ax22.text(0.95, 0.9, f"n={len(model_rps)}/{n_total}", transform=ax22.transAxes,
+                     ha='right', fontsize=9, fontweight='bold')
             
-            cf2 = ax2.pcolormesh(mean_non.lon, mean_non.lat, mean_non, cmap='RdBu_r', 
-                                 vmin=-limit, vmax=limit, transform=ccrs.PlateCarree())
-            ax2.set_title(f"Non-Extreme Models (Long RP)", fontsize=10)
-            
-            # Panel 3: Diff
-            ax3 = fig.add_subplot(gs[i, 3], projection=ccrs.PlateCarree())
-            ax3.set_extent(extent, crs=ccrs.PlateCarree())
-            ax3.add_feature(cfeature.COASTLINE, linewidth=0.5)
-            ax3.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
-            
-            diff_limit = max(abs(diff.min()), abs(diff.max()))
-            diff_limit = np.ceil(diff_limit / 5) * 5
-            
-            cf3 = ax3.pcolormesh(diff.lon, diff.lat, diff, cmap='PuOr', 
-                                 vmin=-diff_limit, vmax=diff_limit, transform=ccrs.PlateCarree())
-            
-            if sig_mask is not None:
-                skip = 4
-                lons_mesh, lats_mesh = np.meshgrid(diff.lon, diff.lat)
-                mask_sub = sig_mask[::skip, ::skip]
-                lons_sub = lons_mesh[::skip, ::skip]
-                lats_sub = lats_mesh[::skip, ::skip]
-                ax3.scatter(lons_sub[mask_sub], lats_sub[mask_sub], s=1, color='black', alpha=0.5, transform=ccrs.PlateCarree())
-            
-            ax3.set_title(f"Difference (Ext - Non)", fontsize=10)
-            
-            # Colorbars (Bottom)
-            if i == 1:
-                cax_mean = fig.add_axes([0.33, 0.06, 0.28, 0.02])
-                fig.colorbar(cf1, cax=cax_mean, orientation='horizontal', label='PSL Zonal Anomaly (hPa)', extend='both')
-                
-                cax_diff = fig.add_axes([0.72, 0.06, 0.15, 0.02])
-                fig.colorbar(cf3, cax=cax_diff, orientation='horizontal', label='Difference (hPa)', extend='both')
-
-        # Legend
-        from matplotlib.lines import Line2D
-        legend_elements = [
-            Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b', label='Extreme Models', markersize=8),
-            Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac', label='Non-Extreme Models', markersize=8),
-            Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', label='All Models', markersize=6, alpha=0.5)
-        ]
-        fig.legend(handles=legend_elements, loc='lower left', bbox_to_anchor=(0.08, 0.06), frameon=False, title="Selection")
-
-        plt.subplots_adjust(bottom=0.15)
-        plt.suptitle(f"PSL Composite Analysis: Extreme vs Non-Extreme Models ({event_key})\nGWL +{gwl}°C | {scenario.upper()}", 
-                     fontsize=14, weight='bold', y=0.98)
-                     
-        filename = f"composite_analysis_psl_{event_key}_{scenario}_gwl{gwl}.png"
+            from matplotlib.lines import Line2D
+            legend_elements = [
+                Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b',
+                       label=f'Extreme (N={len(used_ext_keys)})', markersize=7),
+                Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac',
+                       label=f'Non-Extreme (N={len(used_non_keys)})', markersize=7),
+                Line2D([0], [0], marker='o', color='w', markerfacecolor='gray',
+                       label='Other Models', markersize=5, alpha=0.5),
+            ]
+            ax22.legend(handles=legend_elements, loc='lower right', fontsize=7, frameon=True, framealpha=0.8)
+        else:
+            ax22.axis('off')
+        
+        # Row labels
+        fig.text(0.02, 0.78, "Future", fontsize=14, fontweight='bold', rotation=90, va='center')
+        fig.text(0.02, 0.50, "Historical", fontsize=14, fontweight='bold', rotation=90, va='center')
+        fig.text(0.02, 0.22, "Δ (Fut−Hist)", fontsize=14, fontweight='bold', rotation=90, va='center')
+        
+        # Colorbar for difference maps
+        ref_cf = cf_r0 or cf_r1 or cf_r2a or cf_r2b
+        if ref_cf:
+            cax = fig.add_axes([0.25, 0.04, 0.50, 0.015])
+            fig.colorbar(ref_cf, cax=cax, orientation='horizontal', label=f'Difference ({diff_unit})', extend='both')
+        
+        plt.subplots_adjust(bottom=0.10, left=0.06)
+        plt.suptitle(f"{var_label} Composite ({season} half-year): Extreme vs Non-Extreme ({event_key})\n"
+                     f"GWL +{gwl}°C | {scenario.upper()}",
+                     fontsize=14, weight='bold', y=0.97)
+        
+        filename = f"composite_analysis_{var_label.lower()}_{season.lower()}_{event_key}_{scenario}_gwl{gwl}.png"
         filepath = os.path.join(Config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved PSL composite plot to {filepath}")
+        logging.info(f"Saved {var_label} composite plot to {filepath}")
 
     @staticmethod
-    def plot_pr_composite_analysis_panel(composite_results, gwl, event_key, scenario, model_rps=None, model_lists=None, n_total_models=None):
-        """
-        Plots a multipanel figure for the PR (precipitation) composite analysis.
-        Layout: 2 Rows (Winter, Summer) x 4 Columns (Boxplot, Ext, Non, Diff)
-        Identical to plot_z500_composite_analysis_panel but for PR data.
-        """
-        logging.info(f"Plotting PR composite analysis for GWL +{gwl}°C...")
-        Visualizer.ensure_plot_dir_exists()
-        
-        if not composite_results:
-            logging.warning("No PR composite results to plot.")
-            return
+    def plot_z500_composite_analysis_panel(composite_results, gwl, event_key, scenario, season,
+                                           model_rps=None, model_lists=None, n_total_models=None):
+        """Plots a 3×3 composite panel for Z500 (one season per plot)."""
+        Visualizer._plot_composite_3x3_panel(
+            composite_results, gwl, event_key, scenario, season,
+            var_label='Z500', diff_unit='m', cmap_diff='PuOr', contour_fmt='%.0f',
+            model_rps=model_rps, model_lists=model_lists, n_total_models=n_total_models
+        )
 
-        fig = plt.figure(figsize=(20, 10))
-        gs = gridspec.GridSpec(2, 4, width_ratios=[0.8, 1, 1, 1], wspace=0.15, hspace=0.15)
-        
-        seasons = ['Winter', 'Summer']
-        
-        # Prepare Dataframe once
-        df = pd.DataFrame()
-        if model_rps and model_lists:
-            extreme_models_list, non_extreme_models_list = model_lists
-            extreme_keys = [m[0] for m in extreme_models_list]
-            non_extreme_keys = [m[0] for m in non_extreme_models_list]
-            
-            records = []
-            for m_key, rp in model_rps.items():
-                category = 'Other'
-                color = 'gray'
-                zorder = 1
-                marker = 'o'
-                size = 5
-                alpha = 0.5
-                
-                if m_key in extreme_keys:
-                    category = 'Extreme'
-                    color = '#b2182b'
-                    zorder = 3
-                    marker = 'D'
-                    size = 7
-                    alpha = 1.0
-                elif m_key in non_extreme_keys:
-                    category = 'Non-Extreme'
-                    color = '#2166ac'
-                    zorder = 3
-                    marker = 'D'
-                    size = 7
-                    alpha = 1.0
-                
-                records.append({
-                    'Model': m_key,
-                    'Return Period': rp,
-                    'Category': category,
-                    'Color': color,
-                    'Z': zorder,
-                    'Marker': marker,
-                    'Size': size,
-                    'Alpha': alpha,
-                    'DummyY': 0
-                })
-            df = pd.DataFrame(records)
+    @staticmethod
+    def plot_psl_composite_analysis_panel(composite_results, gwl, event_key, scenario, season,
+                                           model_rps=None, model_lists=None, n_total_models=None):
+        """Plots a 3×3 composite panel for PSL (one season per plot)."""
+        Visualizer._plot_composite_3x3_panel(
+            composite_results, gwl, event_key, scenario, season,
+            var_label='PSL', diff_unit='hPa', cmap_diff='PuOr', contour_fmt='%.0f',
+            model_rps=model_rps, model_lists=model_lists, n_total_models=n_total_models
+        )
 
-        for i, season in enumerate(seasons):
-            # --- Column 0: Return Period Boxplot ---
-            ax0 = fig.add_subplot(gs[i, 0])
-            
-            if not df.empty:
-                sns.boxplot(data=df, x='Return Period', y='DummyY', ax=ax0, 
-                            color='lightgray', width=0.3, showfliers=False, orient='h')
-                
-                other = df[df['Category'] == 'Other']
-                if not other.empty:
-                    sns.stripplot(data=other, x='Return Period', y='DummyY', ax=ax0, 
-                                  color='gray', alpha=0.5, size=5, jitter=True, orient='h')
-                key_models = df[df['Category'] != 'Other']
-                if not key_models.empty:
-                    for _, row in key_models.iterrows():
-                         y_pos = 0 + np.random.uniform(-0.05, 0.05)
-                         ax0.plot(row['Return Period'], y_pos, marker='D', color=row['Color'], 
-                                  markersize=7, alpha=1.0, linestyle='None')
-
-                ax0.set_xlim(0, 35)
-                ax0.set_yticks([])
-                ax0.set_ylabel(f"{season}-half year", fontsize=12, fontweight='bold')
-                ax0.invert_yaxis()
-                ax0.grid(axis='x', linestyle=':', alpha=0.7)
-                
-                if i == 1:
-                    ax0.set_xlabel("Return Period (Years)", fontsize=10)
-                else:
-                    ax0.set_xlabel("")
-                    ax0.tick_params(labelbottom=False)
-                    
-                ax0.set_title("Model Selection (Return Period)", fontsize=10)
-                
-                n_ext = len(df[df['Category'] == 'Extreme'])
-                n_non = len(df[df['Category'] == 'Non-Extreme'])
-                total_with_events = len(df)
-                total_denom = n_total_models if n_total_models else total_with_events
-                
-                ax0.text(0.95, 0.9, f"n={total_with_events}/{total_denom}", transform=ax0.transAxes, ha='right', fontsize=9, fontweight='bold')
-
-
-            # --- Columns 1-3: Composites ---
-            data = composite_results.get(season)
-            if not data: continue
-            
-            mean_ext = data['extreme_mean']
-            mean_non = data['non_extreme_mean']
-            diff = data['diff']
-            sig_mask = data['sig_mask']
-            
-            extent = [-105, 40, 0, 90]
-            
-            # Panel 1: Extreme
-            ax1 = fig.add_subplot(gs[i, 1], projection=ccrs.PlateCarree())
-            ax1.set_extent(extent, crs=ccrs.PlateCarree())
-            ax1.add_feature(cfeature.COASTLINE, linewidth=0.5)
-            ax1.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
-            
-            limit = max(abs(mean_ext.min()), abs(mean_ext.max()), abs(mean_non.min()), abs(mean_non.max()))
-            limit = np.ceil(limit / 10) * 10
-            if limit < 10: limit = 50
-            
-            cf1 = ax1.pcolormesh(mean_ext.lon, mean_ext.lat, mean_ext, cmap='BrBG', 
-                                 vmin=-limit, vmax=limit, transform=ccrs.PlateCarree())
-            ax1.set_title(f"Extreme Models (Short RP)", fontsize=10)
-            
-            # Panel 2: Non-Extreme
-            ax2 = fig.add_subplot(gs[i, 2], projection=ccrs.PlateCarree())
-            ax2.set_extent(extent, crs=ccrs.PlateCarree())
-            ax2.add_feature(cfeature.COASTLINE, linewidth=0.5)
-            ax2.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
-            
-            cf2 = ax2.pcolormesh(mean_non.lon, mean_non.lat, mean_non, cmap='BrBG', 
-                                 vmin=-limit, vmax=limit, transform=ccrs.PlateCarree())
-            ax2.set_title(f"Non-Extreme Models (Long RP)", fontsize=10)
-            
-            # Panel 3: Diff
-            ax3 = fig.add_subplot(gs[i, 3], projection=ccrs.PlateCarree())
-            ax3.set_extent(extent, crs=ccrs.PlateCarree())
-            ax3.add_feature(cfeature.COASTLINE, linewidth=0.5)
-            ax3.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
-            
-            diff_limit = max(abs(diff.min()), abs(diff.max()))
-            diff_limit = np.ceil(diff_limit / 5) * 5
-            
-            cf3 = ax3.pcolormesh(diff.lon, diff.lat, diff, cmap='PuOr', 
-                                 vmin=-diff_limit, vmax=diff_limit, transform=ccrs.PlateCarree())
-            
-            if sig_mask is not None:
-                skip = 4
-                lons_mesh, lats_mesh = np.meshgrid(diff.lon, diff.lat)
-                mask_sub = sig_mask[::skip, ::skip]
-                lons_sub = lons_mesh[::skip, ::skip]
-                lats_sub = lats_mesh[::skip, ::skip]
-                ax3.scatter(lons_sub[mask_sub], lats_sub[mask_sub], s=1, color='black', alpha=0.5, transform=ccrs.PlateCarree())
-            
-            ax3.set_title(f"Difference (Ext - Non)", fontsize=10)
-            
-            # Colorbars (Bottom)
-            if i == 1:
-                cax_mean = fig.add_axes([0.33, 0.06, 0.28, 0.02])
-                fig.colorbar(cf1, cax=cax_mean, orientation='horizontal', label='PR Zonal Anomaly (mm/day)', extend='both')
-                
-                cax_diff = fig.add_axes([0.72, 0.06, 0.15, 0.02])
-                fig.colorbar(cf3, cax=cax_diff, orientation='horizontal', label='Difference (mm/day)', extend='both')
-
-        # Legend
-        from matplotlib.lines import Line2D
-        legend_elements = [
-            Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b', label='Extreme Models', markersize=8),
-            Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac', label='Non-Extreme Models', markersize=8),
-            Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', label='All Models', markersize=6, alpha=0.5)
-        ]
-        fig.legend(handles=legend_elements, loc='lower left', bbox_to_anchor=(0.08, 0.06), frameon=False, title="Selection")
-
-        plt.subplots_adjust(bottom=0.15)
-        plt.suptitle(f"PR Composite Analysis: Extreme vs Non-Extreme Models ({event_key})\nGWL +{gwl}°C | {scenario.upper()}", 
-                     fontsize=14, weight='bold', y=0.98)
-                     
-        filename = f"composite_analysis_pr_{event_key}_{scenario}_gwl{gwl}.png"
-        filepath = os.path.join(Config.PLOT_DIR, filename)
-        plt.savefig(filepath, dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        logging.info(f"Saved PR composite plot to {filepath}")
-
-
+    @staticmethod
+    def plot_pr_composite_analysis_panel(composite_results, gwl, event_key, scenario, season,
+                                          model_rps=None, model_lists=None, n_total_models=None):
+        """Plots a 3×3 composite panel for PR (one season per plot)."""
+        Visualizer._plot_composite_3x3_panel(
+            composite_results, gwl, event_key, scenario, season,
+            var_label='PR', diff_unit='mm/day', cmap_diff='BrBG', contour_fmt='%.1f',
+            model_rps=model_rps, model_lists=model_lists, n_total_models=n_total_models
+        )

@@ -3592,6 +3592,9 @@ class StorylineAnalyzer:
         hist_mean_ext, hist_stack_ext, hist_used_ext = get_group_maps(extreme_models, 'historical')
         hist_mean_non, hist_stack_non, hist_used_non = get_group_maps(non_extreme_models, 'historical')
         
+        # --- ADDED: Historical Climatology (All Models) for Reference Contours ---
+        hist_mean_all, _, _ = get_group_maps(sorted_models, 'historical')
+        
         if fut_mean_ext is not None:
             logging.info(f"  Z500 Future Extreme Models (N={len(fut_used_ext)}): {fut_used_ext}")
         if fut_mean_non is not None:
@@ -3622,6 +3625,7 @@ class StorylineAnalyzer:
                 'future_non_extreme_mean': fut_mean_non,
                 'hist_extreme_mean': hist_mean_ext,
                 'hist_non_extreme_mean': hist_mean_non,
+                'hist_climatology_mean': hist_mean_all, # <--- Added this
                 'diff_ext_non_future': diff_ext_non_future,
                 'diff_ext_non_hist': diff_ext_non_hist,
                 'diff_fut_hist_ext': diff_fut_hist_ext,
@@ -3908,6 +3912,9 @@ class StorylineAnalyzer:
         hist_mean_ext, hist_stack_ext, hist_used_ext = get_group_maps(extreme_models, 'historical')
         hist_mean_non, hist_stack_non, hist_used_non = get_group_maps(non_extreme_models, 'historical')
         
+        # --- ADDED: Historical Climatology (All Models) for Reference Contours ---
+        hist_mean_all, _, _ = get_group_maps(sorted_models, 'historical')
+        
         if fut_mean_ext is not None:
             logging.info(f"  PSL Future Extreme Models (N={len(fut_used_ext)}): {fut_used_ext}")
         if fut_mean_non is not None:
@@ -3935,6 +3942,7 @@ class StorylineAnalyzer:
                 'future_non_extreme_mean': fut_mean_non,
                 'hist_extreme_mean': hist_mean_ext,
                 'hist_non_extreme_mean': hist_mean_non,
+                'hist_climatology_mean': hist_mean_all, # Added for contour plotting
                 'diff_ext_non_future': diff_ext_non_future,
                 'diff_ext_non_hist': diff_ext_non_hist,
                 'diff_fut_hist_ext': diff_fut_hist_ext,
@@ -4001,12 +4009,539 @@ class StorylineAnalyzer:
         member_files = sorted(member_groups[target_dir])
         return member_files
 
+    def find_cmip6_ua_file(self, model, scenario):
+        """
+        Searches for the raw UA file for a given model and scenario.
+        """
+        search_pattern = self.config.CMIP6_RAW_UA_PATH_PATTERN.format(model=model, scenario=scenario)
+        found_files = glob.glob(search_pattern)
+        
+        if not found_files:
+            return []
+            
+        return sorted(found_files)
+
+    def find_cmip6_ua_historical_file(self, model):
+        """
+        Searches for the raw UA file for a given model in the historical experiment.
+        """
+        search_pattern = self.config.CMIP6_HISTORICAL_UA_PATH_PATTERN.format(model=model)
+        found_files = glob.glob(search_pattern)
+        
+        if not found_files:
+            return []
+            
+        return sorted(found_files)
+
+    def _load_ua_seasonal_map(self, files, time_start, time_end, months, target_lat, target_lon):
+        """
+        Helper: loads UA data from files, selects time period, season, and LEVEL, returns mean map.
+        """
+        try:
+            ds = xr.open_mfdataset(files, combine='nested', concat_dim='time', chunks={'time': 12}, 
+                                   parallel=False, use_cftime=True, data_vars='minimal', coords='minimal', compat='override')
+            
+            if 'ua' in ds:
+                da = ds['ua']
+            elif 'UA' in ds:
+                da = ds['UA']
+            else:
+                ds.close()
+                return None
+            
+            rename_map = {'latitude': 'lat', 'longitude': 'lon'}
+            final_rename = {k:v for k,v in rename_map.items() if k in da.dims}
+            da = da.rename(final_rename)
+            
+            # Select 850hPa level if 3D
+            # Check for common vertical coordinate names
+            level_name = None
+            for dim in ['plev', 'level', 'pressure']:
+                if dim in da.dims:
+                    level_name = dim
+                    break
+            
+            if level_name:
+                try:
+                    # Try 85000 Pa first (CMIP6 standard)
+                    da = da.sel({level_name: 85000}, method='nearest', tolerance=500)
+                except KeyError:
+                    try:
+                        # Try 850 hPa
+                        da = da.sel({level_name: 850}, method='nearest', tolerance=5)
+                    except KeyError:
+                        logging.warning(f"  Could not find 850hPa level in {level_name}. Available: {da[level_name].values}")
+                        ds.close()
+                        return None
+            
+            if da.lon.max() > 180:
+                da = da.assign_coords(lon=(((da.lon + 180) % 360) - 180)).sortby('lon')
+                
+            try:
+                da_sel = da.sel(time=slice(str(time_start), str(time_end)))
+            except (TypeError, KeyError, ValueError):
+                try:
+                    time_ref = da.time.values[0] 
+                    date_type = type(time_ref)
+                    start_conf = date_type(time_start, 1, 1)
+                    try:
+                        end_conf = date_type(time_end, 12, 31)
+                    except ValueError:
+                        end_conf = date_type(time_end, 12, 30)
+                    da_sel = da.sel(time=slice(start_conf, end_conf))
+                except Exception:
+                    ds.close()
+                    return None
+            
+            try:
+                month_mask = da_sel.time.dt.month.isin(months)
+            except AttributeError:
+                 # cftime workaround
+                month_mask = np.isin(da_sel.time.values, [t for t in da_sel.time.values if t.month in months])
+                da_sel = da_sel.sel(time=month_mask)
+            else:
+                da_sel = da_sel.sel(time=month_mask)
+                
+            if da_sel.time.size == 0:
+                ds.close()
+                return None
+                
+            seasonal_mean = da_sel.mean(dim='time')
+            
+            # Regrid to common grid
+            # Regrid to common grid using xarray.interp (consistent with Z500/PSL)
+            regridded = seasonal_mean.interp(lat=target_lat, lon=target_lon, method='linear')
+            
+            result = regridded.compute()
+            ds.close()
+            return result
+            
+        except Exception as e:
+            logging.error(f"Error loading UA map: {e}")
+            return None
+
+    def calculate_ua_composites_for_extremes(self, cmip6_results, gwl, event_key, season):
+        """
+        Calculates composite maps for UA (Zonal Wind 850hPa) based on extreme vs non-extreme models.
+        """
+        logging.info(f"Calculating UA composites for event '{event_key}' at GWL +{gwl}°C, Season={season}...")
+        
+        # Reuse the model selection from standard logic or PR logic if available
+        # But we need to recalculate return periods or use the ones from cmip6_results if stored
+        # The most robust way is to re-use the model classification from calculate_z500... if available,
+        # but here we'll re-run standard classification for consistency.
+        
+        model_rps = {}
+        all_models = list(cmip6_results.get('cmip6_model_data_loaded', {}).keys())
+        metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
+        gwl_years = cmip6_results.get('gwl_threshold_years', {})
+        window = self.config.GWL_YEARS_WINDOW
+        
+        # 1. Calculate Return Periods for ALL models
+        selection_season = season.lower()
+        
+        for model_run_key in all_models:
+            q_metrics = metric_timeseries.get(model_run_key, {})
+
+            if '30Q' in event_key: duration = '30Q'
+            elif '7Q' in event_key: duration = '7Q'
+            elif '1Q' in event_key: duration = '1Q'
+            else: duration = 'Q_daily'
+            
+            metric_type = 'low' if 'low' in event_key else 'high'
+            
+            ts_annual_key = f"{duration}_{metric_type}_full_year"
+            ts_seasonal_key = f"{duration}_{metric_type}_{selection_season}"
+            
+            ts_annual = q_metrics.get(ts_annual_key)
+            ts_seasonal = q_metrics.get(ts_seasonal_key)
+            
+            if ts_annual is None or ts_seasonal is None: 
+                continue
+            
+            hist_annual = ts_annual.sel(year=slice(1960, 2014)).dropna(dim='year')
+            if hist_annual.year.size < 20: 
+                continue
+            
+            try:
+                target_T = int(event_key.split('Q')[1].split('_')[0])
+            except:
+                target_T = 10
+                
+            if metric_type == 'low':
+                thresh = np.quantile(hist_annual.values, 1.0/target_T)
+            else:
+                thresh = np.quantile(hist_annual.values, 1.0 - 1.0/target_T)
+                
+            gwl_year = gwl_years.get(model_run_key, {}).get(gwl)
+            if gwl_year is None: 
+                continue
+            
+            start, end = gwl_year - window // 2, gwl_year + (window - 1) // 2
+            fut_seasonal = ts_seasonal.sel(year=slice(start, end)).dropna(dim='year')
+            if fut_seasonal.year.size < 10: 
+                continue
+            
+            values = fut_seasonal.values
+            if metric_type == 'low':
+                count = (values < thresh).sum()
+            else:
+                count = (values > thresh).sum()
+                
+            prob = count / len(values)
+        
+            if prob > 1e-6:
+                T_fut = 1.0 / prob
+            else:
+                T_fut = np.inf
+                
+            model_rps[model_run_key] = T_fut
+             
+        if len(model_rps) < 1:
+            logging.warning("Not enough models for UA composite analysis (<1).")
+            return None
+            
+        # 2. Sort and Select
+        sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
+        
+        n_select = self.config.COMPOSITE_N_MODELS
+        if n_select * 2 > len(sorted_models):
+            n_select = len(sorted_models) // 2
+        if n_select < 1: n_select = 1
+            
+        if 'low' in event_key:
+             # Low flow: Lowest values are Extreme
+            extreme_models = sorted_models[:n_select]
+            non_extreme_models = sorted_models[-n_select:]
+        else:
+             # High flow: Highest values are Extreme
+            extreme_models = sorted_models[-n_select:]
+            non_extreme_models = sorted_models[:n_select]
+            
+        logging.info(f"  UA Extreme Models (N={len(extreme_models)}): {[m[0] for m in extreme_models]}")
+        logging.info(f"  UA Non-Extreme Models (N={len(non_extreme_models)}): {[m[0] for m in non_extreme_models]}")
+    
+        # 3. Compute Composites
+        target_lat = np.arange(-90, 90.1, 2.5)
+        target_lon = np.arange(-180, 180, 2.5)
+        months = [11, 12, 1, 2, 3, 4] if season == 'Winter' else [5, 6, 7, 8, 9, 10]
+        
+        hist_start = self.config.COMPOSITE_HIST_PERIOD_START
+        hist_end = self.config.COMPOSITE_HIST_PERIOD_END
+        
+        def get_group_maps(model_list, period='future'):
+            maps = []
+            used_models = []
+            for model_key, _ in model_list:
+                model_name = model_key.split('_')[0]
+                scenario = model_key.split('_')[1]
+                
+                if period == 'future':
+                    files = self.find_cmip6_ua_file(model_name, scenario)
+                    gwl_y = gwl_years.get(model_key, {}).get(gwl)
+                    if gwl_y is None: continue
+                    t_start = gwl_y - window // 2
+                    t_end = gwl_y + (window - 1) // 2
+                else:
+                    files = self.find_cmip6_ua_historical_file(model_name)
+                    t_start = hist_start
+                    t_end = hist_end
+                
+                if not files: 
+                    logging.warning(f"    Missing UA {'historical' if period != 'future' else 'future'} file for {model_key}")
+                    continue
+                    
+                regrid = self._load_ua_seasonal_map(files, t_start, t_end, months, target_lat, target_lon)
+                if regrid is not None:
+                    maps.append(regrid)
+                    used_models.append(model_key)
+                else:
+                    logging.warning(f"    Could not load UA {period} data for {model_key}")
+                    
+            if not maps: return None, None, []
+            
+            concatenated = xr.concat(maps, dim='model')
+            composite_mean = concatenated.mean(dim='model')
+            return composite_mean, concatenated, used_models
+        
+        # Future composites
+        fut_mean_ext, fut_stack_ext, fut_used_ext = get_group_maps(extreme_models, 'future')
+        fut_mean_non, fut_stack_non, fut_used_non = get_group_maps(non_extreme_models, 'future')
+        
+        # Historical composites
+        hist_mean_ext, hist_stack_ext, hist_used_ext = get_group_maps(extreme_models, 'historical')
+        hist_mean_non, hist_stack_non, hist_used_non = get_group_maps(non_extreme_models, 'historical')
+        
+        composites = {}
+        if all(x is not None for x in [fut_mean_ext, fut_mean_non, hist_mean_ext, hist_mean_non]):
+            diff_ext_non_future = fut_mean_ext - fut_mean_non
+            diff_ext_non_hist = hist_mean_ext - hist_mean_non
+            diff_fut_hist_ext = fut_mean_ext - hist_mean_ext
+            diff_fut_hist_non = fut_mean_non - hist_mean_non
+            
+            sig_ext_non_fut = self._calculate_permutation_significance(fut_stack_ext, fut_stack_non)
+            sig_ext_non_hist = self._calculate_permutation_significance(hist_stack_ext, hist_stack_non)
+            sig_fut_hist_ext = self._calculate_permutation_significance(fut_stack_ext, hist_stack_ext)
+            sig_fut_hist_non = self._calculate_permutation_significance(fut_stack_non, hist_stack_non)
+            
+            # --- Climatology Calculation (Mean of all used models, future + hist combined or just hist?) ---
+            # Standard practice: Use Historical Climatology of ALL models in the selection pool?
+            # Or just the models used in the composite?
+            # Let's use the mean of the historical extreme and non-extreme means as a proxy for "climatology"
+            # Or better: (hist_mean_ext + hist_mean_non) / 2
+            
+            hist_mean_all = (hist_mean_ext + hist_mean_non) / 2.0
+            
+            composites = {
+                'future_extreme_mean': fut_mean_ext,
+                'future_non_extreme_mean': fut_mean_non,
+                'hist_extreme_mean': hist_mean_ext,
+                'hist_non_extreme_mean': hist_mean_non,
+                'hist_climatology_mean': hist_mean_all, # Added for contour plotting
+                'diff_ext_non_future': diff_ext_non_future,
+                'diff_ext_non_hist': diff_ext_non_hist,
+                'diff_fut_hist_ext': diff_fut_hist_ext,
+                'diff_fut_hist_non': diff_fut_hist_non,
+                'sig_mask_ext_non_future': sig_ext_non_fut.values < 0.05,
+                'sig_mask_ext_non_hist': sig_ext_non_hist.values < 0.05,
+                'sig_mask_fut_hist_ext': sig_fut_hist_ext.values < 0.05,
+                'sig_mask_fut_hist_non': sig_fut_hist_non.values < 0.05,
+                'used_extreme_models': fut_used_ext,
+                'used_non_extreme_models': fut_used_non,
+            }
+        else:
+            logging.warning(f"  UA: Could not compute all 4 composites (future+historical) for season {season}.")
+            
+        return composites, (extreme_models, non_extreme_models), model_rps, len(all_models)
+
+    def find_cmip6_tas_file(self, model, scenario):
+        search_pattern = self.config.CMIP6_RAW_TAS_PATH_PATTERN.format(model=model, scenario=scenario)
+        found_files = glob.glob(search_pattern)
+        return sorted(found_files) if found_files else []
+
+    def find_cmip6_tas_historical_file(self, model):
+        search_pattern = self.config.CMIP6_HISTORICAL_TAS_PATH_PATTERN.format(model=model)
+        found_files = glob.glob(search_pattern)
+        return sorted(found_files) if found_files else []
+
+    def _load_tas_seasonal_map(self, files, time_start, time_end, months, target_lat, target_lon):
+        # Similar to PR but for TAS
+        try:
+            ds = xr.open_mfdataset(files, combine='nested', concat_dim='time', chunks={'time': 12}, 
+                                   parallel=False, use_cftime=True, data_vars='minimal', coords='minimal', compat='override')
+            if 'tas' in ds: da = ds['tas']
+            elif 'TAS' in ds: da = ds['TAS']
+            else: ds.close(); return None
+            
+            rename_map = {'latitude': 'lat', 'longitude': 'lon'}
+            final_rename = {k:v for k,v in rename_map.items() if k in da.dims}
+            da = da.rename(final_rename)
+            
+            if da.attrs.get('units', '').lower() == 'k':
+                da = da - 273.15
+                da.attrs['units'] = 'degC'
+
+            # Drop height coordinate if present (sometimes 2m, sometimes missing) to avoid concat errors
+            if 'height' in da.coords:
+                da = da.drop_vars('height')
+
+            if da.lon.max() > 180:
+                da = da.assign_coords(lon=(((da.lon + 180) % 360) - 180)).sortby('lon')
+
+            # ... Time selection (same as PR/UA) ...
+            try:
+                da_sel = da.sel(time=slice(str(time_start), str(time_end)))
+            except:
+                 # Fallback for cftime issues
+                 return None 
+                 
+            # ... Month selection ...
+            try:
+                month_mask = da_sel.time.dt.month.isin(months)
+            except AttributeError:
+                month_mask = np.isin(da_sel.time.values, [t for t in da_sel.time.values if t.month in months])
+                
+            da_sel = da_sel.sel(time=month_mask)
+            if da_sel.time.size == 0: ds.close(); return None
+                
+            seasonal_mean = da_sel.mean(dim='time')
+            
+            # Regrid to common grid using xarray.interp (consistent with Z500/PSL)
+            regridded = seasonal_mean.interp(lat=target_lat, lon=target_lon, method='linear')
+
+            result = regridded.compute()
+            ds.close()
+            return result
+        except Exception as e:
+            logging.error(f"Error loading TAS map: {e}")
+            return None
+
+    def calculate_tas_composites_for_extremes(self, cmip6_results, gwl, event_key, season):
+        """
+        Calculates composite maps for TAS (Surface Temperature).
+        """
+        logging.info(f"Calculating TAS composites for event '{event_key}' at GWL +{gwl}°C, Season={season}...")
+        
+        # Reuse logic for sorting models (same as UA)
+        model_rps = {}
+        all_models = list(cmip6_results.get('cmip6_model_data_loaded', {}).keys())
+        metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
+        gwl_years = cmip6_results.get('gwl_threshold_years', {})
+        window = self.config.GWL_YEARS_WINDOW
+        
+        # 1. Calculate Return Periods for ALL models
+        selection_season = season.lower()
+
+        for model_run_key in all_models:
+            q_metrics = metric_timeseries.get(model_run_key, {})
+
+            if '30Q' in event_key: duration = '30Q'
+            elif '7Q' in event_key: duration = '7Q'
+            elif '1Q' in event_key: duration = '1Q'
+            else: duration = 'Q_daily'
+            
+            metric_type = 'low' if 'low' in event_key else 'high'
+            
+            ts_annual_key = f"{duration}_{metric_type}_full_year"
+            ts_seasonal_key = f"{duration}_{metric_type}_{selection_season}"
+            
+            ts_annual = q_metrics.get(ts_annual_key)
+            ts_seasonal = q_metrics.get(ts_seasonal_key)
+            
+            if ts_annual is None or ts_seasonal is None: 
+                continue
+            
+            hist_annual = ts_annual.sel(year=slice(1960, 2014)).dropna(dim='year')
+            if hist_annual.year.size < 20: 
+                continue
+            
+            try:
+                target_T = int(event_key.split('Q')[1].split('_')[0])
+            except:
+                target_T = 10
+                
+            if metric_type == 'low':
+                thresh = np.quantile(hist_annual.values, 1.0/target_T)
+            else:
+                thresh = np.quantile(hist_annual.values, 1.0 - 1.0/target_T)
+                
+            gwl_year = gwl_years.get(model_run_key, {}).get(gwl)
+            if gwl_year is None: 
+                continue
+            
+            start, end = gwl_year - window // 2, gwl_year + (window - 1) // 2
+            fut_seasonal = ts_seasonal.sel(year=slice(start, end)).dropna(dim='year')
+            if fut_seasonal.year.size < 10: 
+                continue
+            
+            values = fut_seasonal.values
+            if metric_type == 'low':
+                count = (values < thresh).sum()
+            else:
+                count = (values > thresh).sum()
+                
+            prob = count / len(values)
+        
+            if prob > 1e-6:
+                T_fut = 1.0 / prob
+            else:
+                T_fut = np.inf
+                
+            model_rps[model_run_key] = T_fut
+             
+        if len(model_rps) < 1: return None
+            
+        sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
+        n_select = self.config.COMPOSITE_N_MODELS
+        if n_select * 2 > len(sorted_models): n_select = len(sorted_models) // 2
+        if n_select < 1: n_select = 1
+            
+        if 'low' in event_key:
+            extreme_models = sorted_models[:n_select]
+            non_extreme_models = sorted_models[-n_select:]
+        else:
+            extreme_models = sorted_models[-n_select:]
+            non_extreme_models = sorted_models[:n_select]
+            
+        logging.info(f"  TAS Extreme Models (N={len(extreme_models)}): {[m[0] for m in extreme_models]}")
+        
+        # Compute Composites
+        target_lat = np.arange(-90, 90.1, 2.5)
+        target_lon = np.arange(-180, 180, 2.5)
+        months = [11, 12, 1, 2, 3, 4] if season == 'Winter' else [5, 6, 7, 8, 9, 10]
+        hist_start = self.config.COMPOSITE_HIST_PERIOD_START
+        hist_end = self.config.COMPOSITE_HIST_PERIOD_END
+        
+        def get_group_maps(model_list, period='future'):
+            maps = []
+            used_models = []
+            for model_key, _ in model_list:
+                model_name = model_key.split('_')[0]
+                scenario = model_key.split('_')[1]
+                
+                if period == 'future':
+                    files = self.find_cmip6_tas_file(model_name, scenario)
+                    gwl_y = gwl_years.get(model_key, {}).get(gwl)
+                    if gwl_y is None: continue
+                    t_start = gwl_y - window // 2
+                    t_end = gwl_y + (window - 1) // 2
+                else:
+                    files = self.find_cmip6_tas_historical_file(model_name)
+                    t_start = hist_start
+                    t_end = hist_end
+                
+                if not files: 
+                    logging.warning(f"    Missing TAS {'historical' if period != 'future' else 'future'} file for {model_key}")
+                    continue
+                    
+                regrid = self._load_tas_seasonal_map(files, t_start, t_end, months, target_lat, target_lon)
+                if regrid is not None:
+                    maps.append(regrid)
+                    used_models.append(model_key)
+                    
+            if not maps: return None, None, []
+            concatenated = xr.concat(maps, dim='model')
+            composite_mean = concatenated.mean(dim='model')
+            return composite_mean, concatenated, used_models
+
+        fut_mean_ext, fut_stack_ext, fut_used_ext = get_group_maps(extreme_models, 'future')
+        fut_mean_non, fut_stack_non, fut_used_non = get_group_maps(non_extreme_models, 'future')
+        hist_mean_ext, hist_stack_ext, hist_used_ext = get_group_maps(extreme_models, 'historical')
+        hist_mean_non, hist_stack_non, hist_used_non = get_group_maps(non_extreme_models, 'historical')
+        
+        composites = {}
+        if all(x is not None for x in [fut_mean_ext, fut_mean_non, hist_mean_ext, hist_mean_non]):
+            hist_mean_all = (hist_mean_ext + hist_mean_non) / 2.0
+            
+            composites = {
+                'future_extreme_mean': fut_mean_ext,
+                'future_non_extreme_mean': fut_mean_non,
+                'hist_extreme_mean': hist_mean_ext,
+                'hist_non_extreme_mean': hist_mean_non,
+                'hist_climatology_mean': hist_mean_all,
+                'diff_ext_non_future': fut_mean_ext - fut_mean_non,
+                'diff_ext_non_hist': hist_mean_ext - hist_mean_non,
+                'diff_fut_hist_ext': fut_mean_ext - hist_mean_ext,
+                'diff_fut_hist_non': fut_mean_non - hist_mean_non,
+                'sig_mask_ext_non_future': self._calculate_permutation_significance(fut_stack_ext, fut_stack_non).values < 0.05,
+                'sig_mask_ext_non_hist': self._calculate_permutation_significance(hist_stack_ext, hist_stack_non).values < 0.05,
+                'sig_mask_fut_hist_ext': self._calculate_permutation_significance(fut_stack_ext, hist_stack_ext).values < 0.05,
+                'sig_mask_fut_hist_non': self._calculate_permutation_significance(fut_stack_non, hist_stack_non).values < 0.05,
+                'used_extreme_models': fut_used_ext,
+                'used_non_extreme_models': fut_used_non,
+            }
+        else:
+             logging.warning(f"  TAS: Could not compute all 4 composites (future+historical) for season {season}.")
+
+        return composites, (extreme_models, non_extreme_models), model_rps, len(all_models)
+
     def _load_pr_seasonal_map(self, files, time_start, time_end, months, target_lat, target_lon):
         """
         Helper: loads PR data from files, selects time period and season, returns mean map on common grid.
         """
         try:
-            ds = xr.open_mfdataset(files, combine='nested', concat_dim='time', chunks={'time': 12}, parallel=False)
+            ds = xr.open_mfdataset(files, combine='nested', concat_dim='time', chunks={'time': 12}, 
+                                   parallel=False, use_cftime=True, data_vars='minimal', coords='minimal', compat='override')
             
             if 'pr' in ds:
                 da = ds['pr']
@@ -4221,6 +4756,9 @@ class StorylineAnalyzer:
         hist_mean_ext, hist_stack_ext, hist_used_ext = get_group_maps(extreme_models, 'historical')
         hist_mean_non, hist_stack_non, hist_used_non = get_group_maps(non_extreme_models, 'historical')
         
+        # --- ADDED: Historical Climatology (All Models) for Reference Contours ---
+        hist_mean_all, _, _ = get_group_maps(sorted_models, 'historical')
+        
         if fut_mean_ext is not None:
             logging.info(f"  PR Future Extreme Models (N={len(fut_used_ext)}): {fut_used_ext}")
         if fut_mean_non is not None:
@@ -4248,6 +4786,7 @@ class StorylineAnalyzer:
                 'future_non_extreme_mean': fut_mean_non,
                 'hist_extreme_mean': hist_mean_ext,
                 'hist_non_extreme_mean': hist_mean_non,
+                'hist_climatology_mean': hist_mean_all, # Added for contour plotting
                 'diff_ext_non_future': diff_ext_non_future,
                 'diff_ext_non_hist': diff_ext_non_hist,
                 'diff_fut_hist_ext': diff_fut_hist_ext,

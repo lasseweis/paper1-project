@@ -4612,7 +4612,7 @@ class Visualizer:
     def _plot_composite_3x3_panel(composite_results, gwl, event_key, scenario, season,
                                       var_label, diff_unit, cmap_diff='PuOr',
                                       contour_fmt='%.0f', model_rps=None, model_lists=None, 
-                                      n_total_models=None):
+                                      n_total_models=None, map_extent=None):
         """
         Generic 3×3 composite panel for any variable.
         
@@ -4652,6 +4652,8 @@ class Visualizer:
         sig_fut_hist_ext = composite_results.get('sig_mask_fut_hist_ext')
         sig_fut_hist_non = composite_results.get('sig_mask_fut_hist_non')
         
+        hist_climatology = composite_results.get('hist_climatology_mean')
+
         # --- Shared contour levels for absolute value panels (Row 0, 1, Cols 0, 1) ---
         abs_maps = [m for m in [fut_ext, fut_non, hist_ext, hist_non] if m is not None]
         if abs_maps:
@@ -4661,35 +4663,111 @@ class Visualizer:
         else:
             contour_levels = None
         
-        # --- Shared color limits for difference panels ---
+        # --- Shared color limits for difference panels (Robust Scaling or Fixed) ---
         diff_maps = [m for m in [diff_ext_non_fut, diff_ext_non_hist, diff_fut_hist_ext, diff_fut_hist_non] if m is not None]
-        if diff_maps:
-            max_diff_val = max(max(abs(float(m.min())), abs(float(m.max()))) for m in diff_maps)
+        
+        # --- USER REQUEST: Uniform colorbars (fixed ranges) & White Masking ---
+        mask_threshold = 0.0
+        
+        if var_label == 'Z500':
+             diff_limit = 100.0 # Fixed range -100 to 100 m
+             mask_threshold = 20.0 # Requested by user: <20m white
+        elif var_label == 'PSL':
+             diff_limit = 10.0  # Fixed range -10 to 10 hPa
+             mask_threshold = 1.0 # 1 hPa seems reasonable white noise
+        elif var_label == 'UA850':
+             diff_limit = 5.0   # Fixed range -5 to 5 m/s
+             mask_threshold = 0.25 # 5% of range
+        elif var_label == 'TAS':
+             diff_limit = 10.0  # Fixed range -10 to 10 °C
+             mask_threshold = 0.5  # 5% of range
+        elif var_label == 'PR':
+             diff_limit = 5.0   # Fixed range -5 to 5 mm/day
+             mask_threshold = 0.25 # 5% of range
+        elif diff_maps:
+            # Fallback to robust scaling for other variables (if any)
+            all_diff_vals = np.concatenate([m.values.ravel() for m in diff_maps])
+            all_diff_vals = all_diff_vals[np.isfinite(all_diff_vals)]
+            
+            # Robust limits: use 99th percentile to avoid outliers driving the scale
+            max_diff_val = np.percentile(np.abs(all_diff_vals), 99) 
+            
+            # Round up to nice number
             diff_limit = np.ceil(max_diff_val / 5) * 5
             if diff_limit == 0:
                 diff_limit = 1
+            
+            # Default mask: 5% of range
+            mask_threshold = diff_limit * 0.05
         else:
             diff_limit = 1
+            mask_threshold = 0
+            
+        logging.info(f"  Using difference color limit: +/- {diff_limit} {diff_unit}, Masking < +/- {mask_threshold}")
         
         def _add_map_features(ax):
-            ax.set_extent(extent, crs=ccrs.PlateCarree())
+            if map_extent:
+                ax.set_extent(map_extent, crs=ccrs.PlateCarree())
+            else:
+                ax.set_extent(extent, crs=ccrs.PlateCarree())
             ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
             ax.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
         
-        def _plot_contour(ax, data_map, title):
-            _add_map_features(ax)
-            if data_map is not None and contour_levels is not None:
-                cs = ax.contour(data_map.lon, data_map.lat, data_map, levels=contour_levels,
-                                colors='black', linewidths=0.8, transform=ccrs.PlateCarree())
-                ax.clabel(cs, inline=True, fontsize=6, fmt=contour_fmt)
-            ax.set_title(title, fontsize=10)
+        def _plot_contour(ax, data_map, title, contours_to_use=None):
+             _add_map_features(ax)
+             levels = contours_to_use if contours_to_use is not None else contour_levels
+             if data_map is not None and levels is not None:
+                 cs = ax.contour(data_map.lon, data_map.lat, data_map, levels=levels,
+                                 colors='black', linewidths=0.8, transform=ccrs.PlateCarree())
+                 ax.clabel(cs, inline=True, fontsize=6, fmt=contour_fmt)
+             ax.set_title(title, fontsize=10)
         
-        def _plot_diff(ax, diff_map, sig_mask, title):
+        def _plot_diff(ax, diff_map, sig_mask, title, contour_map=None):
             _add_map_features(ax)
             cf = None
             if diff_map is not None:
-                cf = ax.pcolormesh(diff_map.lon, diff_map.lat, diff_map, cmap=cmap_diff,
+                # --- CUSTOM COLORMAPS (User Request) ---
+                # Positives = Red
+                # Negatives = Purple (Z500/PSL) or Green (PR)
+                
+                import matplotlib.colors as mcolors
+                
+                custom_cmap = None
+                
+                if var_label in ['Z500', 'PSL']:
+                    # Purple -> White -> Red
+                    # Uses Hex from ColorBrewer PuOr (Purple) and RdBu (Red)
+                    colors = ['#542788', '#ffffff', '#b2182b'] 
+                    custom_cmap = mcolors.LinearSegmentedColormap.from_list('PuWhRd', colors)
+                    
+                elif var_label == 'PR':
+                    # Green -> White -> Red
+                    # Uses Hex from BrBG (Green is usually positive there, but user wants Green Negative)
+                    # wait, user said "green (like pr) den negativen bereich".
+                    # BrBG: Brown(Neg)-Green(Pos). User wants Green(Neg)-Red(Pos).
+                    colors = ['#1a9850', '#ffffff', '#b2182b'] # Deep Green -> White -> Deep Red
+                    custom_cmap = mcolors.LinearSegmentedColormap.from_list('GnWhRd', colors)
+                
+                else:
+                    # Fallback to standard
+                    try:
+                        custom_cmap = matplotlib.pyplot.get_cmap(cmap_diff)
+                    except:
+                        custom_cmap = matplotlib.cm.get_cmap(cmap_diff)
+
+                # --- PLOT DIFFERENCE MAP ---
+                cf = ax.pcolormesh(diff_map.lon, diff_map.lat, diff_map, cmap=custom_cmap,
                                    vmin=-diff_limit, vmax=diff_limit, transform=ccrs.PlateCarree())
+                
+                # --- ADDED: Reference Climatology Contours ---
+                if contour_map is not None and contour_levels is not None:
+                    # Plot simplified contours (every 2nd level) for reference
+                    # INCREASED THICKNESS and ALPHA as requested
+                    ref_levels = contour_levels[::2]
+                    cs = ax.contour(contour_map.lon, contour_map.lat, contour_map, levels=ref_levels,
+                                    colors='gray', linewidths=1.2, alpha=0.9, transform=ccrs.PlateCarree())
+                    ax.clabel(cs, inline=True, fontsize=6, fmt=contour_fmt, colors='gray')
+
                 if sig_mask is not None:
                     skip = 4
                     lons_mesh, lats_mesh = np.meshgrid(diff_map.lon, diff_map.lat)
@@ -4709,7 +4787,8 @@ class Visualizer:
         _plot_contour(ax01, fut_non, "Future – Non-Extreme")
         
         ax02 = fig.add_subplot(gs[0, 2], projection=ccrs.PlateCarree())
-        cf_r0 = _plot_diff(ax02, diff_ext_non_fut, sig_ext_non_fut, "Future: Ext − Non")
+        # Add Reference Contours to Difference Plot
+        cf_r0 = _plot_diff(ax02, diff_ext_non_fut, sig_ext_non_fut, "Future: Ext − Non", contour_map=hist_climatology)
         
         # --- Row 1: Historical ---
         ax10 = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
@@ -4719,14 +4798,15 @@ class Visualizer:
         _plot_contour(ax11, hist_non, "Historical – Non-Extreme")
         
         ax12 = fig.add_subplot(gs[1, 2], projection=ccrs.PlateCarree())
-        cf_r1 = _plot_diff(ax12, diff_ext_non_hist, sig_ext_non_hist, "Historical: Ext − Non")
+        # Add Reference Contours to Difference Plot
+        cf_r1 = _plot_diff(ax12, diff_ext_non_hist, sig_ext_non_hist, "Historical: Ext − Non", contour_map=hist_climatology)
         
         # --- Row 2: Difference (Future − Historical) ---
         ax20 = fig.add_subplot(gs[2, 0], projection=ccrs.PlateCarree())
-        cf_r2a = _plot_diff(ax20, diff_fut_hist_ext, sig_fut_hist_ext, "Δ(Fut−Hist) – Extreme")
+        cf_r2a = _plot_diff(ax20, diff_fut_hist_ext, sig_fut_hist_ext, "Δ(Fut−Hist) – Extreme", contour_map=hist_climatology)
         
         ax21 = fig.add_subplot(gs[2, 1], projection=ccrs.PlateCarree())
-        cf_r2b = _plot_diff(ax21, diff_fut_hist_non, sig_fut_hist_non, "Δ(Fut−Hist) – Non-Extreme")
+        cf_r2b = _plot_diff(ax21, diff_fut_hist_non, sig_fut_hist_non, "Δ(Fut−Hist) – Non-Extreme", contour_map=hist_climatology)
         
         # Row 2, Col 2: Return Period Boxplot
         ax22 = fig.add_subplot(gs[2, 2])
@@ -4858,8 +4938,38 @@ class Visualizer:
     def plot_pr_composite_analysis_panel(composite_results, gwl, event_key, scenario, season,
                                           model_rps=None, model_lists=None, n_total_models=None):
         """Plots a 3×3 composite panel for PR (one season per plot)."""
+        # Central Europe Box from Config
+        # [LonMin, LonMax, LatMin, LatMax]
+        # Adding a small buffer around the box for better visualization
+        buffer = 5.0
+        ce_extent = [
+            Config.BOX_LON_MIN - buffer, Config.BOX_LON_MAX + buffer,
+            Config.BOX_LAT_MIN - buffer, Config.BOX_LAT_MAX + buffer
+        ]
+        
         Visualizer._plot_composite_3x3_panel(
             composite_results, gwl, event_key, scenario, season,
             var_label='PR', diff_unit='mm/day', cmap_diff='BrBG', contour_fmt='%.1f',
+            model_rps=model_rps, model_lists=model_lists, n_total_models=n_total_models,
+            map_extent=ce_extent # <--- Zoomed in
+        )
+
+    @staticmethod
+    def plot_ua_composite_analysis_panel(composite_results, gwl, event_key, scenario, season,
+                                          model_rps=None, model_lists=None, n_total_models=None):
+        """Plots a 3×3 composite panel for UA (Zonal Wind)."""
+        Visualizer._plot_composite_3x3_panel(
+            composite_results, gwl, event_key, scenario, season,
+            var_label='UA850', diff_unit='m/s', cmap_diff='RdBu_r', contour_fmt='%.1f',
+            model_rps=model_rps, model_lists=model_lists, n_total_models=n_total_models
+        )
+
+    @staticmethod
+    def plot_tas_composite_analysis_panel(composite_results, gwl, event_key, scenario, season,
+                                          model_rps=None, model_lists=None, n_total_models=None):
+        """Plots a 3×3 composite panel for TAS (Temperature)."""
+        Visualizer._plot_composite_3x3_panel(
+            composite_results, gwl, event_key, scenario, season,
+            var_label='TAS', diff_unit='°C', cmap_diff='RdBu_r', contour_fmt='%.1f',
             model_rps=model_rps, model_lists=model_lists, n_total_models=n_total_models
         )

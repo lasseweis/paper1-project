@@ -844,6 +844,52 @@ class ClimateAnalysis:
                         else:
                             logging.info(f"PR composite plot for GWL {gwl}, {composite_season} already exists.")
 
+                # --- PLOT: UA Composite Analysis (Zonal Wind 850hPa) ---
+                for gwl in Config.GLOBAL_WARMING_LEVELS:
+                    for composite_season in ['Winter', 'Summer']:
+                        ua_composite_plot_filename = os.path.join(Config.PLOT_DIR, f"composite_analysis_ua850_{composite_season.lower()}_{composite_event_key}_{scenario}_gwl{gwl}.png")
+                        if not os.path.exists(ua_composite_plot_filename):
+                            logging.info(f"Running UA composite analysis for GWL +{gwl}°C, Season {composite_season}, Event {composite_event_key}...")
+                            ua_result_tuple = storyline_analyzer.calculate_ua_composites_for_extremes(
+                                cmip6_results, gwl=gwl, event_key=composite_event_key, season=composite_season
+                            )
+                            if ua_result_tuple:
+                                ua_composite_results, ua_model_lists, ua_model_rps, ua_n_total_models = ua_result_tuple
+                                if ua_composite_results:
+                                    Visualizer.plot_ua_composite_analysis_panel(
+                                        ua_composite_results, gwl, composite_event_key, scenario, composite_season,
+                                        ua_model_rps, ua_model_lists, ua_n_total_models
+                                    )
+                                else:
+                                    logging.warning(f"UA composite analysis returned empty results for GWL {gwl}, {composite_season}.")
+                            else:
+                                logging.warning(f"UA composite analysis returned no results for GWL {gwl}, {composite_season}.")
+                        else:
+                            logging.info(f"UA composite plot for GWL {gwl}, {composite_season} already exists.")
+
+                # --- PLOT: TAS Composite Analysis (Surface Temperature) ---
+                for gwl in Config.GLOBAL_WARMING_LEVELS:
+                    for composite_season in ['Winter', 'Summer']:
+                        tas_composite_plot_filename = os.path.join(Config.PLOT_DIR, f"composite_analysis_tas_{composite_season.lower()}_{composite_event_key}_{scenario}_gwl{gwl}.png")
+                        if not os.path.exists(tas_composite_plot_filename):
+                            logging.info(f"Running TAS composite analysis for GWL +{gwl}°C, Season {composite_season}, Event {composite_event_key}...")
+                            tas_result_tuple = storyline_analyzer.calculate_tas_composites_for_extremes(
+                                cmip6_results, gwl=gwl, event_key=composite_event_key, season=composite_season
+                            )
+                            if tas_result_tuple:
+                                tas_composite_results, tas_model_lists, tas_model_rps, tas_n_total_models = tas_result_tuple
+                                if tas_composite_results:
+                                    Visualizer.plot_tas_composite_analysis_panel(
+                                        tas_composite_results, gwl, composite_event_key, scenario, composite_season,
+                                        tas_model_rps, tas_model_lists, tas_n_total_models
+                                    )
+                                else:
+                                    logging.warning(f"TAS composite analysis returned empty results for GWL {gwl}, {composite_season}.")
+                            else:
+                                logging.warning(f"TAS composite analysis returned no results for GWL {gwl}, {composite_season}.")
+                        else:
+                            logging.info(f"TAS composite plot for GWL {gwl}, {composite_season} already exists.")
+
                 # --- PLOT: Storyline Impacts Bar Chart (per scenario) ---
                 # (This block remains the same, but it uses the 'return_period_results_for_plot' calculated above)
                 impacts_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_impacts_summary_4x2_boxplots_{scenario}.png")

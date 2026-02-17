@@ -82,12 +82,20 @@ class Config:
     CMIP6_RAW_PSL_PATH_PATTERN = '/data/reloclim/normal/CMIP6/ScenarioMIP/*/{model}/{scenario}/*/Amon/psl/*/*/psl_*.nc'
 
     # Raw Data Path for Composite Analysis (PR - Precipitation)
-    CMIP6_RAW_PR_PATH_PATTERN = '/data/reloclim/normal/CMIP6/ScenarioMIP/*/{model}/{scenario}/*/Amon/pr/*/*/pr_*.nc'
+    CMIP6_RAW_PR_PATH_PATTERN = '/data/reloclim/normal/CMIP6_STREAM/paper1-cmip-data/pr_regrid/pr_Amon_{model}_{scenario}_*_*_regridded.nc'
+
+    # Raw Data Path for Composite Analysis (UA - Zonal Wind 850hPa)
+    CMIP6_RAW_UA_PATH_PATTERN = '/data/reloclim/normal/CMIP6_STREAM/paper1-cmip-data/ua_regrid/ua_Amon_{model}_{scenario}_*_*_regridded.nc'
+
+    # Raw Data Path for Composite Analysis (TAS - Surface Temperature)
+    CMIP6_RAW_TAS_PATH_PATTERN = '/data/reloclim/normal/CMIP6_STREAM/paper1-cmip-data/tas_regrid/tas_Amon_{model}_{scenario}_*_*_regridded.nc'
 
     # Historical Raw Data Paths for Composite Analysis
     CMIP6_HISTORICAL_ZG_PATH_PATTERN = '/data/reloclim/normal/CMIP6/CMIP/*/{model}/historical/*/Amon/zg/*/*/zg_*.nc'
     CMIP6_HISTORICAL_PSL_PATH_PATTERN = '/data/reloclim/normal/CMIP6/CMIP/*/{model}/historical/*/Amon/psl/*/*/psl_*.nc'
-    CMIP6_HISTORICAL_PR_PATH_PATTERN = '/data/reloclim/normal/CMIP6/CMIP/*/{model}/historical/*/Amon/pr/*/*/pr_*.nc'
+    CMIP6_HISTORICAL_PR_PATH_PATTERN = '/data/reloclim/normal/CMIP6_STREAM/paper1-cmip-data/pr_regrid/pr_Amon_{model}_historical_*_*_regridded.nc'
+    CMIP6_HISTORICAL_UA_PATH_PATTERN = '/data/reloclim/normal/CMIP6_STREAM/paper1-cmip-data/ua_regrid/ua_Amon_{model}_historical_*_*_regridded.nc'
+    CMIP6_HISTORICAL_TAS_PATH_PATTERN = '/data/reloclim/normal/CMIP6_STREAM/paper1-cmip-data/tas_regrid/tas_Amon_{model}_historical_*_*_regridded.nc'
     COMPOSITE_HIST_PERIOD_START = 1960
     COMPOSITE_HIST_PERIOD_END = 2014
 

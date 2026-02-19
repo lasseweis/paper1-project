@@ -822,10 +822,13 @@ class ClimateAnalysis:
 
                 # --- PLOT: PR Composite Analysis (Extreme vs Non-Extreme) ---
                 # Added Feb 2026 - Mirrors Z500 composite but for precipitation
+                pr_stored_composites = {}  # Store results for combined plot
                 for gwl in Config.GLOBAL_WARMING_LEVELS:
                     for composite_season in ['Winter', 'Summer']:
                         pr_composite_plot_filename = os.path.join(Config.PLOT_DIR, f"composite_analysis_pr_{composite_season.lower()}_{composite_event_key}_{scenario}_gwl{gwl}.png")
-                        if not os.path.exists(pr_composite_plot_filename):
+                        pr_combined_plot_filename = os.path.join(Config.PLOT_DIR, f"combined_diff_pr_{composite_event_key}_{scenario}_gwl{gwl}.png")
+                        need_compute = not os.path.exists(pr_composite_plot_filename) or not os.path.exists(pr_combined_plot_filename)
+                        if need_compute:
                             logging.info(f"Running PR composite analysis for GWL +{gwl}°C, Season {composite_season}, Event {composite_event_key}...")
                             pr_result_tuple = storyline_analyzer.calculate_pr_composites_for_extremes(
                                 cmip6_results, gwl=gwl, event_key=composite_event_key, season=composite_season
@@ -833,10 +836,12 @@ class ClimateAnalysis:
                             if pr_result_tuple:
                                 pr_composite_results, pr_model_lists, pr_model_rps, pr_n_total_models = pr_result_tuple
                                 if pr_composite_results:
-                                    Visualizer.plot_pr_composite_analysis_panel(
-                                        pr_composite_results, gwl, composite_event_key, scenario, composite_season,
-                                        pr_model_rps, pr_model_lists, pr_n_total_models
-                                    )
+                                    pr_stored_composites[(gwl, composite_season)] = (pr_composite_results, pr_model_rps, pr_n_total_models)
+                                    if not os.path.exists(pr_composite_plot_filename):
+                                        Visualizer.plot_pr_composite_analysis_panel(
+                                            pr_composite_results, gwl, composite_event_key, scenario, composite_season,
+                                            pr_model_rps, pr_model_lists, pr_n_total_models
+                                        )
                                 else:
                                     logging.warning(f"PR composite analysis returned empty results for GWL {gwl}, {composite_season}.")
                             else:
@@ -844,11 +849,32 @@ class ClimateAnalysis:
                         else:
                             logging.info(f"PR composite plot for GWL {gwl}, {composite_season} already exists.")
 
+                # --- Combined PR Difference Plots (Winter + Summer) ---
+                for gwl in Config.GLOBAL_WARMING_LEVELS:
+                    pr_combined_fn = os.path.join(Config.PLOT_DIR, f"combined_diff_pr_{composite_event_key}_{scenario}_gwl{gwl}.png")
+                    if not os.path.exists(pr_combined_fn):
+                        w_data = pr_stored_composites.get((gwl, 'Winter'))
+                        s_data = pr_stored_composites.get((gwl, 'Summer'))
+                        if w_data and s_data:
+                            Visualizer.plot_pr_combined_composite_diff_panel(
+                                winter_composite=w_data[0], summer_composite=s_data[0],
+                                gwl=gwl, event_key=composite_event_key, scenario=scenario,
+                                winter_model_rps=w_data[1], summer_model_rps=s_data[1],
+                                winter_n_total=w_data[2], summer_n_total=s_data[2]
+                            )
+                        else:
+                            logging.warning(f"Cannot create combined PR diff plot for GWL {gwl}: missing season data.")
+                    else:
+                        logging.info(f"Combined PR diff plot for GWL {gwl} already exists.")
+
                 # --- PLOT: UA Composite Analysis (Zonal Wind 850hPa) ---
+                ua_stored_composites = {}  # Store results for combined plot
                 for gwl in Config.GLOBAL_WARMING_LEVELS:
                     for composite_season in ['Winter', 'Summer']:
                         ua_composite_plot_filename = os.path.join(Config.PLOT_DIR, f"composite_analysis_ua850_{composite_season.lower()}_{composite_event_key}_{scenario}_gwl{gwl}.png")
-                        if not os.path.exists(ua_composite_plot_filename):
+                        ua_combined_plot_filename = os.path.join(Config.PLOT_DIR, f"combined_diff_ua850_{composite_event_key}_{scenario}_gwl{gwl}.png")
+                        need_compute = not os.path.exists(ua_composite_plot_filename) or not os.path.exists(ua_combined_plot_filename)
+                        if need_compute:
                             logging.info(f"Running UA composite analysis for GWL +{gwl}°C, Season {composite_season}, Event {composite_event_key}...")
                             ua_result_tuple = storyline_analyzer.calculate_ua_composites_for_extremes(
                                 cmip6_results, gwl=gwl, event_key=composite_event_key, season=composite_season
@@ -856,16 +882,36 @@ class ClimateAnalysis:
                             if ua_result_tuple:
                                 ua_composite_results, ua_model_lists, ua_model_rps, ua_n_total_models = ua_result_tuple
                                 if ua_composite_results:
-                                    Visualizer.plot_ua_composite_analysis_panel(
-                                        ua_composite_results, gwl, composite_event_key, scenario, composite_season,
-                                        ua_model_rps, ua_model_lists, ua_n_total_models
-                                    )
+                                    ua_stored_composites[(gwl, composite_season)] = (ua_composite_results, ua_model_rps, ua_n_total_models)
+                                    if not os.path.exists(ua_composite_plot_filename):
+                                        Visualizer.plot_ua_composite_analysis_panel(
+                                            ua_composite_results, gwl, composite_event_key, scenario, composite_season,
+                                            ua_model_rps, ua_model_lists, ua_n_total_models
+                                        )
                                 else:
                                     logging.warning(f"UA composite analysis returned empty results for GWL {gwl}, {composite_season}.")
                             else:
                                 logging.warning(f"UA composite analysis returned no results for GWL {gwl}, {composite_season}.")
                         else:
                             logging.info(f"UA composite plot for GWL {gwl}, {composite_season} already exists.")
+
+                # --- Combined UA Difference Plots (Winter + Summer) ---
+                for gwl in Config.GLOBAL_WARMING_LEVELS:
+                    ua_combined_fn = os.path.join(Config.PLOT_DIR, f"combined_diff_ua850_{composite_event_key}_{scenario}_gwl{gwl}.png")
+                    if not os.path.exists(ua_combined_fn):
+                        w_data = ua_stored_composites.get((gwl, 'Winter'))
+                        s_data = ua_stored_composites.get((gwl, 'Summer'))
+                        if w_data and s_data:
+                            Visualizer.plot_ua_combined_composite_diff_panel(
+                                winter_composite=w_data[0], summer_composite=s_data[0],
+                                gwl=gwl, event_key=composite_event_key, scenario=scenario,
+                                winter_model_rps=w_data[1], summer_model_rps=s_data[1],
+                                winter_n_total=w_data[2], summer_n_total=s_data[2]
+                            )
+                        else:
+                            logging.warning(f"Cannot create combined UA diff plot for GWL {gwl}: missing season data.")
+                    else:
+                        logging.info(f"Combined UA diff plot for GWL {gwl} already exists.")
 
                 # --- PLOT: TAS Composite Analysis (Surface Temperature) ---
                 for gwl in Config.GLOBAL_WARMING_LEVELS:

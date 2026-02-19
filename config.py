@@ -56,6 +56,10 @@ class Config:
     JET_LAT_BOX_LAT_MIN, JET_LAT_BOX_LAT_MAX = 30.0, 70.0
     JET_LAT_BOX_LON_MIN, JET_LAT_BOX_LON_MAX = -20.0, 0.0
 
+    # Greenland Mask Coordinates (Central Greenland)
+    GREENLAND_LAT_MIN, GREENLAND_LAT_MAX = 65.0, 80.0
+    GREENLAND_LON_MIN, GREENLAND_LON_MAX = -55.0, -30.0
+
     # Base period for reanalysis anomaly calculation
     BASE_PERIOD_START_YEAR = 1981
     BASE_PERIOD_END_YEAR = 2010

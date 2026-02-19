@@ -3962,6 +3962,8 @@ class StorylineAnalyzer:
     def find_cmip6_pr_file(self, model, scenario):
         """
         Searches for the raw PR (precipitation) file for a given model and scenario.
+        Handles cases where both standard (YYYYMM-YYYYMM) and non-standard (e.g. YYYYMMDD-YYYYMMDD) files exist,
+        prioritizing standard files and filling gaps with non-standard ones to avoid overlaps.
         """
         search_pattern = self.config.CMIP6_RAW_PR_PATH_PATTERN.format(model=model, scenario=scenario)
         found_files = glob.glob(search_pattern)
@@ -3981,8 +3983,109 @@ class StorylineAnalyzer:
         sorted_dirs = sorted(member_groups.keys())
         target_dir = sorted_dirs[0]
         
-        member_files = sorted(member_groups[target_dir])
-        return member_files
+        # --- NEW: Member Filtering within the target directory ---
+        # Even if in the same directory, we must ensure we don't mix members (r1, r13...)
+        files_in_dir = member_groups[target_dir]
+        realization_groups = {}
+        for f in files_in_dir:
+            try:
+                basename = os.path.basename(f)
+                parts = basename.split('_')
+                member = parts[4] # var_table_model_exp_MEMBER_...
+                if not member.startswith('r'): pass
+                if member not in realization_groups: realization_groups[member] = []
+                realization_groups[member].append(f)
+            except IndexError:
+                # Fallback: put in a 'unknown' group
+                if 'unknown' not in realization_groups: realization_groups['unknown'] = []
+                realization_groups['unknown'].append(f)
+        
+        if len(realization_groups) > 1:
+            sorted_mems = sorted(realization_groups.keys())
+            # Prefer r1...
+            target_mem = sorted_mems[0]
+            for m in sorted_mems:
+                if m.startswith('r1i') and 'p1' in m:
+                    target_mem = m
+                    break
+            logging.info(f"Selected PR file member '{target_mem}' for {model} ({scenario}) from available in dir: {sorted_mems}")
+            member_files = sorted(realization_groups[target_mem])
+        else:
+            member_files = sorted(files_in_dir)
+        # --- END NEW ---
+        
+        # --- Smart Filtering Logic ---
+        standard_files = []
+        non_standard_files = []
+        
+        # Regex for YYYYMM-YYYYMM (Standard)
+        # e.g. pr_Amon_EC-Earth3-Veg-LR_ssp585_r1i1p1f1_gr_204201-204212_regridded.nc
+        # We look for exactly 6 digits, hyphen, 6 digits
+        import re
+        re_standard = re.compile(r'_(\d{6})-(\d{6})_')
+        
+        # Regex for YYYYMMDD-YYYYMMDD (Non-Standard)
+        # e.g. pr_Amon_EC-Earth3-Veg-LR_ssp585_r1i1p1f1_gr_20420116-21001216_regridded.nc
+        re_non_std = re.compile(r'_(\d{8})-(\d{8})_')
+
+        for f in member_files:
+            basename = os.path.basename(f)
+            match_std = re_standard.search(basename)
+            match_non = re_non_std.search(basename)
+            
+            if match_std:
+                start_str, end_str = match_std.groups()
+                # Convert to YYYYMM integer for easy comparison
+                s_code = int(start_str)
+                e_code = int(end_str)
+                standard_files.append({
+                    'path': f,
+                    'start': s_code,
+                    'end': e_code,
+                    'type': 'standard'
+                })
+            elif match_non:
+                start_str, end_str = match_non.groups()
+                # Convert YYYYMMDD to YYYYMM for comparison
+                s_code = int(start_str[:6])
+                e_code = int(end_str[:6])
+                non_standard_files.append({
+                    'path': f,
+                    'start': s_code,
+                    'end': e_code,
+                    'type': 'non_standard'
+                })
+            else:
+                # If it doesn't match either, include it by default (fallback)
+                logging.warning(f"File {basename} does not match expected date pattern, including it in standard set.")
+                standard_files.append({
+                    'path': f,
+                    'start': 0, 
+                    'end': 999999,
+                    'type': 'unknown'
+                })
+
+        # 1. Start with all Standard files
+        final_files = [item['path'] for item in standard_files]
+        
+        #Helper to check overlap against accepted ranges
+        def overlaps_with_accepted(candidate_start, candidate_end, accepted_list):
+            for item in accepted_list:
+                # Simple interval overlap check
+                # (StartA <= EndB) and (EndA >= StartB)
+                if (candidate_start <= item['end']) and (candidate_end >= item['start']):
+                    return True
+            return False
+
+        # 2. Add Non-Standard files ONLY if they don't overlap with existing accepted files
+        for ns in non_standard_files:
+            if not overlaps_with_accepted(ns['start'], ns['end'], standard_files):
+                final_files.append(ns['path'])
+                logging.info(f"Including non-standard file to fill gap: {os.path.basename(ns['path'])}")
+            else:
+                logging.warning(f"Excluding overlapping non-standard file: {os.path.basename(ns['path'])}")
+        
+        return sorted(final_files)
 
     def find_cmip6_pr_historical_file(self, model):
         """
@@ -3994,20 +4097,88 @@ class StorylineAnalyzer:
         if not found_files:
             return []
             
+        # Group files by MEMBER ID to avoid mixing different realizations
         member_groups = {}
         for f in found_files:
-            parent_dir = os.path.dirname(f)
-            if parent_dir not in member_groups:
-                member_groups[parent_dir] = []
-            member_groups[parent_dir].append(f)
+            try:
+                # Assuming filename format: var_table_model_exp_MEMBER_...
+                # e.g. pr_Amon_UKESM1-0-LL_historical_r1i1p1f2_gn_...
+                basename = os.path.basename(f)
+                parts = basename.split('_')
+                # Member is usually the 5th element (index 4) if splitting by '_'
+                # But safer to find the r... part
+                member = parts[4] 
+                if not member.startswith('r'):
+                     # Fallback: check other parts or just use direct index 4
+                     pass
+                
+                if member not in member_groups:
+                    member_groups[member] = []
+                member_groups[member].append(f)
+            except IndexError:
+                # If naming convention fails, fallback to grouping by directory
+                parent_dir = os.path.dirname(f)
+                if parent_dir not in member_groups:
+                    member_groups[parent_dir] = []
+                member_groups[parent_dir].append(f)
             
         if not member_groups: return []
             
-        sorted_dirs = sorted(member_groups.keys())
-        target_dir = sorted_dirs[0]
+        # Select the 'best' member (prefer r1...)
+        sorted_members = sorted(member_groups.keys())
         
-        member_files = sorted(member_groups[target_dir])
-        return member_files
+        # Try to find a member starting with 'r1i' (standard)
+        target_member = sorted_members[0]
+        for m in sorted_members:
+            if m.startswith('r1i') and 'p1' in m:
+                target_member = m
+                break
+        
+        logging.info(f"Selected historical PR member '{target_member}' for {model} from available: {sorted_members}")
+        member_files = sorted(member_groups[target_member])
+        
+        # --- Smart Filtering Logic ---
+        standard_files = []
+        non_standard_files = []
+        import re
+        re_standard = re.compile(r'_(\d{6})-(\d{6})_')
+        re_non_std = re.compile(r'_(\d{8})-(\d{8})_')
+
+        for f in member_files:
+            basename = os.path.basename(f)
+            match_std = re_standard.search(basename)
+            match_non = re_non_std.search(basename)
+            
+            if match_std:
+                start_str, end_str = match_std.groups()
+                s_code = int(start_str)
+                e_code = int(end_str)
+                standard_files.append({'path': f, 'start': s_code, 'end': e_code, 'type': 'standard'})
+            elif match_non:
+                start_str, end_str = match_non.groups()
+                s_code = int(start_str[:6])
+                e_code = int(end_str[:6])
+                non_standard_files.append({'path': f, 'start': s_code, 'end': e_code, 'type': 'non_standard'})
+            else:
+                logging.warning(f"File {basename} does not match expected date pattern: assuming standard.")
+                standard_files.append({'path': f, 'start': 0, 'end': 999999, 'type': 'unknown'})
+
+        final_files = [item['path'] for item in standard_files]
+        
+        def overlaps_with_accepted(candidate_start, candidate_end, accepted_list):
+            for item in accepted_list:
+                if (candidate_start <= item['end']) and (candidate_end >= item['start']):
+                    return True
+            return False
+
+        for ns in non_standard_files:
+            if not overlaps_with_accepted(ns['start'], ns['end'], standard_files):
+                final_files.append(ns['path'])
+                logging.info(f"Including non-standard historical PR file to fill gap: {os.path.basename(ns['path'])}")
+            else:
+                logging.warning(f"Excluding overlapping non-standard historical PR file: {os.path.basename(ns['path'])}")
+        
+        return sorted(final_files)
 
     def find_cmip6_ua_file(self, model, scenario):
         """
@@ -4019,7 +4190,105 @@ class StorylineAnalyzer:
         if not found_files:
             return []
             
-        return sorted(found_files)
+        # Group files by MEMBER ID to avoid mixing different realizations
+        member_groups = {}
+        for f in found_files:
+            try:
+                # Assuming filename format: var_table_model_exp_MEMBER_...
+                basename = os.path.basename(f)
+                parts = basename.split('_')
+                # Member is usually the 5th element (index 4)
+                member = parts[4] 
+                if not member.startswith('r'):
+                     pass
+                
+                if member not in member_groups:
+                    member_groups[member] = []
+                member_groups[member].append(f)
+            except IndexError:
+                parent_dir = os.path.dirname(f)
+                if parent_dir not in member_groups:
+                    member_groups[parent_dir] = []
+                member_groups[parent_dir].append(f)
+            
+        if not member_groups: return []
+            
+        # Select the 'best' member (prefer r1...)
+        sorted_members = sorted(member_groups.keys())
+        target_member = sorted_members[0]
+        for m in sorted_members:
+            if m.startswith('r1i') and 'p1' in m:
+                target_member = m
+                break
+        
+        logging.info(f"Selected UA file member '{target_member}' for {model} ({scenario}) from available: {sorted_members}")
+        member_files = sorted(member_groups[target_member])
+        
+        # --- Smart Filtering Logic (Same as PR) ---
+        standard_files = []
+        non_standard_files = []
+        
+        # Regex for YYYYMM-YYYYMM (Standard)
+        import re
+        re_standard = re.compile(r'_(\d{6})-(\d{6})_')
+        
+        # Regex for YYYYMMDD-YYYYMMDD (Non-Standard)
+        re_non_std = re.compile(r'_(\d{8})-(\d{8})_')
+
+        for f in member_files:
+            basename = os.path.basename(f)
+            match_std = re_standard.search(basename)
+            match_non = re_non_std.search(basename)
+            
+            if match_std:
+                start_str, end_str = match_std.groups()
+                s_code = int(start_str)
+                e_code = int(end_str)
+                standard_files.append({
+                    'path': f,
+                    'start': s_code,
+                    'end': e_code,
+                    'type': 'standard'
+                })
+            elif match_non:
+                start_str, end_str = match_non.groups()
+                # Convert YYYYMMDD to YYYYMM for comparison
+                s_code = int(start_str[:6])
+                e_code = int(end_str[:6])
+                non_standard_files.append({
+                    'path': f,
+                    'start': s_code,
+                    'end': e_code,
+                    'type': 'non_standard'
+                })
+            else:
+                logging.warning(f"File {basename} does not match expected date pattern: assuming standard.")
+                standard_files.append({
+                    'path': f,
+                    'start': 0, 
+                    'end': 999999,
+                    'type': 'unknown'
+                })
+
+        # 1. Start with all Standard files
+        final_files = [item['path'] for item in standard_files]
+        
+        #Helper to check overlap against accepted ranges
+        def overlaps_with_accepted(candidate_start, candidate_end, accepted_list):
+            for item in accepted_list:
+                if (candidate_start <= item['end']) and (candidate_end >= item['start']):
+                    return True
+            return False
+
+        # 2. Add Non-Standard files ONLY if they don't overlap with existing accepted files
+        for ns in non_standard_files:
+            if not overlaps_with_accepted(ns['start'], ns['end'], standard_files):
+                final_files.append(ns['path'])
+                logging.info(f"Including non-standard UA file to fill gap: {os.path.basename(ns['path'])}")
+            else:
+                logging.warning(f"Excluding overlapping non-standard UA file: {os.path.basename(ns['path'])}")
+        
+        return sorted(final_files)
 
     def find_cmip6_ua_historical_file(self, model):
         """
@@ -4031,7 +4300,82 @@ class StorylineAnalyzer:
         if not found_files:
             return []
             
-        return sorted(found_files)
+        # Group files by MEMBER ID to avoid mixing different realizations
+        member_groups = {}
+        for f in found_files:
+            try:
+                # Assuming filename format: var_table_model_exp_MEMBER_...
+                basename = os.path.basename(f)
+                parts = basename.split('_')
+                # Member is usually the 5th element (index 4)
+                member = parts[4] 
+                if not member.startswith('r'):
+                     pass
+                
+                if member not in member_groups:
+                    member_groups[member] = []
+                member_groups[member].append(f)
+            except IndexError:
+                parent_dir = os.path.dirname(f)
+                if parent_dir not in member_groups:
+                    member_groups[parent_dir] = []
+                member_groups[parent_dir].append(f)
+            
+        if not member_groups: return []
+            
+        # Select the 'best' member (prefer r1...)
+        sorted_members = sorted(member_groups.keys())
+        target_member = sorted_members[0]
+        for m in sorted_members:
+            if m.startswith('r1i') and 'p1' in m:
+                target_member = m
+                break
+        
+        logging.info(f"Selected historical UA member '{target_member}' for {model} from available: {sorted_members}")
+        member_files = sorted(member_groups[target_member])
+
+        # --- Smart Filtering Logic ---
+        standard_files = []
+        non_standard_files = []
+        import re
+        re_standard = re.compile(r'_(\d{6})-(\d{6})_')
+        re_non_std = re.compile(r'_(\d{8})-(\d{8})_')
+
+        for f in member_files:
+            basename = os.path.basename(f)
+            match_std = re_standard.search(basename)
+            match_non = re_non_std.search(basename)
+            
+            if match_std:
+                start_str, end_str = match_std.groups()
+                s_code = int(start_str)
+                e_code = int(end_str)
+                standard_files.append({'path': f, 'start': s_code, 'end': e_code, 'type': 'standard'})
+            elif match_non:
+                start_str, end_str = match_non.groups()
+                s_code = int(start_str[:6])
+                e_code = int(end_str[:6])
+                non_standard_files.append({'path': f, 'start': s_code, 'end': e_code, 'type': 'non_standard'})
+            else:
+                logging.warning(f"File {basename} does not match expected date pattern: assuming standard.")
+                standard_files.append({'path': f, 'start': 0, 'end': 999999, 'type': 'unknown'})
+
+        final_files = [item['path'] for item in standard_files]
+        
+        def overlaps_with_accepted(candidate_start, candidate_end, accepted_list):
+            for item in accepted_list:
+                if (candidate_start <= item['end']) and (candidate_end >= item['start']):
+                    return True
+            return False
+
+        for ns in non_standard_files:
+            if not overlaps_with_accepted(ns['start'], ns['end'], standard_files):
+                final_files.append(ns['path'])
+                logging.info(f"Including non-standard historical UA file to fill gap: {os.path.basename(ns['path'])}")
+            else:
+                logging.warning(f"Excluding overlapping non-standard historical UA file: {os.path.basename(ns['path'])}")
+        
+        return sorted(final_files)
 
     def _load_ua_seasonal_map(self, files, time_start, time_end, months, target_lat, target_lon):
         """
@@ -4317,12 +4661,158 @@ class StorylineAnalyzer:
     def find_cmip6_tas_file(self, model, scenario):
         search_pattern = self.config.CMIP6_RAW_TAS_PATH_PATTERN.format(model=model, scenario=scenario)
         found_files = glob.glob(search_pattern)
-        return sorted(found_files) if found_files else []
+        
+        if not found_files:
+            return []
+            
+        # Group files by MEMBER ID
+        member_groups = {}
+        for f in found_files:
+            try:
+                basename = os.path.basename(f)
+                parts = basename.split('_')
+                member = parts[4] 
+                if not member.startswith('r'): pass
+                if member not in member_groups: member_groups[member] = []
+                member_groups[member].append(f)
+            except IndexError:
+                parent_dir = os.path.dirname(f)
+                if parent_dir not in member_groups: member_groups[parent_dir] = []
+                member_groups[parent_dir].append(f)
+            
+        if not member_groups: return []
+            
+        # Select the 'best' member
+        sorted_members = sorted(member_groups.keys())
+        target_member = sorted_members[0]
+        for m in sorted_members:
+            if m.startswith('r1i') and 'p1' in m:
+                target_member = m
+                break
+        
+        logging.info(f"Selected TAS file member '{target_member}' for {model} ({scenario}) from available: {sorted_members}")
+        member_files = sorted(member_groups[target_member])
+
+        # --- Smart Filtering Logic ---
+        standard_files = []
+        non_standard_files = []
+        import re
+        re_standard = re.compile(r'_(\d{6})-(\d{6})_')
+        re_non_std = re.compile(r'_(\d{8})-(\d{8})_')
+
+        for f in member_files:
+            basename = os.path.basename(f)
+            match_std = re_standard.search(basename)
+            match_non = re_non_std.search(basename)
+            
+            if match_std:
+                start_str, end_str = match_std.groups()
+                s_code = int(start_str)
+                e_code = int(end_str)
+                standard_files.append({'path': f, 'start': s_code, 'end': e_code, 'type': 'standard'})
+            elif match_non:
+                start_str, end_str = match_non.groups()
+                s_code = int(start_str[:6])
+                e_code = int(end_str[:6])
+                non_standard_files.append({'path': f, 'start': s_code, 'end': e_code, 'type': 'non_standard'})
+            else:
+                logging.warning(f"File {basename} does not match expected date pattern: assuming standard.")
+                standard_files.append({'path': f, 'start': 0, 'end': 999999, 'type': 'unknown'})
+
+        final_files = [item['path'] for item in standard_files]
+        
+        def overlaps_with_accepted(candidate_start, candidate_end, accepted_list):
+            for item in accepted_list:
+                if (candidate_start <= item['end']) and (candidate_end >= item['start']):
+                    return True
+            return False
+
+        for ns in non_standard_files:
+            if not overlaps_with_accepted(ns['start'], ns['end'], standard_files):
+                final_files.append(ns['path'])
+                logging.info(f"Including non-standard TAS file to fill gap: {os.path.basename(ns['path'])}")
+            else:
+                logging.warning(f"Excluding overlapping non-standard TAS file: {os.path.basename(ns['path'])}")
+        
+        return sorted(final_files)
 
     def find_cmip6_tas_historical_file(self, model):
         search_pattern = self.config.CMIP6_HISTORICAL_TAS_PATH_PATTERN.format(model=model)
         found_files = glob.glob(search_pattern)
-        return sorted(found_files) if found_files else []
+        
+        if not found_files:
+            return []
+            
+        # Group files by MEMBER ID
+        member_groups = {}
+        for f in found_files:
+            try:
+                basename = os.path.basename(f)
+                parts = basename.split('_')
+                member = parts[4] 
+                if not member.startswith('r'): pass
+                if member not in member_groups: member_groups[member] = []
+                member_groups[member].append(f)
+            except IndexError:
+                parent_dir = os.path.dirname(f)
+                if parent_dir not in member_groups: member_groups[parent_dir] = []
+                member_groups[parent_dir].append(f)
+            
+        if not member_groups: return []
+            
+        # Select the 'best' member
+        sorted_members = sorted(member_groups.keys())
+        target_member = sorted_members[0]
+        for m in sorted_members:
+            if m.startswith('r1i') and 'p1' in m:
+                target_member = m
+                break
+        
+        logging.info(f"Selected historical TAS member '{target_member}' for {model} from available: {sorted_members}")
+        member_files = sorted(member_groups[target_member])
+
+        # --- Smart Filtering Logic ---
+        standard_files = []
+        non_standard_files = []
+        import re
+        re_standard = re.compile(r'_(\d{6})-(\d{6})_')
+        re_non_std = re.compile(r'_(\d{8})-(\d{8})_')
+
+        for f in member_files:
+            basename = os.path.basename(f)
+            match_std = re_standard.search(basename)
+            match_non = re_non_std.search(basename)
+            
+            if match_std:
+                start_str, end_str = match_std.groups()
+                s_code = int(start_str)
+                e_code = int(end_str)
+                standard_files.append({'path': f, 'start': s_code, 'end': e_code, 'type': 'standard'})
+            elif match_non:
+                start_str, end_str = match_non.groups()
+                s_code = int(start_str[:6])
+                e_code = int(end_str[:6])
+                non_standard_files.append({'path': f, 'start': s_code, 'end': e_code, 'type': 'non_standard'})
+            else:
+                logging.warning(f"File {basename} does not match expected date pattern: assuming standard.")
+                standard_files.append({'path': f, 'start': 0, 'end': 999999, 'type': 'unknown'})
+
+        final_files = [item['path'] for item in standard_files]
+        
+        def overlaps_with_accepted(candidate_start, candidate_end, accepted_list):
+            for item in accepted_list:
+                if (candidate_start <= item['end']) and (candidate_end >= item['start']):
+                    return True
+            return False
+
+        for ns in non_standard_files:
+            if not overlaps_with_accepted(ns['start'], ns['end'], standard_files):
+                final_files.append(ns['path'])
+                logging.info(f"Including non-standard historical TAS file to fill gap: {os.path.basename(ns['path'])}")
+            else:
+                logging.warning(f"Excluding overlapping non-standard historical TAS file: {os.path.basename(ns['path'])}")
+        
+        return sorted(final_files)
 
     def _load_tas_seasonal_map(self, files, time_start, time_end, months, target_lat, target_lon):
         # Similar to PR but for TAS

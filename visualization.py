@@ -4681,16 +4681,15 @@ class Visualizer:
                 # Calculate 98th percentile of absolute differences
                 limit = np.percentile(np.abs(all_diff_vals), 98)
                 
-                # Round up to 2 significant digits for cleaner labels
+                # Round up to nearest integer for clean edge values
                 if limit > 0:
                     import math
-                    magnitude = 10 ** math.floor(math.log10(limit))
-                    diff_limit = math.ceil(limit / magnitude * 10) * magnitude / 10
+                    diff_limit = math.ceil(limit)
                 else:
                     diff_limit = 1.0
                 
-                # Define discrete levels (10 intervals)
-                diff_levels = np.linspace(-diff_limit, diff_limit, 11)
+                # Define discrete levels (12 color intervals)
+                diff_levels = np.round(np.linspace(-diff_limit, diff_limit, 13), 1)
                 
                 # Mask threshold (5% of range, similar to previous logic)
                 mask_threshold = diff_limit * 0.05
@@ -4754,8 +4753,8 @@ class Visualizer:
                     cf = ax.pcolormesh(diff_map.lon, diff_map.lat, diff_map, cmap=custom_cmap,
                                        vmin=-diff_limit, vmax=diff_limit, transform=ccrs.PlateCarree())
                 
-                # --- ADDED: Reference Climatology Contours ---
-                if contour_map is not None and contour_levels is not None:
+                # --- ADDED: Reference Climatology Contours (skip for PR) ---
+                if contour_map is not None and contour_levels is not None and var_label != 'PR':
                     ref_levels = contour_levels[::2]
                     cs = ax.contour(contour_map.lon, contour_map.lat, contour_map, levels=ref_levels,
                                     colors='gray', linewidths=1.2, alpha=0.9, transform=ccrs.PlateCarree())
@@ -4860,6 +4859,8 @@ class Visualizer:
                              markersize=7, alpha=1.0, linestyle='None', zorder=3)
             
             ax22.set_xlim(0, 35)
+            ax22.set_xticks([0, 5, 10, 15, 20, 25, 30, 35])
+            ax22.set_xticklabels(['0', '5', '10', '15', '20', '25', '30', '∞'])
             ax22.set_yticks([])
             ax22.set_ylabel('')
             ax22.invert_yaxis()
@@ -5045,9 +5046,8 @@ class Visualizer:
                 import math
                 limit = np.percentile(np.abs(all_vals), 98)
                 if limit > 0:
-                    magnitude = 10 ** math.floor(math.log10(limit))
-                    diff_limit = math.ceil(limit / magnitude * 10) * magnitude / 10
-                diff_levels = np.linspace(-diff_limit, diff_limit, 11)
+                    diff_limit = math.ceil(limit)
+                diff_levels = np.round(np.linspace(-diff_limit, diff_limit, 13), 1)
 
         # Shared contour levels for reference climatology
         all_abs_maps = []
@@ -5114,8 +5114,8 @@ class Visualizer:
                                        vmin=-diff_limit, vmax=diff_limit,
                                        transform=ccrs.PlateCarree())
 
-                # Reference climatology contours
-                if contour_map is not None and contour_levels is not None:
+                # Reference climatology contours (skip for PR)
+                if contour_map is not None and contour_levels is not None and var_label != 'PR':
                     ref_levels = contour_levels[::2]
                     cs = ax.contour(contour_map.lon, contour_map.lat, contour_map,
                                     levels=ref_levels, colors='gray', linewidths=1.2,
@@ -5180,6 +5180,8 @@ class Visualizer:
                             linestyle='None', zorder=3)
 
             ax.set_xlim(0, 35)
+            ax.set_xticks([0, 5, 10, 15, 20, 25, 30, 35])
+            ax.set_xticklabels(['0', '5', '10', '15', '20', '25', '30', '∞'])
             ax.set_yticks([])
             ax.set_ylabel('')
             ax.invert_yaxis()

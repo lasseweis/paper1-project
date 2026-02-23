@@ -4704,6 +4704,13 @@ class Visualizer:
                 ax.set_extent(extent, crs=ccrs.PlateCarree())
             ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
             ax.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
+            
+            # Add analysis box
+            lon_min, lon_max = Config.BOX_LON_MIN, Config.BOX_LON_MAX
+            lat_min, lat_max = Config.BOX_LAT_MIN, Config.BOX_LAT_MAX
+            analysis_box = mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
+                                              fill=False, edgecolor='magenta', linewidth=2.0, transform=ccrs.PlateCarree(), zorder=10)
+            ax.add_patch(analysis_box)
         
         def _plot_contour(ax, data_map, title, contours_to_use=None):
              _add_map_features(ax)
@@ -5005,7 +5012,7 @@ class Visualizer:
         var_label, diff_unit, cmap_diff='RdBu_r', contour_fmt='%.1f',
         winter_model_rps=None, summer_model_rps=None,
         winter_n_total=None, summer_n_total=None,
-        map_extent=None
+        map_extent=None, fixed_diff_limit=None
     ):
         """
         Combined difference-column plot for two seasons (Winter + Summer).
@@ -5037,9 +5044,14 @@ class Visualizer:
                     all_diff_maps.append(m)
 
         # Calculate shared difference limits (98th percentile)
-        diff_limit = 1.0
+        diff_limit = fixed_diff_limit if fixed_diff_limit is not None else 1.0
         diff_levels = None
-        if all_diff_maps:
+        
+        if fixed_diff_limit is not None:
+            # If a fixed limit is provided, use it to generate the levels
+            diff_levels = np.round(np.linspace(-diff_limit, diff_limit, 13), 1)
+        elif all_diff_maps:
+            # Otherwise, calculate dynamically from the provided maps
             all_vals = np.concatenate([m.values.ravel() for m in all_diff_maps])
             all_vals = all_vals[np.isfinite(all_vals)]
             if len(all_vals) > 0:
@@ -5099,6 +5111,13 @@ class Visualizer:
             ax.set_extent(extent, crs=ccrs.PlateCarree())
             ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
             ax.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
+            
+            # Add analysis box
+            lon_min, lon_max = Config.BOX_LON_MIN, Config.BOX_LON_MAX
+            lat_min, lat_max = Config.BOX_LAT_MIN, Config.BOX_LAT_MAX
+            analysis_box = mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
+                                              fill=False, edgecolor='magenta', linewidth=2.0, transform=ccrs.PlateCarree(), zorder=10)
+            ax.add_patch(analysis_box)
 
         def _plot_diff(ax, diff_map, sig_mask, title, contour_map=None):
             _add_map_features(ax)
@@ -5272,7 +5291,8 @@ class Visualizer:
         winter_composite, summer_composite,
         gwl, event_key, scenario,
         winter_model_rps=None, summer_model_rps=None,
-        winter_n_total=None, summer_n_total=None
+        winter_n_total=None, summer_n_total=None,
+        fixed_diff_limit=None
     ):
         """Combined diff panel for UA850, with Greenland masking applied."""
         # Apply Greenland mask to both composites
@@ -5300,7 +5320,8 @@ class Visualizer:
             gwl, event_key, scenario,
             var_label='UA850', diff_unit='m/s', cmap_diff='RdBu_r', contour_fmt='%.1f',
             winter_model_rps=winter_model_rps, summer_model_rps=summer_model_rps,
-            winter_n_total=winter_n_total, summer_n_total=summer_n_total
+            winter_n_total=winter_n_total, summer_n_total=summer_n_total,
+            fixed_diff_limit=fixed_diff_limit
         )
 
     @staticmethod
@@ -5308,7 +5329,8 @@ class Visualizer:
         winter_composite, summer_composite,
         gwl, event_key, scenario,
         winter_model_rps=None, summer_model_rps=None,
-        winter_n_total=None, summer_n_total=None
+        winter_n_total=None, summer_n_total=None,
+        fixed_diff_limit=None
     ):
         """Combined diff panel for PR, with Central Europe zoom."""
         buffer = 5.0
@@ -5322,5 +5344,109 @@ class Visualizer:
             var_label='PR', diff_unit='mm/day', cmap_diff='BrBG', contour_fmt='%.1f',
             winter_model_rps=winter_model_rps, summer_model_rps=summer_model_rps,
             winter_n_total=winter_n_total, summer_n_total=summer_n_total,
-            map_extent=ce_extent
+            map_extent=ce_extent,
+            fixed_diff_limit=fixed_diff_limit
         )
+
+    @staticmethod
+    def plot_discharge_events_timeseries(cmip6_results, discharge_data_loaded, config, scenario):
+        """
+        Plots the MMM and spread of annual minimum discharge, marking 30Q10 and lowflow cross events.
+        Creates a 2-panel vertical plot with shared x-axes.
+        """
+        logging.info(f"Plotting discharge events timeseries for {scenario}...")
+        Visualizer.ensure_plot_dir_exists()
+        
+        # 1. Extract timeseries
+        metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
+        if not metric_timeseries:
+            logging.warning("No model metric timeseries available.")
+            return
+
+        all_models_data = []
+        for key, ts_dict in metric_timeseries.items():
+            # Check if this model run belongs to the current scenario
+            if not key.endswith(scenario):
+                continue
+            if '30Q_low_full_year' in ts_dict:
+                da = ts_dict['30Q_low_full_year']
+                if da is not None:
+                     df = da.to_dataframe(name='discharge')
+                     # The index should be 'year'
+                     if 'year' in df.index.names:
+                         df = df.reset_index()
+                     df['model'] = key.split('_')[0]
+                     all_models_data.append(df)
+        
+        if not all_models_data:
+            logging.warning(f"No 30Q_low_full_year data found for scenario {scenario}")
+            return
+
+        df_all = pd.concat(all_models_data, ignore_index=True)
+        # Group by year to get percentiles and mean
+        df_stats = df_all.groupby('year')['discharge'].agg(['mean', lambda x: np.percentile(x, 10), lambda x: np.percentile(x, 90)]).reset_index()
+        df_stats.columns = ['year', 'mmm', 'p10', 'p90']
+
+        # 2. Get 30Q10 Threshold
+        hist_da = discharge_data_loaded.get('daily_historical_da')
+        threshold_30q10 = None
+        if hist_da is not None:
+            ref_thresholds = StatsAnalyzer.calculate_eva_thresholds(
+                hist_da, eva_type='low', q_days=[30], return_periods=[10], half_year_filter='full_year'
+            )
+            threshold_30q10 = ref_thresholds.get('30Q10')
+            if threshold_30q10 is None:
+                # If using empirical percent estimates depending on the configuration
+                ref_thresholds_emp = StatsAnalyzer.calculate_empirical_thresholds(
+                    hist_da.resample(time='MS').mean(), q_type='30Q', eva_type='low', return_periods=[10], half_year_filter='full_year'
+                )
+                threshold_30q10 = ref_thresholds_emp.get('30Q10')
+        else:
+            logging.warning("Historical daily discharge data missing, cannot compute 30Q10 threshold.")
+        
+        # 3. Get lowflow Threshold
+        # 'winter_lowflow_threshold' and 'summer_lowflow_threshold' are typically set to 1064
+        threshold_lowflow = discharge_data_loaded.get('summer_lowflow_threshold') 
+        if threshold_lowflow is None:
+            threshold_lowflow = 1064 # Fallback
+            
+        # Create figure
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+        
+        def _plot_panel(ax, title, threshold, threshold_label):
+            # Plot shading for the model spread
+            ax.fill_between(df_stats['year'], df_stats['p10'], df_stats['p90'], color='lightsteelblue', alpha=0.5, label='10th-90th Percentile Spread')
+            
+            # Plot MMM
+            ax.plot(df_stats['year'], df_stats['mmm'], color='midnightblue', linewidth=2, label='Multi-Model Mean (MMM)')
+            
+            if threshold is not None:
+                # Plot threshold
+                ax.axhline(threshold, color='darkred', linestyle='--', linewidth=1.5, label=f'{threshold_label} ({threshold:.1f} m³/s)')
+                
+                # Find crossover events
+                events = df_stats[df_stats['mmm'] < threshold]
+                if not events.empty:
+                    ax.scatter(events['year'], events['mmm'], color='darkred', s=60, marker='o', zorder=5, label='Threshold Exceeded')
+            
+            ax.set_title(title, fontsize=12, weight='bold')
+            ax.set_ylabel('Discharge (m³/s)', fontsize=10)
+            ax.grid(True, linestyle=':', alpha=0.7)
+            # Limit the x-axis properly
+            min_year = max(1950, df_stats['year'].min())
+            max_year = min(2100, df_stats['year'].max())
+            ax.set_xlim(min_year, max_year)
+            ax.legend(loc='lower left', fontsize=9)
+            
+        _plot_panel(ax1, f'Annual Minimum 30-Day Discharge & 30Q10 Events ({scenario.upper()})', threshold_30q10, 'Historical 30Q10')
+        _plot_panel(ax2, f'Annual Minimum 30-Day Discharge & Low Flow Events ({scenario.upper()})', threshold_lowflow, 'Low Flow Threshold')
+        
+        ax2.set_xlabel('Year', fontsize=10)
+        
+        fig.tight_layout()
+        filename = f"storyline_discharge_events_{scenario}.png"
+        filepath = os.path.join(Config.PLOT_DIR, filename)
+        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved discharge events timeseries plot to {filepath}")
+

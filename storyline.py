@@ -3530,6 +3530,8 @@ class StorylineAnalyzer:
         sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
         
         n_select = self.config.COMPOSITE_N_MODELS
+        if sorted_models and '_ssp585' in sorted_models[0][0]:
+            n_select = 14
         if n_select * 2 > len(sorted_models):
             n_select = len(sorted_models) // 2
         
@@ -3851,6 +3853,8 @@ class StorylineAnalyzer:
         sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
         
         n_select = self.config.COMPOSITE_N_MODELS
+        if sorted_models and '_ssp585' in sorted_models[0][0]:
+            n_select = 14
         if n_select * 2 > len(sorted_models):
             n_select = len(sorted_models) // 2
         
@@ -4549,6 +4553,8 @@ class StorylineAnalyzer:
         sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
         
         n_select = self.config.COMPOSITE_N_MODELS
+        if sorted_models and '_ssp585' in sorted_models[0][0]:
+            n_select = 14
         if n_select * 2 > len(sorted_models):
             n_select = len(sorted_models) // 2
         if n_select < 1: n_select = 1
@@ -4943,6 +4949,8 @@ class StorylineAnalyzer:
             
         sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
         n_select = self.config.COMPOSITE_N_MODELS
+        if sorted_models and '_ssp585' in sorted_models[0][0]:
+            n_select = 14
         if n_select * 2 > len(sorted_models): n_select = len(sorted_models) // 2
         if n_select < 1: n_select = 1
             
@@ -5185,6 +5193,8 @@ class StorylineAnalyzer:
         sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
         
         n_select = self.config.COMPOSITE_N_MODELS
+        if sorted_models and '_ssp585' in sorted_models[0][0]:
+            n_select = 14
         if n_select * 2 > len(sorted_models):
             n_select = len(sorted_models) // 2
         

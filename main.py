@@ -766,6 +766,14 @@ class ClimateAnalysis:
                      else:
                          logging.info(f"Figure 3 '{fig3_filename}' already exists.")
 
+                # --- PLOT: Discharge Events Timeseries (30Q10 & Lowflow) ---
+                discharge_events_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_discharge_events_{scenario}.png")
+                if not os.path.exists(discharge_events_plot_filename):
+                    logging.info(f"Plot '{discharge_events_plot_filename}' not found. Creating...")
+                    Visualizer.plot_discharge_events_timeseries(cmip6_results, discharge_data_loaded, Config(), scenario)
+                else:
+                    logging.info(f"Plot '{discharge_events_plot_filename}' already exists.")
+
                 # --- PLOT: Z500 Composite Analysis (Extreme vs Non-Extreme) ---
                 # Added Feb 2026
                 composite_event_key = Config.COMPOSITE_EVENT_KEY
@@ -850,6 +858,25 @@ class ClimateAnalysis:
                             logging.info(f"PR composite plot for GWL {gwl}, {composite_season} already exists.")
 
                 # --- Combined PR Difference Plots (Winter + Summer) ---
+                pr_shared_diff_limit = None
+                if pr_stored_composites:
+                    all_diff_maps = []
+                    for comp_data in pr_stored_composites.values():
+                        comp = comp_data[0]
+                        if comp:
+                            for key in ['diff_ext_non_future', 'diff_ext_non_hist']:
+                                m = comp.get(key)
+                                if m is not None:
+                                    all_diff_maps.append(m)
+                    if all_diff_maps:
+                        all_vals = np.concatenate([m.values.ravel() for m in all_diff_maps])
+                        all_vals = all_vals[np.isfinite(all_vals)]
+                        if len(all_vals) > 0:
+                            import math
+                            limit = np.percentile(np.abs(all_vals), 98)
+                            if limit > 0:
+                                pr_shared_diff_limit = math.ceil(limit)
+
                 for gwl in Config.GLOBAL_WARMING_LEVELS:
                     pr_combined_fn = os.path.join(Config.PLOT_DIR, f"combined_diff_pr_{composite_event_key}_{scenario}_gwl{gwl}.png")
                     if not os.path.exists(pr_combined_fn):
@@ -860,7 +887,8 @@ class ClimateAnalysis:
                                 winter_composite=w_data[0], summer_composite=s_data[0],
                                 gwl=gwl, event_key=composite_event_key, scenario=scenario,
                                 winter_model_rps=w_data[1], summer_model_rps=s_data[1],
-                                winter_n_total=w_data[2], summer_n_total=s_data[2]
+                                winter_n_total=w_data[2], summer_n_total=s_data[2],
+                                fixed_diff_limit=pr_shared_diff_limit
                             )
                         else:
                             logging.warning(f"Cannot create combined PR diff plot for GWL {gwl}: missing season data.")
@@ -896,6 +924,25 @@ class ClimateAnalysis:
                             logging.info(f"UA composite plot for GWL {gwl}, {composite_season} already exists.")
 
                 # --- Combined UA Difference Plots (Winter + Summer) ---
+                ua_shared_diff_limit = None
+                if ua_stored_composites:
+                    all_diff_maps = []
+                    for comp_data in ua_stored_composites.values():
+                        comp = comp_data[0]
+                        if comp:
+                            for key in ['diff_ext_non_future', 'diff_ext_non_hist']:
+                                m = comp.get(key)
+                                if m is not None:
+                                    all_diff_maps.append(m)
+                    if all_diff_maps:
+                        all_vals = np.concatenate([m.values.ravel() for m in all_diff_maps])
+                        all_vals = all_vals[np.isfinite(all_vals)]
+                        if len(all_vals) > 0:
+                            import math
+                            limit = np.percentile(np.abs(all_vals), 98)
+                            if limit > 0:
+                                ua_shared_diff_limit = math.ceil(limit)
+
                 for gwl in Config.GLOBAL_WARMING_LEVELS:
                     ua_combined_fn = os.path.join(Config.PLOT_DIR, f"combined_diff_ua850_{composite_event_key}_{scenario}_gwl{gwl}.png")
                     if not os.path.exists(ua_combined_fn):
@@ -906,7 +953,8 @@ class ClimateAnalysis:
                                 winter_composite=w_data[0], summer_composite=s_data[0],
                                 gwl=gwl, event_key=composite_event_key, scenario=scenario,
                                 winter_model_rps=w_data[1], summer_model_rps=s_data[1],
-                                winter_n_total=w_data[2], summer_n_total=s_data[2]
+                                winter_n_total=w_data[2], summer_n_total=s_data[2],
+                                fixed_diff_limit=ua_shared_diff_limit
                             )
                         else:
                             logging.warning(f"Cannot create combined UA diff plot for GWL {gwl}: missing season data.")

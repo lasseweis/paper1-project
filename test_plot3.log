@@ -1,0 +1,71 @@
+2026-02-24 15:57:21,970 - INFO - [main.<module>] - Logging initialized.
+2026-02-24 15:57:21,970 - INFO - [test_plot3.run_isolated_plot] - Starting run_isolated_plot
+2026-02-24 15:57:21,970 - INFO - [main.load_historical_qobs_from_csv] - Loading DAILY historical QOBS discharge data from CSV...
+2026-02-24 15:57:22,106 - INFO - [main.load_historical_qobs_from_csv] - Successfully loaded DAILY QOBS historical data from 1960-2021.
+2026-02-24 15:57:22,106 - INFO - [main.process_historical_discharge_data] - Processing QOBS historical data (daily and monthly) for analysis...
+2026-02-24 15:57:22,501 - INFO - [main.process_historical_discharge_data] - Adding fixed low-flow thresholds: 1417 (30th), 1064 (10th), 970 (LNWL).
+2026-02-24 15:57:22,502 - INFO - [data_processing.process_discharge_data] - Processing Danube discharge data for specified CMIP6 models...
+2026-02-24 15:57:22,608 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for ACCESS-CM2_ssp245
+2026-02-24 15:57:22,609 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for ACCESS-ESM1-5_ssp245
+2026-02-24 15:57:22,610 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for CESM2_ssp245
+2026-02-24 15:57:22,611 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for CESM2-WACCM_ssp245
+2026-02-24 15:57:22,611 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for CMCC-CM2-SR5_ssp245
+2026-02-24 15:57:22,612 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for CMCC-ESM2_ssp245
+2026-02-24 15:57:22,613 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for CanESM5_ssp245
+2026-02-24 15:57:22,613 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for EC-Earth3-CC_ssp245
+2026-02-24 15:57:22,614 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for EC-Earth3-Veg-LR_ssp245
+2026-02-24 15:57:22,615 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for EC-Earth3_ssp245
+2026-02-24 15:57:22,615 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for GFDL-ESM4_ssp245
+2026-02-24 15:57:22,616 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for HadGEM3-GC31-LL_ssp245
+2026-02-24 15:57:22,616 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for IITM-ESM_ssp245
+2026-02-24 15:57:22,617 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for INM-CM4-8_ssp245
+2026-02-24 15:57:22,618 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for INM-CM5-0_ssp245
+2026-02-24 15:57:22,619 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for IPSL-CM6A-LR_ssp245
+2026-02-24 15:57:22,620 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for KACE-1-0-G_ssp245
+2026-02-24 15:57:22,621 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for KIOST-ESM_ssp245
+2026-02-24 15:57:22,622 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for MIROC-ES2L_ssp245
+2026-02-24 15:57:22,623 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for MIROC6_ssp245
+2026-02-24 15:57:22,624 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for MPI-ESM1-2-HR_ssp245
+2026-02-24 15:57:22,625 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for MPI-ESM1-2-LR_ssp245
+2026-02-24 15:57:22,626 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for MRI-ESM2-0_ssp245
+2026-02-24 15:57:22,627 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for NorESM2-MM_ssp245
+2026-02-24 15:57:22,628 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for UKESM1-0-LL_ssp245
+2026-02-24 15:57:22,758 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for ACCESS-CM2_ssp585
+2026-02-24 15:57:22,759 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for ACCESS-ESM1-5_ssp585
+2026-02-24 15:57:22,760 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for BCC-CSM2-MR_ssp585
+2026-02-24 15:57:22,761 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for CESM2_ssp585
+2026-02-24 15:57:22,762 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for CESM2-WACCM_ssp585
+2026-02-24 15:57:22,762 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for CMCC-CM2-SR5_ssp585
+2026-02-24 15:57:22,763 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for CMCC-ESM2_ssp585
+2026-02-24 15:57:22,764 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for CNRM-CM6-1-HR_ssp585
+2026-02-24 15:57:22,764 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for CNRM-CM6-1_ssp585
+2026-02-24 15:57:22,765 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for CNRM-ESM2-1_ssp585
+2026-02-24 15:57:22,766 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for CanESM5_ssp585
+2026-02-24 15:57:22,766 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for E3SM-1-0_ssp585
+2026-02-24 15:57:22,767 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for EC-Earth3-CC_ssp585
+2026-02-24 15:57:22,768 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for EC-Earth3-Veg-LR_ssp585
+2026-02-24 15:57:22,768 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for EC-Earth3_ssp585
+2026-02-24 15:57:22,769 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for GFDL-ESM4_ssp585
+2026-02-24 15:57:22,769 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for HadGEM3-GC31-LL_ssp585
+2026-02-24 15:57:22,770 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for HadGEM3-GC31-MM_ssp585
+2026-02-24 15:57:22,771 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for IITM-ESM_ssp585
+2026-02-24 15:57:22,771 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for INM-CM4-8_ssp585
+2026-02-24 15:57:22,772 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for INM-CM5-0_ssp585
+2026-02-24 15:57:22,772 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for IPSL-CM6A-LR_ssp585
+2026-02-24 15:57:22,773 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for KACE-1-0-G_ssp585
+2026-02-24 15:57:22,774 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for KIOST-ESM_ssp585
+2026-02-24 15:57:22,774 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for MIROC-ES2L_ssp585
+2026-02-24 15:57:22,775 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for MIROC6_ssp585
+2026-02-24 15:57:22,775 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for MPI-ESM1-2-HR_ssp585
+2026-02-24 15:57:22,776 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for MPI-ESM1-2-LR_ssp585
+2026-02-24 15:57:22,777 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for MRI-ESM2-0_ssp585
+2026-02-24 15:57:22,777 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for NorESM2-MM_ssp585
+2026-02-24 15:57:22,778 - INFO - [data_processing.process_discharge_data] - Successfully processed discharge data for UKESM1-0-LL_ssp585
+2026-02-24 15:57:22,778 - INFO - [test_plot3.run_isolated_plot] - Plotting for ssp585...
+2026-02-24 15:57:22,779 - INFO - [visualization.plot_discharge_events_timeseries] - Plotting discharge events timeseries for ssp585...
+2026-02-24 15:57:22,779 - WARNING - [visualization.plot_discharge_events_timeseries] - No model metric timeseries available.
+2026-02-24 15:57:22,779 - INFO - [test_plot3.run_isolated_plot] - SUCCESS: Plot generated for ssp585
+2026-02-24 15:57:22,779 - INFO - [test_plot3.run_isolated_plot] - Plotting for ssp245...
+2026-02-24 15:57:22,779 - INFO - [visualization.plot_discharge_events_timeseries] - Plotting discharge events timeseries for ssp245...
+2026-02-24 15:57:22,779 - WARNING - [visualization.plot_discharge_events_timeseries] - No model metric timeseries available.
+2026-02-24 15:57:22,779 - INFO - [test_plot3.run_isolated_plot] - SUCCESS: Plot generated for ssp245

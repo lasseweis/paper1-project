@@ -786,11 +786,14 @@ class ClimateAnalysis:
 
                 # --- PLOT: Discharge Events Timeseries (30Q10 & Lowflow) ---
                 discharge_events_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_discharge_events_{scenario}.png")
-                if not os.path.exists(discharge_events_plot_filename):
-                    logging.info(f"Plot '{discharge_events_plot_filename}' not found. Creating...")
+                discharge_extreme_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_discharge_events_extremes_{scenario}.png")
+                
+                if True or not os.path.exists(discharge_events_plot_filename) or not os.path.exists(discharge_extreme_plot_filename):
+                    logging.info(f"Discharge events plots not found or requested to recreate. Creating...")
                     Visualizer.plot_discharge_events_timeseries(cmip6_results, discharge_data_loaded, Config(), scenario)
+                    Visualizer.plot_discharge_events_extreme_timeseries(cmip6_results, discharge_data_loaded, Config(), scenario)
                 else:
-                    logging.info(f"Plot '{discharge_events_plot_filename}' already exists.")
+                    logging.info(f"Discharge events plots already exist.")
 
                 # --- PLOT: Z500 Composite Analysis (Extreme vs Non-Extreme) ---
                 # Added Feb 2026

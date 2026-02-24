@@ -3915,16 +3915,14 @@ class Visualizer:
         low_key_summer = next((k for k in summer_keys if target_event_substring in k and 'low' in k.lower()), None)
         high_key_summer = next((k for k in summer_keys if target_event_substring in k and 'high' in k.lower()), None)
         
-        # Config for the 4 logical plots
+        # Config for the 2 logical plots (Low Flow ONLY)
         plot_configs = [
             {'half_year': 'summer', 'event_key': low_key_summer,  'base_title': 'a) Summer Half-Year: 30-Day Low Flow', 'row': 0, 'col_group': 0},
             {'half_year': 'winter', 'event_key': low_key_winter,  'base_title': 'b) Winter Half-Year: 30-Day Low Flow', 'row': 0, 'col_group': 1},
-            {'half_year': 'summer', 'event_key': high_key_summer, 'base_title': 'c) Summer Half-Year: 30-Day High Flow', 'row': 1, 'col_group': 0},
-            {'half_year': 'winter', 'event_key': high_key_winter, 'base_title': 'd) Winter Half-Year: 30-Day High Flow', 'row': 1, 'col_group': 1},
         ]
 
-        # --- SETUP FIGURE (Standard 2x2) ---
-        fig, axs = plt.subplots(2, 2, figsize=(16, 10))
+        # --- SETUP FIGURE (Standard 1x2) ---
+        fig, axs = plt.subplots(1, 2, figsize=(16, 5))
         axs = axs.flatten()
         
         # --- MODIFIED: Correct spelling for SSP5-8.5 ---
@@ -3936,12 +3934,10 @@ class Visualizer:
         gwl_colors = {f'+{gwl}°C GWL': Visualizer.GWL_COLORS[gwl] for gwl in gwls_to_plot}
         
         storyline_data_keys = [
-            'MMM', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
-            'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
+            'MMM', 'Extreme Models', 'Non-Extreme Models'
         ]
         storyline_display_order = [
-            'Multi-Model Mean', 'Slow Jet & Northward Shift', 'Fast Jet & Northward Shift',
-            'Slow Jet & Southward Shift', 'Fast Jet & Southward Shift',
+            'Multi-Model Mean', 'Extreme Models', 'Non-Extreme Models'
         ]
 
         # Loop through the 4 logical plots
@@ -4045,11 +4041,8 @@ class Visualizer:
             # X-Axis Labels & Ticks
             ax.tick_params(axis='x', which='both', bottom=True, labelbottom=True)
             
-            # Set Label ONLY for the bottom row
-            if i >= 2: # Bottom row (indices 2 and 3)
-                ax.set_xlabel("Return Period (Years)", fontsize=10)
-            else:
-                ax.set_xlabel('')
+            # Set Label for the only row
+            ax.set_xlabel("Return Period (Years)", fontsize=10)
             
             # Y-Axis Labels Logic
             ax.set_ylabel('')
@@ -4062,7 +4055,7 @@ class Visualizer:
                 ax.set_yticks([])
                 ax.set_yticklabels([])
 
-            ax.invert_yaxis() # Ensure MMM is at the top
+            # ax.invert_yaxis() # Removed: seaborn places index 0 (MMM) at the top by default
 
         # Shared Legend
         handles = []

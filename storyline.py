@@ -3428,6 +3428,99 @@ class StorylineAnalyzer:
         except Exception as e:
             return None
 
+    def get_composite_extreme_models(self, cmip6_results, gwl, event_key='30Q10_low', season='Summer'):
+        """
+        Extracts the model selection logic used for composite plots (Extreme vs Non-Extreme).
+        Returns: tuple(extreme_models_list, non_extreme_models_list, model_rps)
+        """
+        model_data_loaded = cmip6_results.get('cmip6_model_data_loaded')
+        metric_timeseries = cmip6_results.get('model_metric_timeseries')
+        gwl_years = cmip6_results.get('gwl_threshold_years')
+        window = self.config.GWL_YEARS_WINDOW
+        
+        if not all([model_data_loaded, metric_timeseries, gwl_years]):
+             logging.error("Missing inputs for composite model selection.")
+             return None, None, None
+             
+        selection_season = season.lower()
+        model_rps = {}
+        all_models = list(model_data_loaded.keys())
+        
+        for model_run_key in all_models:
+            q_metrics = metric_timeseries.get(model_run_key, {})
+            
+            if '30Q' in event_key: duration = '30Q'
+            elif '7Q' in event_key: duration = '7Q'
+            elif '1Q' in event_key: duration = '1Q'
+            else: duration = 'Q_daily'
+            
+            metric_type = 'low' if 'low' in event_key else 'high'
+            
+            ts_seasonal_key = f"{duration}_{metric_type}_{selection_season}"
+            ts_annual_key = f"{duration}_{metric_type}_full_year"
+            
+            ts_annual = q_metrics.get(ts_annual_key)
+            ts_seasonal = q_metrics.get(ts_seasonal_key)
+            
+            if ts_annual is None or ts_seasonal is None: 
+                continue
+            
+            hist_annual = ts_annual.sel(year=slice(1960, 2014)).dropna(dim='year')
+            if hist_annual.year.size < 20: 
+                continue
+            
+            try:
+                target_T = int(event_key.split('Q')[1].split('_')[0])
+            except:
+                target_T = 10
+                
+            if metric_type == 'low':
+                thresh = np.quantile(hist_annual.values, 1.0/target_T)
+            else:
+                thresh = np.quantile(hist_annual.values, 1.0 - 1.0/target_T)
+                
+            gwl_year = gwl_years.get(model_run_key, {}).get(gwl)
+            if gwl_year is None: 
+                continue
+            
+            start, end = gwl_year - window // 2, gwl_year + (window - 1) // 2
+            fut_seasonal = ts_seasonal.sel(year=slice(start, end)).dropna(dim='year')
+            if fut_seasonal.year.size < 10: 
+                continue
+            
+            values = fut_seasonal.values
+            if metric_type == 'low':
+                count = (values < thresh).sum()
+            else:
+                count = (values > thresh).sum()
+                
+            prob = count / len(values)
+        
+            if prob > 1e-6:
+                T_fut = 1.0 / prob
+            else:
+                T_fut = np.inf
+                
+            model_rps[model_run_key] = T_fut
+            
+        if len(model_rps) < 1:
+            return None, None, None
+            
+        sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
+        
+        n_select = self.config.COMPOSITE_N_MODELS
+        if sorted_models and '_ssp585' in sorted_models[0][0]:
+            n_select = 14
+        if n_select * 2 > len(sorted_models):
+            n_select = len(sorted_models) // 2
+        
+        if n_select < 1: n_select = 1
+        
+        extreme_models = sorted_models[:n_select]     # Shortest T
+        non_extreme_models = sorted_models[-n_select:] # Longest T
+        
+        return [m[0] for m in extreme_models], [m[0] for m in non_extreme_models], model_rps
+
     def calculate_z500_composites_for_extremes(self, cmip6_results, gwl, event_key='30Q10_low', quantile=None, season='Summer'):
         """
         Calculates Z500 composites for 'Short Return Period' (Extreme) vs 'Long Return Period' (Non-Extreme) models.

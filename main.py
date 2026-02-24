@@ -734,6 +734,24 @@ class ClimateAnalysis:
                 historical_long_term_da = discharge_data_loaded.get('monthly_historical_long_term_da') # LONG-TERM MONTHLY data
 
                 if historical_da is not None:
+                    # --- NEW: Inject Extreme/Non-Extreme into storyline_classification_2d ---
+                    # We inject them here so `analyze_storyline_discharge_extremes` calculates GEV return periods for them,
+                    # which is then used by `plot_core_finding_gev_panel` as per user request.
+                    storyline_classification_2d = cmip6_results.get('storyline_classification_2d')
+                    if storyline_classification_2d:
+                        for gwl in Config.GLOBAL_WARMING_LEVELS:
+                            if gwl not in storyline_classification_2d:
+                                storyline_classification_2d[gwl] = {}
+                            
+                            for season_name, season_prefix in [('Winter', 'DJF'), ('Summer', 'JJA')]:
+                                event_key = Config.COMPOSITE_EVENT_KEY
+                                res = storyline_analyzer.get_composite_extreme_models(cmip6_results, gwl, event_key, season_name)
+                                if res[0] is not None:
+                                    ext_models, non_ext_models, _ = res
+                                    storyline_classification_2d[gwl][f"{season_prefix}_Extreme Models"] = ext_models
+                                    storyline_classification_2d[gwl][f"{season_prefix}_Non-Extreme Models"] = non_ext_models
+                                    logging.info(f"Injected {len(ext_models)} Extreme and {len(non_ext_models)} Non-Extreme models for {season_prefix} GWL {gwl}.")
+
                     logging.info(f"Calculating half-year EVA return period data for {scenario}...")
                     return_period_results_for_plot = storyline_analyzer.analyze_storyline_discharge_extremes(
                         cmip6_results=cmip6_results,

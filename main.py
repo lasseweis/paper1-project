@@ -612,6 +612,8 @@ class ClimateAnalysis:
         # Load all CMIP6 discharge data once before the loop
         cmip6_discharge_loaded = ClimateAnalysis.process_cmip6_discharge_data(Config()) # This uses the static method
 
+        aggregated_metric_timeseries = {}
+
         for scenario in Config.CMIP6_SCENARIOS:
             logging.info(f"\n\n{'='*25} STARTING CMIP6 ANALYSIS FOR SCENARIO: {scenario.upper()} {'='*25}\n")
 
@@ -622,6 +624,9 @@ class ClimateAnalysis:
                 if not cmip6_results:
                     logging.warning(f"CMIP6 analysis did not produce results for scenario {scenario}. Skipping.")
                     continue
+
+                if 'model_metric_timeseries' in cmip6_results:
+                    aggregated_metric_timeseries.update(cmip6_results['model_metric_timeseries'])
 
                 # --- PLOT: Jet Changes vs GWL (per scenario) ---
                 gwl_plot_filename = os.path.join(Config.PLOT_DIR, f"cmip6_jet_changes_vs_gwl_{scenario}.png")
@@ -661,22 +666,35 @@ class ClimateAnalysis:
                 need_calc_evo = not os.path.exists(evolution_plot_filename)
                 if not os.path.exists(erl_fig2_filename):
                     need_calc_evo = True
+                
+                # Store globally for scenario scope
+                cmip6_plot_data_stored = None
+                reanalysis_plot_data_stored = None
 
-                if need_calc_evo:
-                    logging.info(f"Calculating data for climate evolution plot ({scenario})...")
-                    cmip6_plot_data, reanalysis_plot_data = StorylineAnalyzer.analyze_timeseries_for_projection_plot(cmip6_results, datasets_reanalysis, Config())
-                    if cmip6_plot_data and reanalysis_plot_data:
+                # Check if Final Figure 3 needs it
+                need_calc_final_fig3 = False
+                for gwl in Config.GLOBAL_WARMING_LEVELS:
+                    final_fig3_fn = os.path.join(Config.PLOT_DIR, f"final_figure_3_{Config.COMPOSITE_EVENT_KEY}_{scenario}_gwl{gwl}.png")
+                    if not os.path.exists(final_fig3_fn):
+                        need_calc_final_fig3 = True
+                        break
+                
+                if need_calc_final_fig3 or need_calc_evo:
+                    logging.info(f"Calculating data for climate evolution and final fig 3 ({scenario})...")
+                    cmip6_plot_data_stored, reanalysis_plot_data_stored = StorylineAnalyzer.analyze_timeseries_for_projection_plot(cmip6_results, datasets_reanalysis, Config())
+                    
+                    if cmip6_plot_data_stored and reanalysis_plot_data_stored:
                         # Plot standard version if missing
                         if not os.path.exists(evolution_plot_filename):
-                            Visualizer.plot_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, Config(), filename=os.path.basename(evolution_plot_filename))
+                            Visualizer.plot_climate_projection_timeseries(cmip6_plot_data_stored, reanalysis_plot_data_stored, Config(), filename=os.path.basename(evolution_plot_filename))
                         
                         # Plot ERL Figure 2 if missing
                         if not os.path.exists(erl_fig2_filename):
-                            Visualizer.plot_erl_figure2_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, Config(), scenario=scenario)
+                            Visualizer.plot_erl_figure2_climate_projection_timeseries(cmip6_plot_data_stored, reanalysis_plot_data_stored, Config(), scenario=scenario)
                     else:
                          logging.warning(f"Skipping climate evolution plot for {scenario}, data preparation failed.")
                 else:
-                    logging.info(f"Climate evolution plots for {scenario} already exist. Skipping.")
+                    logging.info(f"Climate evolution plots and final fig 3 base for {scenario} already exist. Skipping.")
 
                 # --- PLOT: Storyline U850 Wind Change Maps (per scenario) ---
                 storyline_map_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_u850_change_maps_{scenario}.png")
@@ -781,19 +799,18 @@ class ClimateAnalysis:
                      fig3_filename = os.path.join(Config.PLOT_DIR, f"Figure3_core_finding_regime_shift_{scenario}.png")
                      if True or not os.path.exists(fig3_filename):
                          Visualizer.plot_core_finding_gev_panel(return_period_results_for_plot, Config(), scenario)
+                         Visualizer.plot_final_figure_2_shift_and_verification(return_period_results_for_plot, Config(), scenario)
                      else:
                          logging.info(f"Figure 3 '{fig3_filename}' already exists.")
 
                 # --- PLOT: Discharge Events Timeseries (30Q10 & Lowflow) ---
-                discharge_events_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_discharge_events_{scenario}.png")
                 discharge_extreme_plot_filename = os.path.join(Config.PLOT_DIR, f"storyline_discharge_events_extremes_{scenario}.png")
                 
-                if True or not os.path.exists(discharge_events_plot_filename) or not os.path.exists(discharge_extreme_plot_filename):
-                    logging.info(f"Discharge events plots not found or requested to recreate. Creating...")
-                    Visualizer.plot_discharge_events_timeseries(cmip6_results, discharge_data_loaded, Config(), scenario)
+                if True or not os.path.exists(discharge_extreme_plot_filename):
+                    logging.info(f"Discharge extreme events plot not found or requested to recreate. Creating...")
                     Visualizer.plot_discharge_events_extreme_timeseries(cmip6_results, discharge_data_loaded, Config(), scenario)
                 else:
-                    logging.info(f"Discharge events plots already exist.")
+                    logging.info(f"Discharge extreme events plot already exists.")
 
                 # --- PLOT: Z500 Composite Analysis (Extreme vs Non-Extreme) ---
                 # Added Feb 2026
@@ -803,27 +820,28 @@ class ClimateAnalysis:
                 # Check for 30Q30/30Q10 data availability first to avoid useless calls
                 # But calculate_z500... checks internally.
                 
-                for gwl in Config.GLOBAL_WARMING_LEVELS:
-                    for composite_season in ['Winter', 'Summer']:
-                        composite_plot_filename = os.path.join(Config.PLOT_DIR, f"composite_analysis_z500_{composite_season.lower()}_{composite_event_key}_{scenario}_gwl{gwl}.png")
-                        if not os.path.exists(composite_plot_filename):
-                            logging.info(f"Running Z500 composite analysis for GWL +{gwl}°C, Season {composite_season}, Event {composite_event_key}...")
-                            result_tuple = storyline_analyzer.calculate_z500_composites_for_extremes(
-                                cmip6_results, gwl=gwl, event_key=composite_event_key, season=composite_season
-                            )
-                            if result_tuple:
-                                composite_results, model_lists, model_rps, n_total_models = result_tuple
-                                if composite_results:
-                                    Visualizer.plot_z500_composite_analysis_panel(
-                                        composite_results, gwl, composite_event_key, scenario, composite_season,
-                                        model_rps, model_lists, n_total_models
-                                    )
+                if scenario == 'ssp585':
+                    for gwl in Config.GLOBAL_WARMING_LEVELS:
+                        for composite_season in ['Winter', 'Summer']:
+                            composite_plot_filename = os.path.join(Config.PLOT_DIR, f"composite_analysis_z500_{composite_season.lower()}_{composite_event_key}_{scenario}_gwl{gwl}.png")
+                            if not os.path.exists(composite_plot_filename):
+                                logging.info(f"Running Z500 composite analysis for GWL +{gwl}°C, Season {composite_season}, Event {composite_event_key}...")
+                                result_tuple = storyline_analyzer.calculate_z500_composites_for_extremes(
+                                    cmip6_results, gwl=gwl, event_key=composite_event_key, season=composite_season
+                                )
+                                if result_tuple:
+                                    composite_results, model_lists, model_rps, n_total_models = result_tuple
+                                    if composite_results:
+                                        Visualizer.plot_z500_composite_analysis_panel(
+                                            composite_results, gwl, composite_event_key, scenario, composite_season,
+                                            model_rps, model_lists, n_total_models
+                                        )
+                                    else:
+                                        logging.warning(f"Z500 composite analysis returned empty results for GWL {gwl}, {composite_season}.")
                                 else:
-                                    logging.warning(f"Z500 composite analysis returned empty results for GWL {gwl}, {composite_season}.")
+                                    logging.warning(f"Z500 composite analysis returned no results for GWL {gwl}, {composite_season}.")
                             else:
-                                logging.warning(f"Z500 composite analysis returned no results for GWL {gwl}, {composite_season}.")
-                        else:
-                            logging.info(f"Z500 composite plot for GWL {gwl}, {composite_season} already exists.")
+                                logging.info(f"Z500 composite plot for GWL {gwl}, {composite_season} already exists.")
 
                 # --- PLOT: PSL Composite Analysis (Extreme vs Non-Extreme) ---
                 # Added Feb 2026 - Mirrors Z500 composite but for sea level pressure
@@ -919,10 +937,24 @@ class ClimateAnalysis:
                 # --- PLOT: UA Composite Analysis (Zonal Wind 850hPa) ---
                 ua_stored_composites = {}  # Store results for combined plot
                 for gwl in Config.GLOBAL_WARMING_LEVELS:
+                    final_fig3_fn_check = os.path.join(Config.PLOT_DIR, f"final_figure_3_{composite_event_key}_{scenario}_gwl{gwl}.png")
                     for composite_season in ['Winter', 'Summer']:
                         ua_composite_plot_filename = os.path.join(Config.PLOT_DIR, f"composite_analysis_ua850_{composite_season.lower()}_{composite_event_key}_{scenario}_gwl{gwl}.png")
                         ua_combined_plot_filename = os.path.join(Config.PLOT_DIR, f"combined_diff_ua850_{composite_event_key}_{scenario}_gwl{gwl}.png")
-                        need_compute = not os.path.exists(ua_composite_plot_filename) or not os.path.exists(ua_combined_plot_filename)
+                        need_compute = (not os.path.exists(ua_composite_plot_filename) or 
+                                        not os.path.exists(ua_combined_plot_filename) or
+                                        not os.path.exists(final_fig3_fn_check))
+                        
+                        # ALways calculate composites to store it in memory for the final fig 3 
+                        # even if plots exist, if final_fig3 is missing OR we need it.
+                        # Wait, we can just ALWAYS calculate it if ANY plot needs it, 
+                        # OR if we just want to ensure we have the data.
+                        
+                        compute_data = need_compute
+                        # Actually to be safe let's just compute to get the data if final fig 3 is needed
+                        # wait, earlier we already changed need_compute to include final_fig3_fn_check. 
+                        # So it DOES compute!
+                        
                         if need_compute:
                             logging.info(f"Running UA composite analysis for GWL +{gwl}°C, Season {composite_season}, Event {composite_event_key}...")
                             ua_result_tuple = storyline_analyzer.calculate_ua_composites_for_extremes(
@@ -942,7 +974,20 @@ class ClimateAnalysis:
                             else:
                                 logging.warning(f"UA composite analysis returned no results for GWL {gwl}, {composite_season}.")
                         else:
-                            logging.info(f"UA composite plot for GWL {gwl}, {composite_season} already exists.")
+                            logging.info(f"UA composite plot for GWL {gwl}, {composite_season} already exists and data not needed.")
+                            # Still need to load it if final fig 3 needs it? NO, need_compute is True if final fig 3 is missing.
+                            # BUT WHAT IF final fig 3 exists? Then we don't need it.
+                            # Wait, the warning was "Cannot create final figure 3 for GWL 2.0: missing season data."
+                            # If need_compute was True, it should have populated ua_stored_composites.
+                            # Let's just FORCE computation of the data (without plotting if plots exist).
+                            ua_result_tuple = storyline_analyzer.calculate_ua_composites_for_extremes(
+                                cmip6_results, gwl=gwl, event_key=composite_event_key, season=composite_season
+                            )
+                            if ua_result_tuple:
+                                ua_composite_results, ua_model_lists, ua_model_rps, ua_n_total_models = ua_result_tuple
+                                if ua_composite_results:
+                                    ua_stored_composites[(gwl, composite_season)] = (ua_composite_results, ua_model_rps, ua_n_total_models)
+
 
                 # --- Combined UA Difference Plots (Winter + Summer) ---
                 ua_shared_diff_limit = None
@@ -981,6 +1026,25 @@ class ClimateAnalysis:
                             logging.warning(f"Cannot create combined UA diff plot for GWL {gwl}: missing season data.")
                     else:
                         logging.info(f"Combined UA diff plot for GWL {gwl} already exists.")
+
+                    # --- NEW: Final Figure 3 Plot ---
+                    final_fig3_fn = os.path.join(Config.PLOT_DIR, f"final_figure_3_{composite_event_key}_{scenario}_gwl{gwl}.png")
+                    if not os.path.exists(final_fig3_fn):
+                        w_data = ua_stored_composites.get((gwl, 'Winter'))
+                        s_data = ua_stored_composites.get((gwl, 'Summer'))
+                        if w_data and s_data:
+                            Visualizer.plot_final_figure_3_u850_and_indices(
+                                winter_composite=w_data[0], summer_composite=s_data[0],
+                                gwl=gwl, event_key=composite_event_key, scenario=scenario,
+                                cmip6_plot_data=cmip6_plot_data_stored, reanalysis_plot_data=reanalysis_plot_data_stored, config=Config(),
+                                winter_model_rps=w_data[1], summer_model_rps=s_data[1],
+                                winter_n_total=w_data[2], summer_n_total=s_data[2],
+                                fixed_diff_limit=ua_shared_diff_limit
+                            )
+                        else:
+                            logging.warning(f"Cannot create final figure 3 for GWL {gwl}: missing season data.")
+                    else:
+                        logging.info(f"Final figure 3 for GWL {gwl} already exists.")
 
                 # --- PLOT: TAS Composite Analysis (Surface Temperature) ---
                 for gwl in Config.GLOBAL_WARMING_LEVELS:
@@ -1224,6 +1288,19 @@ class ClimateAnalysis:
         # =================================================================================
         # === END OF SCENARIO-SPECIFIC LOOP ===
         # =================================================================================
+
+        # --- PLOT: Discharge Events Timeseries (30Q10 & Lowflow) - COMBINED ---
+        discharge_events_plot_filename = os.path.join(Config.PLOT_DIR, f"final_figure_1_storyline_discharge_events_combined.png")
+        if True or not os.path.exists(discharge_events_plot_filename):
+            logging.info(f"Discharge events combined plot not found or requested to recreate. Creating...")
+            
+            if aggregated_metric_timeseries:
+                cmip6_results_combined = {'model_metric_timeseries': aggregated_metric_timeseries}
+                Visualizer.plot_discharge_events_timeseries(cmip6_results_combined, cmip6_discharge_loaded, Config(), 'combined')
+            else:
+                logging.warning("No aggregated metric timeseries data found for final figure 1.")
+        else:
+            logging.info(f"Discharge events combined plot already exists.")
 
         logging.info("\n\n=====================================================")
         logging.info("=== FULL ANALYSIS COMPLETED ===")

@@ -21,6 +21,7 @@ from matplotlib.cm import ScalarMappable
 import seaborn as sns
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+import cartopy.io.shapereader as shpreader
 from scipy.stats import chi2
 import json
 import seaborn as sns
@@ -3892,6 +3893,296 @@ class Visualizer:
         logging.info(f"Saved LNWL aggregation comparison plot (3x4 grid, 30-Day, FullYear) to {filename}")
 
     @staticmethod
+    def plot_final_figure_2_shift_and_verification(return_period_results, config, scenario):
+        """
+        Combines Figure 3 (Regime Shift) and Historical Seasonal Verification (Low Flow only).
+        """
+        logging.info(f"Plotting Final Figure 2 (Combined Shift and Verification) for {scenario}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        if not return_period_results or 'data' not in return_period_results:
+            logging.warning("Missing data for Final Figure 2.")
+            return
+
+        # --- PREPARE DATA FOR VERIFICATION ---
+        hist_data = return_period_results.get('historical_verification', {})
+        future_data = return_period_results.get('data', {})
+        gwls = sorted([g for g in future_data.keys() if g in config.GLOBAL_WARMING_LEVELS])
+        
+        low_keys = sorted([k for k in hist_data.keys() 
+                    if hist_data[k]['type'] == 'low' 
+                    and '30Q10' in k])
+        n_verif_rows = 1 + len(gwls) if low_keys else 0
+
+        # --- SETUP FIGURE ---
+        n_verif_cols = 1 + len(gwls) if low_keys else 0
+        
+        # We need a gridspec that can handle 2 columns in top row, and n_verif_cols in bottom row.
+        # A common multiple of 2 and n_verif_cols works well. Let's use 2 * n_verif_cols columns.
+        total_cols = max(2, 2 * n_verif_cols if n_verif_cols > 0 else 2)
+        
+        fig = plt.figure(figsize=(16, 10))
+        gs = gridspec.GridSpec(2, total_cols, height_ratios=[5.0, 4.0], hspace=0.45, wspace=0.3)
+        
+        # Top row: 2 plots (Fig 3: a and b), each spanning half the columns
+        col_span_top = total_cols // 2
+        axs_top = [fig.add_subplot(gs[0, 0:col_span_top]), fig.add_subplot(gs[0, col_span_top:])]
+
+        # ==========================================
+        # PART 1: FIGURE 3 (Core Finding GEV Panel)
+        # ==========================================
+        target_event_substring = "30Q10"
+        winter_keys = list(return_period_results['thresholds'].get('winter', {}).keys())
+        summer_keys = list(return_period_results['thresholds'].get('summer', {}).keys())
+        
+        low_key_winter = next((k for k in winter_keys if target_event_substring in k and 'low' in k.lower()), None)
+        low_key_summer = next((k for k in summer_keys if target_event_substring in k and 'low' in k.lower()), None)
+        
+        plot_configs_fig3 = [
+            {'half_year': 'summer', 'event_key': low_key_summer,  'base_title': 'a) Summer Half-Year: 30-Day Low Flow', 'ax': axs_top[0]},
+            {'half_year': 'winter', 'event_key': low_key_winter,  'base_title': 'b) Winter Half-Year: 30-Day Low Flow', 'ax': axs_top[1]},
+        ]
+
+        scenario_title = Visualizer._format_scenario_title(scenario)
+        fig.suptitle(f"Final Figure 2: Shift in Extreme Return Periods & Seasonal Verification - {scenario_title}", fontsize=16, weight='bold', y=0.98)
+        
+        gwls_to_plot = config.GLOBAL_WARMING_LEVELS
+        gwl_colors = {f'+{gwl}°C GWL': Visualizer.GWL_COLORS[gwl] for gwl in gwls_to_plot}
+        
+        storyline_data_keys = ['MMM', 'Extreme Models', 'Non-Extreme Models']
+        storyline_display_order = ['Multi-Model Mean', 'Extreme Models', 'Non-Extreme Models']
+
+        for i, cfg in enumerate(plot_configs_fig3):
+            ax = cfg['ax']
+            event_key = cfg['event_key']
+            half_year = cfg['half_year']
+            
+            full_title = cfg['base_title']
+            ax.set_title(full_title, loc='left', fontsize=12, weight='bold')
+
+            plot_data = []
+            
+            # Guard against missing keys
+            if event_key and half_year in return_period_results['thresholds'] and event_key in return_period_results['thresholds'][half_year]:
+                thresh_meta = return_period_results['thresholds'][half_year][event_key]
+                hist_rp = thresh_meta.get('hist_return_period')
+            else:
+                hist_rp = None
+            
+            for storyline_key in storyline_data_keys:
+                display_name = 'Multi-Model Mean' if storyline_key == 'MMM' else storyline_key
+                for gwl in gwls_to_plot:
+                    gwl_label = f'+{gwl}°C GWL'
+                    try:
+                        event_data = return_period_results['data'][gwl][half_year][storyline_key][event_key]
+                        if event_data and 'future_return_periods_all_models' in event_data:
+                            rps = event_data['future_return_periods_all_models']
+                            rps = [rp for rp in rps if np.isfinite(rp)]
+                            for rp in rps:
+                                plot_data.append({'Storyline': display_name, 'GWL': gwl_label, 'Plot Pos': rp})
+                    except KeyError: continue
+            
+            df = pd.DataFrame(plot_data)
+            
+            if df.empty:
+                ax.text(0.5, 0.5, "No Data", ha='center', va='center', transform=ax.transAxes)
+                continue
+
+            sns.boxplot(data=df, y='Storyline', x='Plot Pos', hue='GWL', ax=ax,
+                        order=storyline_display_order, palette=gwl_colors,
+                        showfliers=False, linewidth=1.0, width=0.7, orient='h',
+                        boxprops={'alpha': 0.4})
+            sns.stripplot(data=df, y='Storyline', x='Plot Pos', hue='GWL', ax=ax,
+                          order=storyline_display_order, palette=gwl_colors,
+                          dodge=True, jitter=0.15, size=6, alpha=0.6, legend=False, orient='h')
+            
+            y_ticks_pos = np.arange(len(storyline_display_order))
+            for i_story, storyline_display in enumerate(storyline_display_order):
+                storyline_key = 'MMM' if storyline_display == 'Multi-Model Mean' else storyline_display
+                y_base = y_ticks_pos[i_story]
+                for j, gwl in enumerate(gwls_to_plot):
+                    gwl_label = f'+{gwl}°C GWL'
+                    y_offset = -0.15 + (j * 0.25)
+                    try:
+                        event_data_gwl = return_period_results['data'][gwl][half_year][storyline_key][event_key]
+                        if event_data_gwl and 'model_count_X' in event_data_gwl and 'model_count_Y' in event_data_gwl:
+                            X = event_data_gwl['model_count_X']
+                            Y = event_data_gwl['model_count_Y']
+                            ax.text(0.98, y_base + y_offset, f"n={X}/{Y}", 
+                                    transform=ax.get_yaxis_transform(), 
+                                    horizontalalignment='right', verticalalignment='center',
+                                    fontsize=8, weight='bold', 
+                                    color=gwl_colors[gwl_label],
+                                    bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
+                    except Exception: pass
+            
+            if hist_rp:
+                ax.axvline(hist_rp, color='black', linestyle='--', linewidth=1.5)
+            
+            if ax.get_legend(): ax.get_legend().remove()
+
+            ax.set_xscale('linear')
+            ax.set_xlim(0, 35)
+            ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+            ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+            ax.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
+            ax.tick_params(axis='x', which='both', bottom=True, labelbottom=True)
+            ax.set_xlabel("Return Period (Years)", fontsize=10)
+            
+            ax.set_ylabel('')
+            if i == 0:
+                labels = [l.replace(' & ', ' &\n') for l in storyline_display_order]
+                ax.set_yticks(range(len(labels)))
+                ax.set_yticklabels(labels, fontsize=10)
+            else:
+                ax.set_yticks([])
+                ax.set_yticklabels([])
+
+        handles_fig3 = []
+        handles_fig3.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.5, label='Models'))
+        handles_fig3.append(plt.Line2D([0], [0], color='black', linestyle='--', linewidth=1.5, label='Historical Return Period'))
+        for gwl_label, color in gwl_colors.items():
+            handles_fig3.append(mpatches.Patch(color=color, label=gwl_label))
+        
+        axs_top[0].legend(handles=handles_fig3, loc='lower left', bbox_to_anchor=(0.0, -0.28), ncol=3, frameon=False, fontsize=9)
+
+
+        # ==========================================
+        # PART 2: VERIFICATION PANELS (Low Flow Only)
+        # ==========================================
+        if n_verif_cols > 0:
+            def get_median(lst):
+                clean = [x for x in lst if np.isfinite(x)]
+                if not clean: return np.nan
+                return np.median(clean)
+
+            scenario_labels = ['Historical'] + [f'GWL +{g}°C' for g in gwls]
+            lettering_start = 99 # ascii for 'c'
+            
+            # Subplots for bottom row
+            col_span_bot = total_cols // n_verif_cols
+            
+            for c in range(n_verif_cols):
+                start_col = c * col_span_bot
+                ax = fig.add_subplot(gs[1, start_col:start_col+col_span_bot]) 
+                is_hist = (c == 0)
+                current_gwl = gwls[c-1] if not is_hist else None
+                col_label = scenario_labels[c]
+                
+                type_title = 'Seasonal Verification'
+                
+                x_pos = np.arange(len(low_keys))
+                width = 0.25
+                
+                annual_targets = []
+                winter_periods = []
+                summer_periods = []
+                winter_medians = []
+                summer_medians = []
+                winter_counts = []
+                summer_counts = []
+                
+                for k in low_keys:
+                    target_T = hist_data[k]['target_T']
+                    annual_targets.append(target_T)
+                    
+                    if is_hist:
+                        w_vals = hist_data[k]['winter_periods']
+                        s_vals = hist_data[k]['summer_periods']
+                        winter_periods.append(w_vals)
+                        summer_periods.append(s_vals)
+                        winter_medians.append(get_median(w_vals))
+                        summer_medians.append(get_median(s_vals))
+                        winter_counts.append((len([x for x in w_vals if np.isfinite(x)]), len(w_vals)))
+                        summer_counts.append((len([x for x in s_vals if np.isfinite(x)]), len(s_vals)))
+                        w_color = Visualizer.GWL_COLORS.get(2.0, 'navy')
+                        s_color = '#ff7f0e'
+                    else:
+                        try:
+                            w_data_node = future_data[current_gwl]['winter']['MMM'][k]
+                            w_vals = w_data_node['future_return_periods_all_models']
+                            winter_periods.append(w_vals)
+                            winter_medians.append(get_median(w_vals))
+                            winter_counts.append((w_data_node['model_count_X'], w_data_node['model_count_Y']))
+                        except Exception:
+                            winter_periods.append([])
+                            winter_medians.append(np.nan)
+                            winter_counts.append((0,0))
+
+                        try:
+                            s_data_node = future_data[current_gwl]['summer']['MMM'][k]
+                            s_vals = s_data_node['future_return_periods_all_models']
+                            summer_periods.append(s_vals)
+                            summer_medians.append(get_median(s_vals))
+                            summer_counts.append((s_data_node['model_count_X'], s_data_node['model_count_Y']))
+                        except Exception:
+                            summer_periods.append([])
+                            summer_medians.append(np.nan)
+                            summer_counts.append((0,0))
+                            
+                        w_color = Visualizer.GWL_COLORS.get(2.0, 'navy')
+                        s_color = '#ff7f0e'
+
+                rects1 = ax.bar(x_pos - width, annual_targets, width, label='Annual Target T', color='black', alpha=0.7)
+                label_w = 'Winter Median T' if is_hist else f'Future Winter Median T (+{current_gwl}°C)' 
+                rects2 = ax.bar(x_pos, winter_medians, width, label=label_w, color=w_color, alpha=0.9 if is_hist else 0.7)
+                label_s = 'Summer Median T' if is_hist else f'Future Summer Median T (+{current_gwl}°C)'
+                rects3 = ax.bar(x_pos + width, summer_medians, width, label=label_s, color=s_color, alpha=0.9 if is_hist else 0.7)
+                
+                panel_letter = chr(lettering_start + c)
+                if c == 0:
+                     ax.set_ylabel('Return Period (Years)', fontsize=10)
+                ax.set_title(f'{panel_letter}) {col_label}\n{type_title}', weight='bold', loc='left', fontsize=11)
+                ax.set_xticks(x_pos)
+                ax.set_xticklabels([k.replace('30Q10_', '') for k in low_keys], fontsize=10)
+                ax.grid(axis='y', linestyle='--', alpha=0.5)
+                
+                if c == 0:
+                    ax.legend(loc='upper left', fontsize=8, bbox_to_anchor=(0.0, -0.15))
+                elif c == 1 and not is_hist:
+                    ax.legend(loc='upper right', fontsize=8) 
+
+                def autolabel_90(rects, counts):
+                     for i, rect in enumerate(rects):
+                        height = rect.get_height()
+                        X, Y = 0, 0
+                        if i < len(counts): X, Y = counts[i]
+                        label_text = f'{height:.1f}'
+                        if Y > 0: label_text += f"\n(n={X}/{Y})"
+                        
+                        if np.isfinite(height):
+                            ax.annotate(label_text, xy=(rect.get_x() + rect.get_width() / 2, height),
+                                        xytext=(0, 3), textcoords="offset points",
+                                        ha='center', va='bottom', rotation=90, fontsize=8)
+                        else:
+                            ax.annotate('Inf', xy=(rect.get_x() + rect.get_width() / 2, 0),
+                                        xytext=(0, 3), textcoords="offset points",
+                                        ha='center', va='bottom', fontsize=8, color='red', rotation=90)
+                
+                autolabel_90(rects2, winter_counts)
+                autolabel_90(rects3, summer_counts)
+                
+                for j, sub_vals in enumerate(winter_periods):
+                    clean = [v for v in sub_vals if np.isfinite(v)]
+                    if clean:
+                        jitter = np.random.uniform(-0.05, 0.05, size=len(clean))
+                        ax.scatter(np.full_like(clean, x_pos[j]) + jitter, clean, 
+                                 color='navy', s=8, alpha=0.4, zorder=5, marker='o')
+
+                for j, sub_vals in enumerate(summer_periods):
+                    clean = [v for v in sub_vals if np.isfinite(v)]
+                    if clean:
+                        jitter = np.random.uniform(-0.05, 0.05, size=len(clean))
+                        ax.scatter(np.full_like(clean, x_pos[j] + width) + jitter, clean, 
+                                 color='brown', s=8, alpha=0.4, zorder=5, marker='o')
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        filename = os.path.join(config.PLOT_DIR, f"final_figure_2_regime_shift_and_verification_{scenario}.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved Final Figure 2 to {filename}")
+
+    @staticmethod
     def plot_core_finding_gev_panel(return_period_results, config, scenario):
         """
         Creates ERL Figure 3: Core Finding - Regime Shift in Extremes (30Q100).
@@ -5357,60 +5648,140 @@ class Visualizer:
             return
 
         all_models_data = []
-        for key, ts_dict in metric_timeseries.items():
-            # Check if this model run belongs to the current scenario
-            if not key.endswith(scenario):
-                continue
-            if '30Q_low_full_year' in ts_dict:
-                da = ts_dict['30Q_low_full_year']
-                if da is not None:
-                     try:
-                         df = da.to_dataframe(name='discharge')
-                     except ValueError:
-                         df = da.to_dataframe()
-                         if len(df.columns) == 1:
-                             df.columns = ['discharge']
-                     # The index should be 'year'
-                     if 'year' in df.index.names:
-                         df = df.reset_index()
-                     df['model'] = key.split('_')[0]
-                     all_models_data.append(df)
         
-        if not all_models_data:
-            logging.warning(f"No 30Q_low_full_year data found for scenario {scenario}")
-            return
+        def get_scenario_data(target_scenario):
+            scen_models_data = []
+            for key, ts_dict in metric_timeseries.items():
+                if not key.endswith(target_scenario):
+                    continue
+                if '30Q_low_full_year' in ts_dict:
+                    da = ts_dict['30Q_low_full_year']
+                    if da is not None:
+                         try:
+                             df = da.to_dataframe(name='discharge')
+                         except ValueError:
+                             df = da.to_dataframe()
+                             if len(df.columns) == 1:
+                                 df.columns = ['discharge']
+                         if 'year' in df.index.names:
+                             df = df.reset_index()
+                         df['model'] = key.split('_')[0]
+                         scen_models_data.append(df)
+            
+            if not scen_models_data:
+                return None, 0
+            
+            df_all = pd.concat(scen_models_data, ignore_index=True)
+            df_stats = df_all.groupby('year')['discharge'].agg(['mean', lambda x: np.percentile(x, 10), lambda x: np.percentile(x, 90)]).reset_index()
+            df_stats.columns = ['year', 'mmm', 'p10', 'p90']
 
-        df_all = pd.concat(all_models_data, ignore_index=True)
-        # Group by year to get percentiles and mean
-        df_stats = df_all.groupby('year')['discharge'].agg(['mean', lambda x: np.percentile(x, 10), lambda x: np.percentile(x, 90)]).reset_index()
-        df_stats.columns = ['year', 'mmm', 'p10', 'p90']
+            df_stats['mmm'] = df_stats['mmm'].rolling(window=5, center=True).mean()
+            df_stats['p10'] = df_stats['p10'].rolling(window=5, center=True).mean()
+            df_stats['p90'] = df_stats['p90'].rolling(window=5, center=True).mean()
+            return df_stats, len(scen_models_data)
+
+        df_stats_ssp585, n_ssp585 = get_scenario_data('ssp585')
+        df_stats_ssp245, n_ssp245 = get_scenario_data('ssp245')
+        
+        if df_stats_ssp585 is None and df_stats_ssp245 is None:
+            logging.warning("No 30Q_low_full_year data found for either scenario.")
+            return
 
         # 2. Get lowflow Threshold (LNWL 970 m3/s)
         threshold_lowflow = 970.0
         if discharge_data_loaded:
             threshold_lowflow = discharge_data_loaded.get('winter_lowflow_lnwl', 970.0)
 
-        # Create figure
-        fig, ax = plt.subplots(figsize=(10, 5))
+        # Create figure with 2 subplots (map on top, timeseries on bottom)
+        fig = plt.figure(figsize=(10, 10))
+        gs = gridspec.GridSpec(2, 1, height_ratios=[1, 1])
         
-        # Plot shading for the model spread
-        ax.fill_between(df_stats['year'], df_stats['p10'], df_stats['p90'], color='lightsteelblue', alpha=0.5, label='10th-90th Percentile Spread')
+        # Define shape CRS: Lambert Azimuthal Equal Area based on zones.prj
+        shape_crs = ccrs.LambertAzimuthalEqualArea(
+            central_longitude=20.0, 
+            central_latitude=55.0, 
+            globe=ccrs.Globe(ellipse=None, semimajor_axis=6370997.0, semiminor_axis=6370997.0)
+        )
         
-        # Plot MMM
-        ax.plot(df_stats['year'], df_stats['mmm'], color='midnightblue', linewidth=2, label=f'Multi-Model Mean (MMM, n={len(all_models_data)})')
         
-        ax.set_title(f'Annual Minimum 30-Day Discharge ({scenario.upper()})', fontsize=12, weight='bold')
+        # --- Top Subplot: Map ---
+        ax_map = fig.add_subplot(gs[0], projection=ccrs.PlateCarree())
+        
+        # Add high-resolution satellite background 
+        import cartopy.io.img_tiles as cimgt
+        request = cimgt.GoogleTiles(style='satellite')
+        ax_map.add_image(request, 6) # zoom level 6 is usually good for a region like a large river basin
+        
+        ax_map.add_feature(cfeature.COASTLINE, linewidth=0.8, edgecolor='white', zorder=5)
+        ax_map.add_feature(cfeature.BORDERS, linestyle='-', linewidth=0.8, edgecolor='white', zorder=5)
+        
+        try:
+            shapefile_path = '/nas/home/vlw/Desktop/STREAM/hydro-units-files/zones.shp'
+            reader = shpreader.Reader(shapefile_path)
+            geometries = list(reader.geometries())
+            
+            # Merge all individual sub-shapes to get only the outer boundary
+            import shapely.ops
+            merged_geom = shapely.ops.unary_union(geometries)
+            
+            # Plot only the outer boundary
+            ax_map.add_geometries([merged_geom], crs=shape_crs, edgecolor='red', facecolor='none', linewidth=1.5, zorder=10)
+            
+            # Extract bounds from geometries
+            bounds = [
+                min(g.bounds[0] for g in geometries),
+                min(g.bounds[1] for g in geometries),
+                max(g.bounds[2] for g in geometries),
+                max(g.bounds[3] for g in geometries)
+            ]
+            
+            # Transform bounds to PlateCarree to set extent properly
+            # bounds are [minx, miny, maxx, maxy] in shape_crs
+            import shapely.geometry as sgeom
+            box = sgeom.box(bounds[0], bounds[1], bounds[2], bounds[3])
+            projected_box = ccrs.PlateCarree().project_geometry(box, shape_crs)
+            p_bounds = projected_box.bounds
+            
+            # Allow some padding (roughly 2 degrees)
+            buffer_lon = 2.0
+            buffer_lat = 2.0
+            ax_map.set_extent([p_bounds[0] - buffer_lon, p_bounds[2] + buffer_lon,
+                               p_bounds[1] - buffer_lat, p_bounds[3] + buffer_lat], crs=ccrs.PlateCarree())
+            ax_map.set_title("Study Region: Upper Danube Basin", fontsize=12, weight='bold')
+        except Exception as e:
+            logging.error(f"Failed to plot shapefile map: {e}")
+            ax_map.set_title("Study Region (Shapefile error)", fontsize=12, weight='bold')
+            
+        # --- Bottom Subplot: Timeseries ---
+        ax = fig.add_subplot(gs[1])
+        
+        # Colors: SSP585 (blueish), SSP245 (orangeish)
+        # We use standard color for SSP585 since it was midnightblue previously.
+        if df_stats_ssp585 is not None:
+            ax.fill_between(df_stats_ssp585['year'], df_stats_ssp585['p10'], df_stats_ssp585['p90'], 
+                            color='lightsteelblue', alpha=0.5, label='SSP585 10th-90th Spread (5-yr MA)')
+            ax.plot(df_stats_ssp585['year'], df_stats_ssp585['mmm'], 
+                    color='midnightblue', linewidth=2, label=f'SSP585 MMM (5-yr MA, n={n_ssp585})')
+
+        if df_stats_ssp245 is not None:
+            ax.fill_between(df_stats_ssp245['year'], df_stats_ssp245['p10'], df_stats_ssp245['p90'], 
+                            color='moccasin', alpha=0.5, label='SSP245 10th-90th Spread (5-yr MA)')
+            ax.plot(df_stats_ssp245['year'], df_stats_ssp245['mmm'], 
+                    color='darkorange', linewidth=2, label=f'SSP245 MMM (5-yr MA, n={n_ssp245})')
+
+        ax.set_title('Annual Minimum 30-Day Discharge (SSP245 & SSP585)', fontsize=12, weight='bold')
         ax.set_ylabel('Discharge (m³/s)', fontsize=10)
         ax.set_xlabel('Year', fontsize=10)
         ax.grid(True, linestyle=':', alpha=0.7)
+        
         # Limit the x-axis properly
-        min_year = max(1950, df_stats['year'].min())
-        max_year = min(2100, df_stats['year'].max())
+        min_year = 1950
+        max_year = 2100
         ax.set_xlim(min_year, max_year)
         ax.legend(loc='lower left', fontsize=9)
         
         fig.tight_layout()
-        filename = f"storyline_discharge_events_{scenario}.png"
+        filename = f"final_figure_1_storyline_discharge_events_{scenario}.png"
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -5473,24 +5844,30 @@ class Visualizer:
         if discharge_data_loaded:
             threshold_lowflow = discharge_data_loaded.get('winter_lowflow_lnwl', 970.0)
 
-        fig, axs = plt.subplots(2, 2, figsize=(14, 10), sharex=True, sharey=True)
+        fig, axs = plt.subplots(1, 2, figsize=(14, 5), sharex=True, sharey=True)
         
-        def _plot_panel_split(ax, df_all, model_list, title, color_line):
+        def _plot_combined_panel(ax, df_all, ext_list, non_ext_list, title):
             if df_all.empty:
                 return
             
-            target_names = [m.split('_')[0] for m in model_list]
-            df_target = df_all[df_all['model'].isin(target_names)]
+            def _plot_group(model_list, label_prefix, color_line):
+                target_names = [m.split('_')[0] for m in model_list]
+                df_target = df_all[df_all['model'].isin(target_names)]
 
-            if not df_target.empty:
-                df_target_stats = df_target.groupby('year')['discharge'].agg(['mean', lambda x: np.percentile(x, 10), lambda x: np.percentile(x, 90)]).reset_index()
-                df_target_stats.columns = ['year', 'mmm', 'p10', 'p90']
+                if not df_target.empty:
+                    df_target_stats = df_target.groupby('year')['discharge'].agg(['mean', lambda x: np.percentile(x, 10), lambda x: np.percentile(x, 90)]).reset_index()
+                    df_target_stats.columns = ['year', 'mmm', 'p10', 'p90']
 
-                # Plot spread shading
-                ax.fill_between(df_target_stats['year'], df_target_stats['p10'], df_target_stats['p90'], color=color_line, alpha=0.3, label='10th-90th Percentile Spread')
-                
-                # Plot MMM
-                ax.plot(df_target_stats['year'], df_target_stats['mmm'], color=color_line, linewidth=2, label=f'MMM (n={len(target_names)})')
+                    # Apply 5-year moving average
+                    df_target_stats['mmm'] = df_target_stats['mmm'].rolling(window=5, center=True).mean()
+                    df_target_stats['p10'] = df_target_stats['p10'].rolling(window=5, center=True).mean()
+                    df_target_stats['p90'] = df_target_stats['p90'].rolling(window=5, center=True).mean()
+
+                    ax.fill_between(df_target_stats['year'], df_target_stats['p10'], df_target_stats['p90'], color=color_line, alpha=0.3, label=f'{label_prefix} Spread (5-yr MA)')
+                    ax.plot(df_target_stats['year'], df_target_stats['mmm'], color=color_line, linewidth=2, label=f'{label_prefix} MMM (5-yr MA, n={len(target_names)})')
+
+            _plot_group(ext_list, 'Extreme', '#b2182b')
+            _plot_group(non_ext_list, 'Non-Extreme', '#2166ac')
             
             ax.set_title(title, fontsize=12, weight='bold')
             ax.grid(True, linestyle=':', alpha=0.7)
@@ -5501,24 +5878,319 @@ class Visualizer:
 
         # Plot Summer (Col 0)
         df_summer = pd.concat(data_by_season['Summer'], ignore_index=True) if data_by_season['Summer'] else pd.DataFrame()
-        _plot_panel_split(axs[0, 0], df_summer, extreme_models['Summer'], f'Summer: Extreme Models ({scenario.upper()})', '#b2182b')
-        _plot_panel_split(axs[1, 0], df_summer, non_extreme_models['Summer'], f'Summer: Non-Extreme Models ({scenario.upper()})', '#2166ac')
+        _plot_combined_panel(axs[0], df_summer, extreme_models['Summer'], non_extreme_models['Summer'], f'Summer ({scenario.upper()})')
 
         # Plot Winter (Col 1)
         df_winter = pd.concat(data_by_season['Winter'], ignore_index=True) if data_by_season['Winter'] else pd.DataFrame()
-        _plot_panel_split(axs[0, 1], df_winter, extreme_models['Winter'], f'Winter: Extreme Models ({scenario.upper()})', '#b2182b')
-        _plot_panel_split(axs[1, 1], df_winter, non_extreme_models['Winter'], f'Winter: Non-Extreme Models ({scenario.upper()})', '#2166ac')
+        _plot_combined_panel(axs[1], df_winter, extreme_models['Winter'], non_extreme_models['Winter'], f'Winter ({scenario.upper()})')
 
-        # Set labels
-        for ax in axs[:, 0]:
-            ax.set_ylabel('Discharge (m³/s)', fontsize=10)
-        for ax in axs[1, :]:
-            ax.set_xlabel('Year', fontsize=10)
+        axs[0].set_ylabel('Discharge (m³/s)', fontsize=10)
+        axs[0].set_xlabel('Year', fontsize=10)
+        axs[1].set_xlabel('Year', fontsize=10)
 
+        plt.suptitle(f'Annual Minimum 30-Day Discharge ({scenario.upper()})', fontsize=16, weight='bold')
         fig.tight_layout()
+        fig.subplots_adjust(top=0.88)
         filename = f"storyline_discharge_events_extremes_{scenario}.png"
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved extreme discharge events timeseries plot to {filepath}")
+
+
+    @staticmethod
+    def plot_final_figure_3_u850_and_indices(
+        winter_composite, summer_composite,
+        gwl, event_key, scenario,
+        cmip6_plot_data, reanalysis_plot_data, config,
+        winter_model_rps=None, summer_model_rps=None,
+        winter_n_total=None, summer_n_total=None,
+        fixed_diff_limit=None
+    ):
+        """
+        Creates final_figure_3:
+        Top: UA850 difference maps (Future: Ext - Non) and Return Period Boxplots (2x2)
+        Bottom: Subplots b (Summer Jet Latitude) and e (Winter Jet Speed) from Figure 2 (1x2)
+        """
+        logging.info(f"Plotting final figure 3 for GWL +{gwl}°C, {scenario}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        if not winter_composite and not summer_composite:
+            logging.warning("No composite data for final figure 3.")
+            return
+
+        mask_lon_min = Config.GREENLAND_LON_MIN
+        mask_lon_max = Config.GREENLAND_LON_MAX
+        mask_lat_min = Config.GREENLAND_LAT_MIN
+        mask_lat_max = Config.GREENLAND_LAT_MAX
+        for comp in [winter_composite, summer_composite]:
+            if comp is None: continue
+            for key_arr, data_array in comp.items():
+                if isinstance(data_array, xr.DataArray):
+                    if data_array.lon.min() >= 0:
+                        m_lon_min, m_lon_max = mask_lon_min + 360, mask_lon_max + 360
+                    else:
+                        m_lon_min, m_lon_max = mask_lon_min, mask_lon_max
+                    mask = ((data_array.lon >= m_lon_min) & (data_array.lon <= m_lon_max) &
+                            (data_array.lat >= mask_lat_min) & (data_array.lat <= mask_lat_max))
+                    comp[key_arr] = data_array.where(~mask)
+
+        all_diff_maps = []
+        for comp in [winter_composite, summer_composite]:
+            if comp is None: continue
+            for key in ['diff_ext_non_future']: 
+                m = comp.get(key)
+                if m is not None: all_diff_maps.append(m)
+
+        diff_limit = fixed_diff_limit if fixed_diff_limit is not None else 1.0
+        diff_levels = None
+        if fixed_diff_limit is not None:
+            diff_levels = np.round(np.linspace(-diff_limit, diff_limit, 13), 1)
+        elif all_diff_maps:
+            all_vals = np.concatenate([m.values.ravel() for m in all_diff_maps])
+            all_vals = all_vals[np.isfinite(all_vals)]
+            if len(all_vals) > 0:
+                import math
+                limit = np.percentile(np.abs(all_vals), 98)
+                if limit > 0: diff_limit = math.ceil(limit)
+                diff_levels = np.round(np.linspace(-diff_limit, diff_limit, 13), 1)
+
+        all_abs_maps = []
+        for comp in [winter_composite, summer_composite]:
+            if comp is None: continue
+            for key in ['fut_extreme_mean', 'future_non_extreme_mean']:
+                m = comp.get(key)
+                if m is not None: all_abs_maps.append(m)
+        contour_levels = None
+        if all_abs_maps:
+            abs_vals = np.concatenate([m.values.ravel() for m in all_abs_maps])
+            abs_vals = abs_vals[np.isfinite(abs_vals)]
+            if len(abs_vals) > 0:
+                contour_levels = np.linspace(np.percentile(abs_vals, 2), np.percentile(abs_vals, 98), 15)
+
+        fig = plt.figure(figsize=(12, 14)) 
+        gs = gridspec.GridSpec(3, 2, wspace=0.15, hspace=0.3, height_ratios=[1.5, 0.8, 1.5], top=0.92, bottom=0.1)
+
+        import matplotlib.colors as mcolors
+        try:
+            custom_cmap = matplotlib.pyplot.get_cmap('RdBu_r')
+        except:
+            custom_cmap = matplotlib.cm.get_cmap('RdBu_r')
+        norm = mcolors.BoundaryNorm(diff_levels, ncolors=custom_cmap.N, clip=False) if diff_levels is not None else None
+
+        extent = [-105, 40, 0, 90]
+        
+        def _add_map_features(ax):
+            ax.set_extent(extent, crs=ccrs.PlateCarree())
+            ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
+            ax.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
+            lon_min, lon_max = Config.BOX_LON_MIN, Config.BOX_LON_MAX
+            lat_min, lat_max = Config.BOX_LAT_MIN, Config.BOX_LAT_MAX
+            ax.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
+                                              fill=False, edgecolor='magenta', linewidth=2.0, transform=ccrs.PlateCarree(), zorder=10))
+
+        def _plot_diff(ax, diff_map, sig_mask, title, contour_map=None):
+            _add_map_features(ax)
+            cf = None
+            if diff_map is not None:
+                if norm is not None:
+                    cf = ax.pcolormesh(diff_map.lon, diff_map.lat, diff_map, cmap=custom_cmap, norm=norm, transform=ccrs.PlateCarree())
+                else:
+                    cf = ax.pcolormesh(diff_map.lon, diff_map.lat, diff_map, cmap=custom_cmap, vmin=-diff_limit, vmax=diff_limit, transform=ccrs.PlateCarree())
+                if contour_map is not None and contour_levels is not None:
+                    ref_levels = contour_levels[::2]
+                    cs = ax.contour(contour_map.lon, contour_map.lat, contour_map, levels=ref_levels, colors='gray', linewidths=1.2, alpha=0.9, transform=ccrs.PlateCarree())
+                    ax.clabel(cs, inline=True, fontsize=6, fmt="%.1f", colors='gray')
+                if sig_mask is not None:
+                    skip = 4
+                    lons_mesh, lats_mesh = np.meshgrid(diff_map.lon, diff_map.lat)
+                    mask_sub = sig_mask[::skip, ::skip]
+                    lons_sub = lons_mesh[::skip, ::skip]
+                    lats_sub = lats_mesh[::skip, ::skip]
+                    ax.scatter(lons_sub[mask_sub], lats_sub[mask_sub], s=1, color='black', alpha=0.5, transform=ccrs.PlateCarree())
+            ax.set_title(title, fontsize=10, weight='bold')
+            return cf
+
+        season_data = [
+            ('Winter', winter_composite, winter_model_rps, winter_n_total),
+            ('Summer', summer_composite, summer_model_rps, summer_n_total),
+        ]
+
+        ref_cf = None
+        for col_idx, (season_label, comp, model_rps_dict, n_total_val) in enumerate(season_data):
+            if comp is None:
+                ax = fig.add_subplot(gs[0, col_idx], projection=ccrs.PlateCarree())
+                _add_map_features(ax)
+                ax.set_title(f"{season_label}: No Data", fontsize=10)
+                ax_rp = fig.add_subplot(gs[1, col_idx])
+                ax_rp.text(0.5, 0.5, "No Data", ha='center')
+                continue
+
+            hist_clim = comp.get('hist_climatology_mean')
+            
+            ax = fig.add_subplot(gs[0, col_idx], projection=ccrs.PlateCarree())
+            diff_map = comp.get('diff_ext_non_future')
+            sig_mask = comp.get('sig_mask_ext_non_future')
+            title = f"{'a' if col_idx==0 else 'b'}) {season_label}: Future Ext − Non"
+            cf = _plot_diff(ax, diff_map, sig_mask, title, contour_map=hist_clim)
+            if cf: ref_cf = cf
+            
+            ax_rp = fig.add_subplot(gs[1, col_idx])
+            if not model_rps_dict:
+                ax_rp.text(0.5, 0.5, "No RP Data", ha='center', va='center', transform=ax_rp.transAxes, fontsize=10)
+                ax_rp.set_title(f"{'c' if col_idx==0 else 'd'}) {season_label}: Model Selection", fontsize=10, weight='bold')
+            else:
+                used_ext_keys = comp.get('used_extreme_models', [])
+                used_non_keys = comp.get('used_non_extreme_models', [])
+
+                records = []
+                for m_key, rp in model_rps_dict.items():
+                    r = 35 if np.isinf(rp) else rp
+                    category = 'Other'
+                    color = 'gray'
+                    if m_key in used_ext_keys:
+                        category = 'Extreme (used)'
+                        color = '#b2182b'
+                    elif m_key in used_non_keys:
+                        category = 'Non-Extreme (used)'
+                        color = '#2166ac'
+                    records.append({'Model': m_key, 'Return Period': r, 'Category': category, 'Color': color, 'DummyY': 0})
+                
+                df_rp = pd.DataFrame(records)
+                sns.boxplot(data=df_rp, x='Return Period', y='DummyY', ax=ax_rp, color='lightgray', width=0.3, showfliers=False, orient='h')
+                other = df_rp[df_rp['Category'] == 'Other']
+                if not other.empty:
+                    sns.stripplot(data=other, x='Return Period', y='DummyY', ax=ax_rp, color='gray', alpha=0.4, size=5, jitter=True, orient='h')
+                key_df = df_rp[df_rp['Category'] != 'Other']
+                if not key_df.empty:
+                    for _, row in key_df.iterrows():
+                        y_pos = np.random.uniform(-0.05, 0.05)
+                        ax_rp.plot(row['Return Period'], y_pos, marker='D', color=row['Color'], markersize=7, alpha=1.0, linestyle='None', zorder=3)
+                ax_rp.set_xlim(0, 35)
+                ax_rp.set_xticks([0, 5, 10, 15, 20, 25, 30, 35])
+                ax_rp.set_xticklabels(['0', '5', '10', '15', '20', '25', '30', '∞'])
+                ax_rp.set_yticks([])
+                ax_rp.set_ylabel('')
+                ax_rp.invert_yaxis()
+                ax_rp.grid(axis='x', linestyle=':', alpha=0.7)
+                ax_rp.set_xlabel('Return Period (Years)', fontsize=9)
+                ax_rp.set_title(f"{'c' if col_idx==0 else 'd'}) {season_label}: Model Selection (Return Period)", fontsize=10, weight='bold')
+
+                n_total = n_total_val if n_total_val else len(model_rps_dict)
+                ax_rp.text(0.95, 0.85, f"n={len(model_rps_dict)}/{n_total}", transform=ax_rp.transAxes, ha='right', fontsize=8, fontweight='bold')
+                
+                from matplotlib.lines import Line2D
+                legend_elements = [
+                    Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b', label=f'Extreme (N={len(used_ext_keys)})', markersize=6),
+                    Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac', label=f'Non-Extreme (N={len(used_non_keys)})', markersize=6),
+                    Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', label='Other Models', markersize=5, alpha=0.5),
+                ]
+                ax_rp.legend(handles=legend_elements, loc='lower right', fontsize=6, frameon=True, framealpha=0.8)
+
+        if ref_cf:
+            cax = fig.add_axes([0.15, 0.60, 0.70, 0.012])
+            fig.colorbar(ref_cf, cax=cax, orientation='horizontal', label=f'Difference (m/s)', extend='both')
+
+        def get_unified_limits(keys):
+            min_val, max_val = np.inf, -np.inf
+            has_data = False
+            for key in keys:
+                if cmip6_plot_data and cmip6_plot_data.get(key) and cmip6_plot_data[key]['members']:
+                    for m in cmip6_plot_data[key]['members']:
+                        if m is not None and m.size > 0:
+                            vals = m.values if hasattr(m, 'values') else m
+                            min_val = min(min_val, np.nanmin(vals))
+                            max_val = max(max_val, np.nanmax(vals))
+                            has_data = True
+                if cmip6_plot_data and cmip6_plot_data.get(key) and cmip6_plot_data[key].get('mmm') is not None:
+                    mmm = cmip6_plot_data[key]['mmm']
+                    if mmm.size > 0:
+                        vals = mmm.values if hasattr(mmm, 'values') else mmm
+                        min_val = min(min_val, np.nanmin(vals))
+                        max_val = max(max_val, np.nanmax(vals))
+                        has_data = True
+                if reanalysis_plot_data and reanalysis_plot_data.get(key):
+                    for dset in reanalysis_plot_data[key]:
+                        data = reanalysis_plot_data[key][dset]
+                        if data is not None and data.size > 0:
+                            vals = data.values if hasattr(data, 'values') else data
+                            min_val = min(min_val, np.nanmin(vals))
+                            max_val = max(max_val, np.nanmax(vals))
+                            has_data = True
+            if not has_data or np.isinf(min_val) or np.isinf(max_val): return None
+            range_val = max_val - min_val
+            if range_val == 0: range_val = 1.0
+            return (min_val - 0.05 * range_val, max_val + 0.05 * range_val)
+
+        lat_ylim = get_unified_limits(['JJA_JetLat'])
+        speed_ylim = get_unified_limits(['DJF_JetSpeed'])
+        
+        plot_configs = [
+            {'key': 'JJA_JetLat',   'ax': fig.add_subplot(gs[2, 0]), 'title': 'e) Summer (JJA) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)', 'ylim': lat_ylim},
+            {'key': 'DJF_JetSpeed', 'ax': fig.add_subplot(gs[2, 1]), 'title': 'f) Winter (DJF) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)', 'ylim': speed_ylim}, 
+        ]
+
+        final_handles = []
+        final_labels = []
+
+        if cmip6_plot_data and reanalysis_plot_data:
+            for p_config in plot_configs:
+                ax = p_config['ax']
+                key = p_config['key']
+
+                if cmip6_plot_data.get(key) and cmip6_plot_data[key]['members']:
+                    for idx, member_jet in enumerate(cmip6_plot_data[key]['members']):
+                        line, = ax.plot(member_jet.season_year, member_jet, color='grey', alpha=0.3, linewidth=0.7, label='CMIP6 Models' if idx==0 else "")
+                        if idx==0 and 'CMIP6 Models' not in final_labels:
+                            final_handles.append(line)
+                            final_labels.append('CMIP6 Models')
+                
+                if cmip6_plot_data.get(key) and cmip6_plot_data[key].get('mmm') is not None:
+                    line, = ax.plot(cmip6_plot_data[key]['mmm'].season_year, cmip6_plot_data[key]['mmm'], color='black', linewidth=2.5, label='Multi-Model Mean')
+                    if 'Multi-Model Mean' not in final_labels:
+                        final_handles.append(line)
+                        final_labels.append('Multi-Model Mean')
+                
+                if reanalysis_plot_data.get(key) and reanalysis_plot_data[key].get('20CRv3') is not None:
+                    reanalysis_20crv3 = reanalysis_plot_data[key]['20CRv3']
+                    line, = ax.plot(reanalysis_20crv3.season_year, reanalysis_20crv3, color='darkorange', linewidth=1.5, label='20CRv3')
+                    if '20CRv3' not in final_labels:
+                        final_handles.append(line)
+                        final_labels.append('20CRv3')
+                
+                if reanalysis_plot_data.get(key) and reanalysis_plot_data[key].get('ERA5') is not None:
+                    reanalysis_era5 = reanalysis_plot_data[key]['ERA5']
+                    line, = ax.plot(reanalysis_era5.season_year, reanalysis_era5, color='purple', linewidth=1.5, label='ERA5')
+                    if 'ERA5' not in final_labels:
+                        final_handles.append(line)
+                        final_labels.append('ERA5')
+
+                ax.set_title(p_config['title'], fontsize=10, weight='bold', loc='left')
+                ax.set_ylabel(p_config['ylabel'], fontsize=10)
+                ax.grid(True, linestyle=':', alpha=0.6)
+                ax.set_xlim(1850, 2100)
+                ax.axhline(0, color='black', linewidth=0.5)
+                ax.set_xlabel('Year', fontsize=10)
+
+                if p_config.get('ylim'):
+                    ax.set_ylim(p_config['ylim'])
+
+            if final_handles:
+                fig.legend(final_handles, final_labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.02), frameon=False)
+        else:
+            for p_config in plot_configs:
+                ax = p_config['ax']
+                ax.text(0.5, 0.5, "No Timeseries Data", ha='center', va='center')
+                ax.set_title(p_config['title'], fontsize=10, weight='bold', loc='left')
+
+        plt.suptitle(f'Impact of Storylines on Zonal Wind & Jet Evolution (GWL +{gwl}°C, {Visualizer._format_scenario_title(scenario)})', fontsize=14, weight='bold')
+
+        fig.tight_layout(rect=[0, 0.05, 1, 0.94])
+        plt.subplots_adjust(hspace=0.45) 
+
+        filename_out = f"final_figure_3_{event_key}_{scenario}_gwl{gwl}.png"
+        filepath = os.path.join(Config.PLOT_DIR, filename_out)
+        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved final figure 3 to {filepath}")
 

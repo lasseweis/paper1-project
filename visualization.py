@@ -3949,9 +3949,6 @@ class Visualizer:
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         gwl_colors = {f'+{gwl}°C GWL': Visualizer.GWL_COLORS[gwl] for gwl in gwls_to_plot}
         
-        storyline_data_keys = ['MMM', 'Extreme Models', 'Non-Extreme Models']
-        storyline_display_order = ['Multi-Model Mean', 'Extreme Models', 'Non-Extreme Models']
-
         for i, cfg in enumerate(plot_configs_fig3):
             ax = cfg['ax']
             event_key = cfg['event_key']
@@ -3960,61 +3957,93 @@ class Visualizer:
             full_title = cfg['base_title']
             ax.set_title(full_title, loc='left', fontsize=12, weight='bold')
 
-            plot_data = []
-            
-            # Guard against missing keys
             if event_key and half_year in return_period_results['thresholds'] and event_key in return_period_results['thresholds'][half_year]:
                 thresh_meta = return_period_results['thresholds'][half_year][event_key]
                 hist_rp = thresh_meta.get('hist_return_period')
             else:
                 hist_rp = None
             
-            for storyline_key in storyline_data_keys:
-                display_name = 'Multi-Model Mean' if storyline_key == 'MMM' else storyline_key
-                for gwl in gwls_to_plot:
-                    gwl_label = f'+{gwl}°C GWL'
-                    try:
-                        event_data = return_period_results['data'][gwl][half_year][storyline_key][event_key]
-                        if event_data and 'future_return_periods_all_models' in event_data:
-                            rps = event_data['future_return_periods_all_models']
-                            rps = [rp for rp in rps if np.isfinite(rp)]
-                            for rp in rps:
-                                plot_data.append({'Storyline': display_name, 'GWL': gwl_label, 'Plot Pos': rp})
-                    except KeyError: continue
+            records = []
+            gwl_display_order = []
             
-            df = pd.DataFrame(plot_data)
+            for gwl in gwls_to_plot:
+                gwl_label = f'+{gwl}°C GWL'
+                gwl_display_order.append(gwl_label)
+                
+                try: mmm_rp = return_period_results['data'][gwl][half_year]['MMM'][event_key]['future_return_periods_all_models']
+                except KeyError: mmm_rp = []
+                try: ext_rp = return_period_results['data'][gwl][half_year]['Extreme Models'][event_key]['future_return_periods_all_models']
+                except KeyError: ext_rp = []
+                try: non_ext_rp = return_period_results['data'][gwl][half_year]['Non-Extreme Models'][event_key]['future_return_periods_all_models']
+                except KeyError: non_ext_rp = []
+                
+                unassigned_mmm = [rp if np.isfinite(rp) else 35.0 for rp in mmm_rp]
+                ext_list_copy = [rp if np.isfinite(rp) else 35.0 for rp in ext_rp]
+                non_ext_list_copy = [rp if np.isfinite(rp) else 35.0 for rp in non_ext_rp]
+                
+                def pop_match(val, lst, tol=1e-5):
+                    for idx, v in enumerate(lst):
+                        if abs(v - val) < tol:
+                            return lst.pop(idx)
+                    return None
+                
+                for r_val in unassigned_mmm:
+                    if pop_match(r_val, ext_list_copy) is not None:
+                        category = 'Extreme'
+                        color = '#b2182b'
+                    elif pop_match(r_val, non_ext_list_copy) is not None:
+                        category = 'Non-Extreme'
+                        color = '#2166ac'
+                    else:
+                        category = 'Other'
+                        color = 'gray'
+                        
+                    records.append({
+                        'GWL': gwl_label,
+                        'Return Period': r_val,
+                        'Category': category,
+                        'Color': color
+                    })
+            
+            df = pd.DataFrame(records)
             
             if df.empty:
                 ax.text(0.5, 0.5, "No Data", ha='center', va='center', transform=ax.transAxes)
                 continue
 
-            sns.boxplot(data=df, y='Storyline', x='Plot Pos', hue='GWL', ax=ax,
-                        order=storyline_display_order, palette=gwl_colors,
-                        showfliers=False, linewidth=1.0, width=0.7, orient='h',
-                        boxprops={'alpha': 0.4})
-            sns.stripplot(data=df, y='Storyline', x='Plot Pos', hue='GWL', ax=ax,
-                          order=storyline_display_order, palette=gwl_colors,
-                          dodge=True, jitter=0.15, size=6, alpha=0.6, legend=False, orient='h')
+            sns.boxplot(data=df, y='GWL', x='Return Period', ax=ax,
+                        order=gwl_display_order, color='lightgray',
+                        showfliers=False, linewidth=1.0, width=0.4, orient='h',
+                        boxprops={'alpha': 0.7})
             
-            y_ticks_pos = np.arange(len(storyline_display_order))
-            for i_story, storyline_display in enumerate(storyline_display_order):
-                storyline_key = 'MMM' if storyline_display == 'Multi-Model Mean' else storyline_display
-                y_base = y_ticks_pos[i_story]
-                for j, gwl in enumerate(gwls_to_plot):
-                    gwl_label = f'+{gwl}°C GWL'
-                    y_offset = -0.15 + (j * 0.25)
-                    try:
-                        event_data_gwl = return_period_results['data'][gwl][half_year][storyline_key][event_key]
-                        if event_data_gwl and 'model_count_X' in event_data_gwl and 'model_count_Y' in event_data_gwl:
-                            X = event_data_gwl['model_count_X']
-                            Y = event_data_gwl['model_count_Y']
-                            ax.text(0.98, y_base + y_offset, f"n={X}/{Y}", 
-                                    transform=ax.get_yaxis_transform(), 
-                                    horizontalalignment='right', verticalalignment='center',
-                                    fontsize=8, weight='bold', 
-                                    color=gwl_colors[gwl_label],
-                                    bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
-                    except Exception: pass
+            other = df[df['Category'] == 'Other']
+            if not other.empty:
+                sns.stripplot(data=other, y='GWL', x='Return Period', ax=ax,
+                              order=gwl_display_order, color='gray',
+                              alpha=0.4, size=5, jitter=True, orient='h')
+            
+            y_ticks_pos = np.arange(len(gwl_display_order))
+            for idx_gwl, gwl_label in enumerate(gwl_display_order):
+                key_df = df[(df['GWL'] == gwl_label) & (df['Category'] != 'Other')]
+                for _, row in key_df.iterrows():
+                    y_pos = y_ticks_pos[idx_gwl] + np.random.uniform(-0.1, 0.1)
+                    ax.plot(row['Return Period'], y_pos, marker='D', color=row['Color'], 
+                            markersize=6, alpha=0.9, linestyle='None', zorder=3)
+            
+            for idx_gwl, gwl_label in enumerate(gwl_display_order):
+                gwl_val = gwls_to_plot[idx_gwl]
+                y_base = y_ticks_pos[idx_gwl]
+                try:
+                    event_data_gwl = return_period_results['data'][gwl_val][half_year]['MMM'][event_key]
+                    if event_data_gwl and 'model_count_X' in event_data_gwl and 'model_count_Y' in event_data_gwl:
+                        X = event_data_gwl['model_count_X']
+                        Y = event_data_gwl['model_count_Y']
+                        ax.text(0.98, y_base - 0.35, f"n={X}/{Y}", 
+                                transform=ax.get_yaxis_transform(), 
+                                horizontalalignment='right', verticalalignment='center',
+                                fontsize=8, weight='bold', color='black',
+                                bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
+                except Exception: pass
             
             if hist_rp:
                 ax.axvline(hist_rp, color='black', linestyle='--', linewidth=1.5)
@@ -4022,29 +4051,31 @@ class Visualizer:
             if ax.get_legend(): ax.get_legend().remove()
 
             ax.set_xscale('linear')
-            ax.set_xlim(0, 35)
-            ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-            ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+            ax.set_xlim(0, 36)
+            ticks = [0, 5, 10, 15, 20, 25, 30, 35]
+            labels = ['0', '5', '10', '15', '20', '25', '30', '...']
+            ax.set_xticks(ticks)
+            ax.set_xticklabels(labels, fontsize=10)
             ax.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
             ax.tick_params(axis='x', which='both', bottom=True, labelbottom=True)
             ax.set_xlabel("Return Period (Years)", fontsize=10)
             
             ax.set_ylabel('')
             if i == 0:
-                labels = [l.replace(' & ', ' &\n') for l in storyline_display_order]
-                ax.set_yticks(range(len(labels)))
-                ax.set_yticklabels(labels, fontsize=10)
+                ax.set_yticks(range(len(gwl_display_order)))
+                ax.set_yticklabels(gwl_display_order, fontsize=10)
             else:
                 ax.set_yticks([])
                 ax.set_yticklabels([])
 
-        handles_fig3 = []
-        handles_fig3.append(plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.5, label='Models'))
-        handles_fig3.append(plt.Line2D([0], [0], color='black', linestyle='--', linewidth=1.5, label='Historical Return Period'))
-        for gwl_label, color in gwl_colors.items():
-            handles_fig3.append(mpatches.Patch(color=color, label=gwl_label))
-        
-        axs_top[0].legend(handles=handles_fig3, loc='lower left', bbox_to_anchor=(0.0, -0.28), ncol=3, frameon=False, fontsize=9)
+        from matplotlib.lines import Line2D
+        handles_fig3 = [
+            Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b', label='Extreme Models', markersize=7),
+            Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac', label='Non-Extreme Models', markersize=7),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', label='Other Models', markersize=6, alpha=0.5),
+            Line2D([0], [0], color='black', linestyle='--', linewidth=1.5, label='Historical Return Period')
+        ]
+        axs_top[0].legend(handles=handles_fig3, loc='lower left', bbox_to_anchor=(0.0, -0.28), ncol=4, frameon=False, fontsize=9)
 
 
         # ==========================================
@@ -5968,8 +5999,8 @@ class Visualizer:
             if len(abs_vals) > 0:
                 contour_levels = np.linspace(np.percentile(abs_vals, 2), np.percentile(abs_vals, 98), 15)
 
-        fig = plt.figure(figsize=(12, 14)) 
-        gs = gridspec.GridSpec(3, 2, wspace=0.15, hspace=0.3, height_ratios=[1.5, 0.8, 1.5], top=0.92, bottom=0.1)
+        fig = plt.figure(figsize=(12, 11)) 
+        gs = gridspec.GridSpec(2, 2, wspace=0.15, hspace=0.3, height_ratios=[1.5, 1.5], top=0.92, bottom=0.1)
 
         import matplotlib.colors as mcolors
         try:
@@ -6022,8 +6053,6 @@ class Visualizer:
                 ax = fig.add_subplot(gs[0, col_idx], projection=ccrs.PlateCarree())
                 _add_map_features(ax)
                 ax.set_title(f"{season_label}: No Data", fontsize=10)
-                ax_rp = fig.add_subplot(gs[1, col_idx])
-                ax_rp.text(0.5, 0.5, "No Data", ha='center')
                 continue
 
             hist_clim = comp.get('hist_climatology_mean')
@@ -6034,61 +6063,9 @@ class Visualizer:
             title = f"{'a' if col_idx==0 else 'b'}) {season_label}: Future Ext − Non"
             cf = _plot_diff(ax, diff_map, sig_mask, title, contour_map=hist_clim)
             if cf: ref_cf = cf
-            
-            ax_rp = fig.add_subplot(gs[1, col_idx])
-            if not model_rps_dict:
-                ax_rp.text(0.5, 0.5, "No RP Data", ha='center', va='center', transform=ax_rp.transAxes, fontsize=10)
-                ax_rp.set_title(f"{'c' if col_idx==0 else 'd'}) {season_label}: Model Selection", fontsize=10, weight='bold')
-            else:
-                used_ext_keys = comp.get('used_extreme_models', [])
-                used_non_keys = comp.get('used_non_extreme_models', [])
-
-                records = []
-                for m_key, rp in model_rps_dict.items():
-                    r = 35 if np.isinf(rp) else rp
-                    category = 'Other'
-                    color = 'gray'
-                    if m_key in used_ext_keys:
-                        category = 'Extreme (used)'
-                        color = '#b2182b'
-                    elif m_key in used_non_keys:
-                        category = 'Non-Extreme (used)'
-                        color = '#2166ac'
-                    records.append({'Model': m_key, 'Return Period': r, 'Category': category, 'Color': color, 'DummyY': 0})
-                
-                df_rp = pd.DataFrame(records)
-                sns.boxplot(data=df_rp, x='Return Period', y='DummyY', ax=ax_rp, color='lightgray', width=0.3, showfliers=False, orient='h')
-                other = df_rp[df_rp['Category'] == 'Other']
-                if not other.empty:
-                    sns.stripplot(data=other, x='Return Period', y='DummyY', ax=ax_rp, color='gray', alpha=0.4, size=5, jitter=True, orient='h')
-                key_df = df_rp[df_rp['Category'] != 'Other']
-                if not key_df.empty:
-                    for _, row in key_df.iterrows():
-                        y_pos = np.random.uniform(-0.05, 0.05)
-                        ax_rp.plot(row['Return Period'], y_pos, marker='D', color=row['Color'], markersize=7, alpha=1.0, linestyle='None', zorder=3)
-                ax_rp.set_xlim(0, 35)
-                ax_rp.set_xticks([0, 5, 10, 15, 20, 25, 30, 35])
-                ax_rp.set_xticklabels(['0', '5', '10', '15', '20', '25', '30', '∞'])
-                ax_rp.set_yticks([])
-                ax_rp.set_ylabel('')
-                ax_rp.invert_yaxis()
-                ax_rp.grid(axis='x', linestyle=':', alpha=0.7)
-                ax_rp.set_xlabel('Return Period (Years)', fontsize=9)
-                ax_rp.set_title(f"{'c' if col_idx==0 else 'd'}) {season_label}: Model Selection (Return Period)", fontsize=10, weight='bold')
-
-                n_total = n_total_val if n_total_val else len(model_rps_dict)
-                ax_rp.text(0.95, 0.85, f"n={len(model_rps_dict)}/{n_total}", transform=ax_rp.transAxes, ha='right', fontsize=8, fontweight='bold')
-                
-                from matplotlib.lines import Line2D
-                legend_elements = [
-                    Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b', label=f'Extreme (N={len(used_ext_keys)})', markersize=6),
-                    Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac', label=f'Non-Extreme (N={len(used_non_keys)})', markersize=6),
-                    Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', label='Other Models', markersize=5, alpha=0.5),
-                ]
-                ax_rp.legend(handles=legend_elements, loc='lower right', fontsize=6, frameon=True, framealpha=0.8)
 
         if ref_cf:
-            cax = fig.add_axes([0.15, 0.60, 0.70, 0.012])
+            cax = fig.add_axes([0.15, 0.52, 0.70, 0.015])
             fig.colorbar(ref_cf, cax=cax, orientation='horizontal', label=f'Difference (m/s)', extend='both')
 
         def get_unified_limits(keys):
@@ -6126,8 +6103,8 @@ class Visualizer:
         speed_ylim = get_unified_limits(['DJF_JetSpeed'])
         
         plot_configs = [
-            {'key': 'JJA_JetLat',   'ax': fig.add_subplot(gs[2, 0]), 'title': 'e) Summer (JJA) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)', 'ylim': lat_ylim},
-            {'key': 'DJF_JetSpeed', 'ax': fig.add_subplot(gs[2, 1]), 'title': 'f) Winter (DJF) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)', 'ylim': speed_ylim}, 
+            {'key': 'JJA_JetLat',   'ax': fig.add_subplot(gs[1, 0]), 'title': 'c) Summer (JJA) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)', 'ylim': lat_ylim},
+            {'key': 'DJF_JetSpeed', 'ax': fig.add_subplot(gs[1, 1]), 'title': 'd) Winter (DJF) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)', 'ylim': speed_ylim}, 
         ]
 
         final_handles = []

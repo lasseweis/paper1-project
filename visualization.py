@@ -3922,11 +3922,11 @@ class Visualizer:
         total_cols = max(2, 2 * n_verif_cols if n_verif_cols > 0 else 2)
         
         fig = plt.figure(figsize=(16, 10))
-        gs = gridspec.GridSpec(2, total_cols, height_ratios=[5.0, 4.0], hspace=0.45, wspace=0.3)
+        gs = gridspec.GridSpec(2, total_cols, height_ratios=[4.0, 5.0], hspace=0.45, wspace=0.3)
         
-        # Top row: 2 plots (Fig 3: a and b), each spanning half the columns
+        # Bottom row: 2 plots (Fig 3: a and b), each spanning half the columns
         col_span_top = total_cols // 2
-        axs_top = [fig.add_subplot(gs[0, 0:col_span_top]), fig.add_subplot(gs[0, col_span_top:])]
+        axs_top = [fig.add_subplot(gs[1, 0:col_span_top]), fig.add_subplot(gs[1, col_span_top:])]
 
         # ==========================================
         # PART 1: FIGURE 3 (Core Finding GEV Panel)
@@ -3939,8 +3939,8 @@ class Visualizer:
         low_key_summer = next((k for k in summer_keys if target_event_substring in k and 'low' in k.lower()), None)
         
         plot_configs_fig3 = [
-            {'half_year': 'summer', 'event_key': low_key_summer,  'base_title': 'a) Summer Half-Year: 30-Day Low Flow', 'ax': axs_top[0]},
-            {'half_year': 'winter', 'event_key': low_key_winter,  'base_title': 'b) Winter Half-Year: 30-Day Low Flow', 'ax': axs_top[1]},
+            {'half_year': 'summer', 'event_key': low_key_summer,  'base_title': 'd) Summer Half-Year: 30-Day Low Flow', 'ax': axs_top[0]},
+            {'half_year': 'winter', 'event_key': low_key_winter,  'base_title': 'e) Winter Half-Year: 30-Day Low Flow', 'ax': axs_top[1]},
         ]
 
         scenario_title = Visualizer._format_scenario_title(scenario)
@@ -3957,9 +3957,16 @@ class Visualizer:
             full_title = cfg['base_title']
             ax.set_title(full_title, loc='left', fontsize=12, weight='bold')
 
-            if event_key and half_year in return_period_results['thresholds'] and event_key in return_period_results['thresholds'][half_year]:
-                thresh_meta = return_period_results['thresholds'][half_year][event_key]
-                hist_rp = thresh_meta.get('hist_return_period')
+            if event_key and event_key in hist_data:
+                periods = hist_data[event_key].get(f'{half_year}_periods', [])
+                clean_periods = [x for x in periods if np.isfinite(x)]
+                hist_rp = np.median(clean_periods) if clean_periods else None
+                
+                # Fallback to general historical return period (annual target T) if seasonal isn't found
+                if hist_rp is None:
+                    if event_key and half_year in return_period_results['thresholds'] and event_key in return_period_results['thresholds'][half_year]:
+                        thresh_meta = return_period_results['thresholds'][half_year][event_key]
+                        hist_rp = thresh_meta.get('hist_return_period')
             else:
                 hist_rp = None
             
@@ -3970,16 +3977,32 @@ class Visualizer:
                 gwl_label = f'+{gwl}°C GWL'
                 gwl_display_order.append(gwl_label)
                 
-                try: mmm_rp = return_period_results['data'][gwl][half_year]['MMM'][event_key]['future_return_periods_all_models']
-                except KeyError: mmm_rp = []
-                try: ext_rp = return_period_results['data'][gwl][half_year]['Extreme Models'][event_key]['future_return_periods_all_models']
-                except KeyError: ext_rp = []
-                try: non_ext_rp = return_period_results['data'][gwl][half_year]['Non-Extreme Models'][event_key]['future_return_periods_all_models']
-                except KeyError: non_ext_rp = []
+                try: 
+                    mmm_node = return_period_results['data'][gwl][half_year]['MMM'][event_key]
+                    mmm_rp = mmm_node.get('future_return_periods_all_models', [])
+                    mmm_missing = max(0, mmm_node.get('model_count_Y', len(mmm_rp)) - len(mmm_rp))
+                except KeyError: 
+                    mmm_rp, mmm_missing = [], 0
+                    
+                try: 
+                    ext_node = return_period_results['data'][gwl][half_year]['Extreme Models'][event_key]
+                    ext_rp = ext_node.get('future_return_periods_all_models', [])
+                    ext_missing = max(0, ext_node.get('model_count_Y', len(ext_rp)) - len(ext_rp))
+                except KeyError: 
+                    ext_rp, ext_missing = [], 0
+                    
+                try: 
+                    non_ext_node = return_period_results['data'][gwl][half_year]['Non-Extreme Models'][event_key]
+                    non_ext_rp = non_ext_node.get('future_return_periods_all_models', [])
+                    non_ext_missing = max(0, non_ext_node.get('model_count_Y', len(non_ext_rp)) - len(non_ext_rp))
+                except KeyError: 
+                    non_ext_rp, non_ext_missing = [], 0
                 
-                unassigned_mmm = [rp if np.isfinite(rp) else 35.0 for rp in mmm_rp]
-                ext_list_copy = [rp if np.isfinite(rp) else 35.0 for rp in ext_rp]
-                non_ext_list_copy = [rp if np.isfinite(rp) else 35.0 for rp in non_ext_rp]
+                def cap_rp(rp): return 35.0 if not np.isfinite(rp) or rp >= 35.0 else rp
+                
+                unassigned_mmm = [cap_rp(rp) for rp in mmm_rp] + [35.0] * mmm_missing
+                ext_list_copy = [cap_rp(rp) for rp in ext_rp] + [35.0] * ext_missing
+                non_ext_list_copy = [cap_rp(rp) for rp in non_ext_rp] + [35.0] * non_ext_missing
                 
                 def pop_match(val, lst, tol=1e-5):
                     for idx, v in enumerate(lst):
@@ -4045,8 +4068,8 @@ class Visualizer:
                                 bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
                 except Exception: pass
             
-            if hist_rp:
-                ax.axvline(hist_rp, color='black', linestyle='--', linewidth=1.5)
+            # if hist_rp:
+            #     ax.axvline(hist_rp, color='black', linestyle='--', linewidth=1.5)
             
             if ax.get_legend(): ax.get_legend().remove()
 
@@ -4072,10 +4095,9 @@ class Visualizer:
         handles_fig3 = [
             Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b', label='Extreme Models', markersize=7),
             Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac', label='Non-Extreme Models', markersize=7),
-            Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', label='Other Models', markersize=6, alpha=0.5),
-            Line2D([0], [0], color='black', linestyle='--', linewidth=1.5, label='Historical Return Period')
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', label='Other Models', markersize=6, alpha=0.5)
         ]
-        axs_top[0].legend(handles=handles_fig3, loc='lower left', bbox_to_anchor=(0.0, -0.28), ncol=4, frameon=False, fontsize=9)
+        axs_top[0].legend(handles=handles_fig3, loc='lower left', bbox_to_anchor=(0.0, -0.28), ncol=3, frameon=False, fontsize=9)
 
 
         # ==========================================
@@ -4088,14 +4110,14 @@ class Visualizer:
                 return np.median(clean)
 
             scenario_labels = ['Historical'] + [f'GWL +{g}°C' for g in gwls]
-            lettering_start = 99 # ascii for 'c'
+            lettering_start = 97 # ascii for 'a'
             
             # Subplots for bottom row
             col_span_bot = total_cols // n_verif_cols
             
             for c in range(n_verif_cols):
                 start_col = c * col_span_bot
-                ax = fig.add_subplot(gs[1, start_col:start_col+col_span_bot]) 
+                ax = fig.add_subplot(gs[0, start_col:start_col+col_span_bot]) 
                 is_hist = (c == 0)
                 current_gwl = gwls[c-1] if not is_hist else None
                 col_label = scenario_labels[c]
@@ -4154,58 +4176,37 @@ class Visualizer:
                         w_color = Visualizer.GWL_COLORS.get(2.0, 'navy')
                         s_color = '#ff7f0e'
 
-                rects1 = ax.bar(x_pos - width, annual_targets, width, label='Annual Target T', color='black', alpha=0.7)
-                label_w = 'Winter Median T' if is_hist else f'Future Winter Median T (+{current_gwl}°C)' 
-                rects2 = ax.bar(x_pos, winter_medians, width, label=label_w, color=w_color, alpha=0.9 if is_hist else 0.7)
-                label_s = 'Summer Median T' if is_hist else f'Future Summer Median T (+{current_gwl}°C)'
-                rects3 = ax.bar(x_pos + width, summer_medians, width, label=label_s, color=s_color, alpha=0.9 if is_hist else 0.7)
-                
                 panel_letter = chr(lettering_start + c)
-                if c == 0:
-                     ax.set_ylabel('Return Period (Years)', fontsize=10)
-                ax.set_title(f'{panel_letter}) {col_label}\n{type_title}', weight='bold', loc='left', fontsize=11)
-                ax.set_xticks(x_pos)
-                ax.set_xticklabels([k.replace('30Q10_', '') for k in low_keys], fontsize=10)
-                ax.grid(axis='y', linestyle='--', alpha=0.5)
+                ax.set_title(f'{panel_letter}) {col_label}\nEvent Distribution (Winter vs Summer)', weight='bold', loc='center', fontsize=11)
                 
-                if c == 0:
-                    ax.legend(loc='upper left', fontsize=8, bbox_to_anchor=(0.0, -0.15))
-                elif c == 1 and not is_hist:
-                    ax.legend(loc='upper right', fontsize=8) 
+                if not winter_medians or not summer_medians:
+                    continue
 
-                def autolabel_90(rects, counts):
-                     for i, rect in enumerate(rects):
-                        height = rect.get_height()
-                        X, Y = 0, 0
-                        if i < len(counts): X, Y = counts[i]
-                        label_text = f'{height:.1f}'
-                        if Y > 0: label_text += f"\n(n={X}/{Y})"
-                        
-                        if np.isfinite(height):
-                            ax.annotate(label_text, xy=(rect.get_x() + rect.get_width() / 2, height),
-                                        xytext=(0, 3), textcoords="offset points",
-                                        ha='center', va='bottom', rotation=90, fontsize=8)
-                        else:
-                            ax.annotate('Inf', xy=(rect.get_x() + rect.get_width() / 2, 0),
-                                        xytext=(0, 3), textcoords="offset points",
-                                        ha='center', va='bottom', fontsize=8, color='red', rotation=90)
+                w_med = winter_medians[0]
+                s_med = summer_medians[0]
                 
-                autolabel_90(rects2, winter_counts)
-                autolabel_90(rects3, summer_counts)
+                w_rate = 1.0 / w_med if np.isfinite(w_med) and w_med > 0 else 0
+                s_rate = 1.0 / s_med if np.isfinite(s_med) and s_med > 0 else 0
                 
-                for j, sub_vals in enumerate(winter_periods):
-                    clean = [v for v in sub_vals if np.isfinite(v)]
-                    if clean:
-                        jitter = np.random.uniform(-0.05, 0.05, size=len(clean))
-                        ax.scatter(np.full_like(clean, x_pos[j]) + jitter, clean, 
-                                 color='navy', s=8, alpha=0.4, zorder=5, marker='o')
-
-                for j, sub_vals in enumerate(summer_periods):
-                    clean = [v for v in sub_vals if np.isfinite(v)]
-                    if clean:
-                        jitter = np.random.uniform(-0.05, 0.05, size=len(clean))
-                        ax.scatter(np.full_like(clean, x_pos[j] + width) + jitter, clean, 
-                                 color='brown', s=8, alpha=0.4, zorder=5, marker='o')
+                total_rate = w_rate + s_rate
+                
+                if total_rate > 0:
+                    sizes = [w_rate / total_rate, s_rate / total_rate]
+                    labels = [f'Winter\n({sizes[0]*100:.1f}%)', f'Summer\n({sizes[1]*100:.1f}%)']
+                    colors = [w_color, s_color]
+                    
+                    wedges, texts = ax.pie(sizes, labels=labels, colors=colors, startangle=90, 
+                                           wedgeprops={'edgecolor': 'white', 'linewidth': 1, 'alpha': 0.85},
+                                           textprops={'fontsize': 10, 'weight': 'bold'})
+                                           
+                    w_str = f"{w_med:.1f}" if np.isfinite(w_med) else "Inf"
+                    s_str = f"{s_med:.1f}" if np.isfinite(s_med) else "Inf"
+                    ax.text(0, -1.3, f"Median Return Period\nWinter: {w_str} yrs | Summer: {s_str} yrs",
+                            ha='center', va='center', fontsize=10, 
+                            bbox=dict(facecolor='white', alpha=0.8, edgecolor='lightgray', boxstyle='round,pad=0.5'))
+                else:
+                    ax.text(0.5, 0.5, "No Data / Infinite Return Periods", ha='center', va='center', transform=ax.transAxes)
+                    ax.axis('off')
 
         plt.tight_layout(rect=[0, 0, 1, 0.96])
         filename = os.path.join(config.PLOT_DIR, f"final_figure_2_regime_shift_and_verification_{scenario}.png")
@@ -5841,11 +5842,11 @@ class Visualizer:
         if storyline_classification_2d:
             gwls_present = [gwl for gwl in config.GLOBAL_WARMING_LEVELS if gwl in storyline_classification_2d]
             if gwls_present:
-                max_gwl = max(gwls_present)
-                extreme_models['Summer'] = storyline_classification_2d[max_gwl].get('JJA_Extreme Models', [])
-                non_extreme_models['Summer'] = storyline_classification_2d[max_gwl].get('JJA_Non-Extreme Models', [])
-                extreme_models['Winter'] = storyline_classification_2d[max_gwl].get('DJF_Extreme Models', [])
-                non_extreme_models['Winter'] = storyline_classification_2d[max_gwl].get('DJF_Non-Extreme Models', [])
+                target_gwl = 3.0 if 3.0 in gwls_present else max(gwls_present)
+                extreme_models['Summer'] = storyline_classification_2d[target_gwl].get('JJA_Extreme Models', [])
+                non_extreme_models['Summer'] = storyline_classification_2d[target_gwl].get('JJA_Non-Extreme Models', [])
+                extreme_models['Winter'] = storyline_classification_2d[target_gwl].get('DJF_Extreme Models', [])
+                non_extreme_models['Winter'] = storyline_classification_2d[target_gwl].get('DJF_Non-Extreme Models', [])
 
         data_by_season = {'Summer': [], 'Winter': []}
         season_keys = {'Summer': '30Q_low_summer', 'Winter': '30Q_low_winter'}

@@ -1302,29 +1302,21 @@ class ClimateAnalysis:
         else:
             logging.info(f"Discharge events combined plot already exists.")
 
-        # --- PLOT: Discharge Extreme Events Timeseries - COMBINED (SSP245 + SSP585) ---
+        # --- PLOT: Discharge Extreme Events Timeseries - SUMMARY (SSP585 only) ---
         final_fig4_filename = os.path.join(Config.PLOT_DIR, "final_figure_4_storyline_discharge_events_extremes_combined.png")
-        ssp245_extremes_path = os.path.join(Config.PLOT_DIR, "storyline_discharge_events_extremes_ssp245.png")
         ssp585_extremes_path = os.path.join(Config.PLOT_DIR, "storyline_discharge_events_extremes_ssp585.png")
 
         if not os.path.exists(final_fig4_filename):
-            if os.path.exists(ssp245_extremes_path) and os.path.exists(ssp585_extremes_path):
-                logging.info(f"Creating combined extremes plot: {final_fig4_filename}")
+            if os.path.exists(ssp585_extremes_path):
+                logging.info(f"Creating final extremes plot (SSP585 only): {final_fig4_filename}")
                 try:
-                    from PIL import Image as PILImage
-                    img_top = PILImage.open(ssp245_extremes_path)
-                    img_bot = PILImage.open(ssp585_extremes_path)
-                    width = max(img_top.width, img_bot.width)
-                    total_height = img_top.height + img_bot.height
-                    combined = PILImage.new('RGB', (width, total_height), 'white')
-                    combined.paste(img_top, (0, 0))
-                    combined.paste(img_bot, (0, img_top.height))
-                    combined.save(final_fig4_filename, dpi=(300, 300))
-                    logging.info(f"Saved combined extremes plot: {final_fig4_filename}")
+                    import shutil
+                    shutil.copyfile(ssp585_extremes_path, final_fig4_filename)
+                    logging.info(f"Saved final extremes plot: {final_fig4_filename}")
                 except Exception as e:
-                    logging.error(f"Failed to create combined extremes plot: {e}")
+                    logging.error(f"Failed to copy final extremes plot: {e}")
             else:
-                logging.warning("Cannot create final_figure_4: one or both per-scenario extremes plots are missing.")
+                logging.warning("Cannot create final_figure_4: ssp585 extremes plot is missing.")
         else:
             logging.info(f"Combined extremes plot '{final_fig4_filename}' already exists.")
 

@@ -3922,7 +3922,7 @@ class Visualizer:
         total_cols = max(2, 2 * n_verif_cols if n_verif_cols > 0 else 2)
         
         fig = plt.figure(figsize=(16, 10))
-        gs = gridspec.GridSpec(2, total_cols, height_ratios=[4.0, 5.0], hspace=0.45, wspace=0.3)
+        gs = gridspec.GridSpec(2, total_cols, height_ratios=[4.0, 5.0], hspace=0.55, wspace=0.3)
         
         # Bottom row: 2 plots (Fig 3: a and b), each spanning half the columns
         col_span_top = total_cols // 2
@@ -3939,12 +3939,12 @@ class Visualizer:
         low_key_summer = next((k for k in summer_keys if target_event_substring in k and 'low' in k.lower()), None)
         
         plot_configs_fig3 = [
-            {'half_year': 'summer', 'event_key': low_key_summer,  'base_title': 'd) Summer Half-Year: 30-Day Low Flow', 'ax': axs_top[0]},
-            {'half_year': 'winter', 'event_key': low_key_winter,  'base_title': 'e) Winter Half-Year: 30-Day Low Flow', 'ax': axs_top[1]},
+            {'half_year': 'summer', 'event_key': low_key_summer,  'base_title': 'd) Summer Half-Year Events', 'ax': axs_top[0]},
+            {'half_year': 'winter', 'event_key': low_key_winter,  'base_title': 'e) Winter Half-Year Events', 'ax': axs_top[1]},
         ]
 
         scenario_title = Visualizer._format_scenario_title(scenario)
-        fig.suptitle(f"Final Figure 2: Shift in Extreme Return Periods & Seasonal Verification - {scenario_title}", fontsize=16, weight='bold', y=0.98)
+        fig.suptitle(f"Change in Occurrence and Return Periods of 30Q10 Events - {scenario_title}", fontsize=16, weight='bold', y=0.98)
         
         gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         gwl_colors = {f'+{gwl}°C GWL': Visualizer.GWL_COLORS[gwl] for gwl in gwls_to_plot}
@@ -4084,20 +4084,16 @@ class Visualizer:
             ax.set_xlabel("Return Period (Years)", fontsize=10)
             
             ax.set_ylabel('')
-            if i == 0:
-                ax.set_yticks(range(len(gwl_display_order)))
-                ax.set_yticklabels(gwl_display_order, fontsize=10)
-            else:
-                ax.set_yticks([])
-                ax.set_yticklabels([])
+            ax.set_yticks(range(len(gwl_display_order)))
+            ax.set_yticklabels(gwl_display_order, fontsize=10, rotation='vertical', va='center')
 
         from matplotlib.lines import Line2D
         handles_fig3 = [
-            Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b', label='Extreme Models', markersize=7),
-            Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac', label='Non-Extreme Models', markersize=7),
+            Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b', label='Increasing Frequency', markersize=7),
+            Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac', label='Decreasing Frequency', markersize=7),
             Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', label='Other Models', markersize=6, alpha=0.5)
         ]
-        axs_top[0].legend(handles=handles_fig3, loc='lower left', bbox_to_anchor=(0.0, -0.28), ncol=3, frameon=False, fontsize=9)
+        fig.legend(handles=handles_fig3, loc='lower center', ncol=3, bbox_to_anchor=(0.5, 0.02), frameon=False, fontsize=9)
 
 
         # ==========================================
@@ -4177,7 +4173,7 @@ class Visualizer:
                         s_color = '#ff7f0e'
 
                 panel_letter = chr(lettering_start + c)
-                ax.set_title(f'{panel_letter}) {col_label}\nEvent Distribution (Winter vs Summer)', weight='bold', loc='center', fontsize=11)
+                ax.set_title(f'{panel_letter}) {col_label}', weight='bold', loc='center', fontsize=11)
                 
                 if not winter_medians or not summer_medians:
                     continue
@@ -4203,12 +4199,36 @@ class Visualizer:
                     s_str = f"{s_med:.1f}" if np.isfinite(s_med) else "Inf"
                     ax.text(0, -1.3, f"Median Return Period\nWinter: {w_str} yrs | Summer: {s_str} yrs",
                             ha='center', va='center', fontsize=10, 
-                            bbox=dict(facecolor='white', alpha=0.8, edgecolor='lightgray', boxstyle='round,pad=0.5'))
+                            bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', boxstyle='round,pad=0.5'))
                 else:
                     ax.text(0.5, 0.5, "No Data / Infinite Return Periods", ha='center', va='center', transform=ax.transAxes)
                     ax.axis('off')
 
-        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        plt.tight_layout(rect=[0, 0.05, 1, 0.88])
+        
+        # Add left-aligned subtitles for both rows after tight_layout.
+        
+        # Row 0 axes = all axes except the two bottom-row (axs_top) axes
+        row0_axes = [ax for ax in fig.axes if ax not in axs_top]
+        
+        if row0_axes:
+            left_x_row0 = min(ax.get_position().x0 for ax in row0_axes)
+            top_y_row0  = max(ax.get_position().y1 for ax in row0_axes)
+        else:
+            left_x_row0, top_y_row0 = 0.08, 0.85
+        
+        left_x_row1 = min(ax.get_position().x0 for ax in axs_top)
+        top_y_row1  = max(ax.get_position().y1 for ax in axs_top)
+        
+        # Upward nudge to place text above the subplot titles
+        nudge = 0.045
+        fig.text(left_x_row0, top_y_row0 + nudge,
+                 "Event Distribution (Summer Half -Year vs Winter Half-Year)",
+                 ha='left', va='bottom', fontsize=13, weight='bold')
+        fig.text(left_x_row1, top_y_row1 + nudge,
+                 "Change in Return Periods",
+                 ha='left', va='bottom', fontsize=13, weight='bold')
+
         filename = os.path.join(config.PLOT_DIR, f"final_figure_2_regime_shift_and_verification_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -4260,7 +4280,7 @@ class Visualizer:
             'MMM', 'Extreme Models', 'Non-Extreme Models'
         ]
         storyline_display_order = [
-            'Multi-Model Mean', 'Extreme Models', 'Non-Extreme Models'
+            'Multi-Model Mean', 'Increasing Frequency', 'Decreasing Frequency'
         ]
 
         # Loop through the 4 logical plots
@@ -5199,9 +5219,9 @@ class Visualizer:
             from matplotlib.lines import Line2D
             legend_elements = [
                 Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b',
-                       label=f'Extreme (N={len(used_ext_keys)})', markersize=7),
+                       label=f'Increasing Frequency (N={len(used_ext_keys)})', markersize=7),
                 Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac',
-                       label=f'Non-Extreme (N={len(used_non_keys)})', markersize=7),
+                       label=f'Decreasing Frequency (N={len(used_non_keys)})', markersize=7),
                 Line2D([0], [0], marker='o', color='w', markerfacecolor='gray',
                        label='Other Models', markersize=5, alpha=0.5),
             ]
@@ -5221,7 +5241,7 @@ class Visualizer:
             fig.colorbar(ref_cf, cax=cax, orientation='horizontal', label=f'Difference ({diff_unit})', extend='both')
         
         plt.subplots_adjust(bottom=0.10, left=0.06)
-        plt.suptitle(f"{var_label} Composite ({season} half-year): Extreme vs Non-Extreme ({event_key})\n"
+        plt.suptitle(f"{var_label} Composite ({season} half-year): Increasing vs Decreasing Frequency ({event_key})\n"
                      f"GWL +{gwl}°C | {scenario.upper()}",
                      fontsize=14, weight='bold', y=0.97)
         
@@ -5531,9 +5551,9 @@ class Visualizer:
             from matplotlib.lines import Line2D
             legend_elements = [
                 Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b',
-                       label=f'Extreme (N={len(used_ext_keys)})', markersize=6),
+                       label=f'Increasing Frequency (N={len(used_ext_keys)})', markersize=6),
                 Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac',
-                       label=f'Non-Extreme (N={len(used_non_keys)})', markersize=6),
+                       label=f'Decreasing Frequency (N={len(used_non_keys)})', markersize=6),
                 Line2D([0], [0], marker='o', color='w', markerfacecolor='gray',
                        label='Other Models', markersize=5, alpha=0.5),
             ]
@@ -5543,7 +5563,7 @@ class Visualizer:
         # --- Row content: only the 3rd column of the original 3×3 ---
         row_configs = [
             {'key_diff': 'diff_ext_non_future', 'key_sig': 'sig_mask_ext_non_future',
-             'title': 'Future: Ext − Non'},
+             'title': 'Future: Inc − Dec'},
             {'key_diff': 'diff_ext_non_hist', 'key_sig': 'sig_mask_ext_non_hist',
              'title': 'Historical: Ext − Non'},
         ]
@@ -5779,10 +5799,10 @@ class Visualizer:
             buffer_lat = 2.0
             ax_map.set_extent([p_bounds[0] - buffer_lon, p_bounds[2] + buffer_lon,
                                p_bounds[1] - buffer_lat, p_bounds[3] + buffer_lat], crs=ccrs.PlateCarree())
-            ax_map.set_title("Study Region: Upper Danube Basin", fontsize=12, weight='bold')
+            ax_map.set_title("Study Region: Upper Danube Basin", fontsize=12, weight='bold', loc='left')
         except Exception as e:
             logging.error(f"Failed to plot shapefile map: {e}")
-            ax_map.set_title("Study Region (Shapefile error)", fontsize=12, weight='bold')
+            ax_map.set_title("Study Region (Shapefile error)", fontsize=12, weight='bold', loc='left')
             
         # --- Bottom Subplot: Timeseries ---
         ax = fig.add_subplot(gs[1])
@@ -5801,7 +5821,7 @@ class Visualizer:
             ax.plot(df_stats_ssp245['year'], df_stats_ssp245['mmm'], 
                     color='darkorange', linewidth=2, label=f'SSP245 MMM (5-yr MA, n={n_ssp245})')
 
-        ax.set_title('Annual Minimum 30-Day Discharge (SSP245 & SSP585)', fontsize=12, weight='bold')
+        ax.set_title('Annual Minimum 30-Day Discharge (SSP245 & SSP585)', fontsize=12, weight='bold', loc='left')
         ax.set_ylabel('Discharge (m³/s)', fontsize=10)
         ax.set_xlabel('Year', fontsize=10)
         ax.grid(True, linestyle=':', alpha=0.7)
@@ -5812,7 +5832,9 @@ class Visualizer:
         ax.set_xlim(min_year, max_year)
         ax.legend(loc='lower left', fontsize=9)
         
+        plt.suptitle("Study region and minimum discharge timeseries", fontsize=16, weight='bold', y=0.98)
         fig.tight_layout()
+        fig.subplots_adjust(top=0.92)
         filename = f"final_figure_1_storyline_discharge_events_{scenario}.png"
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
@@ -5898,31 +5920,37 @@ class Visualizer:
                     ax.fill_between(df_target_stats['year'], df_target_stats['p10'], df_target_stats['p90'], color=color_line, alpha=0.3, label=f'{label_prefix} Spread (5-yr MA)')
                     ax.plot(df_target_stats['year'], df_target_stats['mmm'], color=color_line, linewidth=2, label=f'{label_prefix} MMM (5-yr MA, n={len(target_names)})')
 
-            _plot_group(ext_list, 'Extreme', '#b2182b')
-            _plot_group(non_ext_list, 'Non-Extreme', '#2166ac')
+            _plot_group(ext_list, 'Increasing Frequency', '#b2182b')
+            _plot_group(non_ext_list, 'Decreasing Frequency', '#2166ac')
             
             ax.set_title(title, fontsize=12, weight='bold')
             ax.grid(True, linestyle=':', alpha=0.7)
-            min_year = max(1950, df_all['year'].min()) if not df_all.empty else 1950
-            max_year = min(2100, df_all['year'].max()) if not df_all.empty else 2100
-            ax.set_xlim(min_year, max_year)
-            ax.legend(loc='lower left', fontsize=9)
+            ax.set_xlim(2015, 2100)
 
         # Plot Summer (Col 0)
         df_summer = pd.concat(data_by_season['Summer'], ignore_index=True) if data_by_season['Summer'] else pd.DataFrame()
-        _plot_combined_panel(axs[0], df_summer, extreme_models['Summer'], non_extreme_models['Summer'], f'Summer ({scenario.upper()})')
+        _plot_combined_panel(axs[0], df_summer, extreme_models['Summer'], non_extreme_models['Summer'], f'Summer Half-Year ({scenario.upper()})')
 
         # Plot Winter (Col 1)
         df_winter = pd.concat(data_by_season['Winter'], ignore_index=True) if data_by_season['Winter'] else pd.DataFrame()
-        _plot_combined_panel(axs[1], df_winter, extreme_models['Winter'], non_extreme_models['Winter'], f'Winter ({scenario.upper()})')
+        _plot_combined_panel(axs[1], df_winter, extreme_models['Winter'], non_extreme_models['Winter'], f'Winter Half-Year ({scenario.upper()})')
 
         axs[0].set_ylabel('Discharge (m³/s)', fontsize=10)
+        axs[1].set_ylabel('Discharge (m³/s)', fontsize=10)
+        axs[1].tick_params(labelleft=True)
         axs[0].set_xlabel('Year', fontsize=10)
         axs[1].set_xlabel('Year', fontsize=10)
+        
+        # Limit y-axis as requested
+        axs[0].set_ylim(top=1750)
+
+        handles, labels = axs[0].get_legend_handles_labels()
+        if handles:
+            fig.legend(handles, labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.02), frameon=False, fontsize=10)
 
         plt.suptitle(f'Annual Minimum 30-Day Discharge ({scenario.upper()})', fontsize=16, weight='bold')
         fig.tight_layout()
-        fig.subplots_adjust(top=0.88)
+        fig.subplots_adjust(top=0.88, bottom=0.15)
         filename = f"storyline_discharge_events_extremes_{scenario}.png"
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
@@ -6000,8 +6028,11 @@ class Visualizer:
             if len(abs_vals) > 0:
                 contour_levels = np.linspace(np.percentile(abs_vals, 2), np.percentile(abs_vals, 98), 15)
 
-        fig = plt.figure(figsize=(12, 11)) 
-        gs = gridspec.GridSpec(2, 2, wspace=0.15, hspace=0.3, height_ratios=[1.5, 1.5], top=0.92, bottom=0.1)
+        fig = plt.figure(figsize=(12, 11.5))
+        # Split layout for better control of spaces and subtitles
+        gs_top = gridspec.GridSpec(1, 2, top=0.92, bottom=0.57, wspace=0.15, left=0.08, right=0.95)
+        gs_cbar = gridspec.GridSpec(1, 1, top=0.56, bottom=0.54, left=0.15, right=0.85)
+        gs_bottom = gridspec.GridSpec(1, 2, top=0.38, bottom=0.08, wspace=0.15, left=0.08, right=0.95)
 
         import matplotlib.colors as mcolors
         try:
@@ -6040,34 +6071,36 @@ class Visualizer:
                     lons_sub = lons_mesh[::skip, ::skip]
                     lats_sub = lats_mesh[::skip, ::skip]
                     ax.scatter(lons_sub[mask_sub], lats_sub[mask_sub], s=1, color='black', alpha=0.5, transform=ccrs.PlateCarree())
-            ax.set_title(title, fontsize=10, weight='bold')
+            ax.set_title(title, fontsize=10, weight='bold', loc='left')
             return cf
 
         season_data = [
-            ('Winter', winter_composite, winter_model_rps, winter_n_total),
             ('Summer', summer_composite, summer_model_rps, summer_n_total),
+            ('Winter', winter_composite, winter_model_rps, winter_n_total),
         ]
 
         ref_cf = None
         for col_idx, (season_label, comp, model_rps_dict, n_total_val) in enumerate(season_data):
             if comp is None:
-                ax = fig.add_subplot(gs[0, col_idx], projection=ccrs.PlateCarree())
+                ax = fig.add_subplot(gs_top[0, col_idx], projection=ccrs.PlateCarree())
                 _add_map_features(ax)
-                ax.set_title(f"{season_label}: No Data", fontsize=10)
+                ax.set_title(f"{season_label}: No Data", fontsize=10, loc='left')
                 continue
 
             hist_clim = comp.get('hist_climatology_mean')
             
-            ax = fig.add_subplot(gs[0, col_idx], projection=ccrs.PlateCarree())
+            ax = fig.add_subplot(gs_top[0, col_idx], projection=ccrs.PlateCarree())
             diff_map = comp.get('diff_ext_non_future')
             sig_mask = comp.get('sig_mask_ext_non_future')
-            title = f"{'a' if col_idx==0 else 'b'}) {season_label}: Future Ext − Non"
+            season_display = f"{season_label} Half-Year"
+            title = f"{'a' if col_idx==0 else 'b'}) {season_display}: Future Inc − Dec"
             cf = _plot_diff(ax, diff_map, sig_mask, title, contour_map=hist_clim)
             if cf: ref_cf = cf
 
+        # Colorbar in its own dedicated row
         if ref_cf:
-            cax = fig.add_axes([0.15, 0.52, 0.70, 0.015])
-            fig.colorbar(ref_cf, cax=cax, orientation='horizontal', label=f'Difference (m/s)', extend='both')
+            cax = fig.add_subplot(gs_cbar[0, 0])
+            fig.colorbar(ref_cf, cax=cax, orientation='horizontal', label='Difference (m/s)', extend='both')
 
         def get_unified_limits(keys):
             min_val, max_val = np.inf, -np.inf
@@ -6104,8 +6137,8 @@ class Visualizer:
         speed_ylim = get_unified_limits(['DJF_JetSpeed'])
         
         plot_configs = [
-            {'key': 'JJA_JetLat',   'ax': fig.add_subplot(gs[1, 0]), 'title': 'c) Summer (JJA) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)', 'ylim': lat_ylim},
-            {'key': 'DJF_JetSpeed', 'ax': fig.add_subplot(gs[1, 1]), 'title': 'd) Winter (DJF) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)', 'ylim': speed_ylim}, 
+            {'key': 'JJA_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 0]), 'title': 'c) Summer (JJA) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)'},
+            {'key': 'DJF_JetSpeed', 'ax': fig.add_subplot(gs_bottom[0, 1]), 'title': 'd) Winter (DJF) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)'}, 
         ]
 
         final_handles = []
@@ -6154,17 +6187,18 @@ class Visualizer:
                     ax.set_ylim(p_config['ylim'])
 
             if final_handles:
-                fig.legend(final_handles, final_labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.02), frameon=False)
+                fig.legend(final_handles, final_labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.005), frameon=False, fontsize=10)
         else:
             for p_config in plot_configs:
                 ax = p_config['ax']
                 ax.text(0.5, 0.5, "No Timeseries Data", ha='center', va='center')
                 ax.set_title(p_config['title'], fontsize=10, weight='bold', loc='left')
 
-        plt.suptitle(f'Impact of Storylines on Zonal Wind & Jet Evolution (GWL +{gwl}°C, {Visualizer._format_scenario_title(scenario)})', fontsize=14, weight='bold')
+        plt.suptitle(f'Impact of Storylines on Zonal Wind & Jet Evolution (GWL +{gwl}°C, {Visualizer._format_scenario_title(scenario)})', fontsize=14, weight='bold', y=0.97) 
 
-        fig.tight_layout(rect=[0, 0.05, 1, 0.94])
-        plt.subplots_adjust(hspace=0.45) 
+        # Add subtitles for the row sections
+        fig.text(0.08, 0.935, 'Zonal Wind (UA850) Differences', ha='left', va='center', fontsize=12, weight='bold')
+        fig.text(0.08, 0.42, 'Jet Stream Evolution', ha='left', va='center', fontsize=12, weight='bold')
 
         filename_out = f"final_figure_3_{event_key}_{scenario}_gwl{gwl}.png"
         filepath = os.path.join(Config.PLOT_DIR, filename_out)

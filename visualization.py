@@ -5965,7 +5965,7 @@ class Visualizer:
         cmip6_plot_data, reanalysis_plot_data, config,
         winter_model_rps=None, summer_model_rps=None,
         winter_n_total=None, summer_n_total=None,
-        fixed_diff_limit=None
+        fixed_diff_limit=None, gwl_years=None
     ):
         """
         Creates final_figure_3:
@@ -6028,11 +6028,11 @@ class Visualizer:
             if len(abs_vals) > 0:
                 contour_levels = np.linspace(np.percentile(abs_vals, 2), np.percentile(abs_vals, 98), 15)
 
-        fig = plt.figure(figsize=(12, 11.5))
+        fig = plt.figure(figsize=(12, 14))
         # Split layout for better control of spaces and subtitles
-        gs_top = gridspec.GridSpec(1, 2, top=0.92, bottom=0.57, wspace=0.15, left=0.08, right=0.95)
-        gs_cbar = gridspec.GridSpec(1, 1, top=0.56, bottom=0.54, left=0.15, right=0.85)
-        gs_bottom = gridspec.GridSpec(1, 2, top=0.38, bottom=0.08, wspace=0.15, left=0.08, right=0.95)
+        gs_top = gridspec.GridSpec(1, 2, top=0.92, bottom=0.62, wspace=0.15, left=0.08, right=0.95)
+        gs_cbar = gridspec.GridSpec(1, 1, top=0.61, bottom=0.59, left=0.15, right=0.85)
+        gs_bottom = gridspec.GridSpec(2, 2, top=0.53, bottom=0.08, wspace=0.15, hspace=0.3, left=0.08, right=0.95)
 
         import matplotlib.colors as mcolors
         try:
@@ -6051,6 +6051,11 @@ class Visualizer:
             lat_min, lat_max = Config.BOX_LAT_MIN, Config.BOX_LAT_MAX
             ax.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
                                               fill=False, edgecolor='magenta', linewidth=2.0, transform=ccrs.PlateCarree(), zorder=10))
+            gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+            gl.top_labels = False
+            gl.right_labels = False
+            gl.xlabel_style = {'size': 8}
+            gl.ylabel_style = {'size': 8}
 
         def _plot_diff(ax, diff_map, sig_mask, title, contour_map=None):
             _add_map_features(ax)
@@ -6133,12 +6138,14 @@ class Visualizer:
             if range_val == 0: range_val = 1.0
             return (min_val - 0.05 * range_val, max_val + 0.05 * range_val)
 
-        lat_ylim = get_unified_limits(['JJA_JetLat'])
-        speed_ylim = get_unified_limits(['DJF_JetSpeed'])
+        lat_ylim = (-4, 4)
+        speed_ylim = (-2, 3)
         
         plot_configs = [
-            {'key': 'JJA_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 0]), 'title': 'c) Summer (JJA) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)'},
-            {'key': 'DJF_JetSpeed', 'ax': fig.add_subplot(gs_bottom[0, 1]), 'title': 'd) Winter (DJF) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)'}, 
+            {'key': 'JJA_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 0]), 'title': 'c) Summer (JJA) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)', 'ylim': lat_ylim},
+            {'key': 'DJF_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 1]), 'title': 'd) Winter (DJF) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)', 'ylim': lat_ylim},
+            {'key': 'JJA_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 0]), 'title': 'e) Summer (JJA) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)', 'ylim': speed_ylim},
+            {'key': 'DJF_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 1]), 'title': 'f) Winter (DJF) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)', 'ylim': speed_ylim},
         ]
 
         final_handles = []
@@ -6150,38 +6157,128 @@ class Visualizer:
                 key = p_config['key']
 
                 if cmip6_plot_data.get(key) and cmip6_plot_data[key]['members']:
+                    # Determine extreme/non-extreme for the models
+                    model_rps = summer_model_rps if 'JJA' in key else winter_model_rps
+                    extreme_models_set = set()
+                    non_extreme_models_set = set()
+                    if model_rps:
+                        sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
+                        n_select = config.COMPOSITE_N_MODELS
+                        if sorted_models and '_ssp585' in sorted_models[0][0]:
+                            n_select = 14
+                        if n_select * 2 > len(sorted_models):
+                            n_select = len(sorted_models) // 2
+                        if n_select < 1: n_select = 1
+                            
+                        if 'low' in event_key:
+                            extreme_models_set = set([m[0] for m in sorted_models[:n_select]])
+                            non_extreme_models_set = set([m[0] for m in sorted_models[-n_select:]])
+                        else:
+                            extreme_models_set = set([m[0] for m in sorted_models[-n_select:]])
+                            non_extreme_models_set = set([m[0] for m in sorted_models[:n_select]])
+
+                    extreme_members = []
+                    non_extreme_members = []
+                    
                     for idx, member_jet in enumerate(cmip6_plot_data[key]['members']):
-                        line, = ax.plot(member_jet.season_year, member_jet, color='grey', alpha=0.3, linewidth=0.7, label='CMIP6 Models' if idx==0 else "")
-                        if idx==0 and 'CMIP6 Models' not in final_labels:
-                            final_handles.append(line)
-                            final_labels.append('CMIP6 Models')
+                        model_name = member_jet.attrs.get('model_key', '')
+                        if model_name in extreme_models_set:
+                            extreme_members.append(member_jet)
+                        elif model_name in non_extreme_models_set:
+                            non_extreme_members.append(member_jet)
+
+                    # Plot 10-90% Shading for ALL CMIP6 Models
+                    all_members = cmip6_plot_data[key]['members']
+                    if all_members:
+                        try:
+                            aligned_all = xr.align(*all_members, join='outer')
+                            stacked_all = xr.concat(aligned_all, dim='model')
+                            
+                            p10 = stacked_all.quantile(0.10, dim='model', skipna=True)
+                            p90 = stacked_all.quantile(0.90, dim='model', skipna=True)
+                            
+                            ax.fill_between(p10.season_year, p10, p90, color='grey', alpha=0.2, zorder=1)
+                            
+                            label = 'CMIP6 10-90% Range (5y-MA)'
+                            if label not in final_labels:
+                                patch = mpatches.Patch(color='grey', alpha=0.3)
+                                final_handles.append(patch)
+                                final_labels.append(label)
+                        except Exception as e:
+                            logging.warning(f"Could not compute 10-90% range for {key}: {e}")
+
+                    # Plot Extreme Models Mean
+                    if extreme_members:
+                        try:
+                            aligned = xr.align(*extreme_members, join='outer')
+                            mmm_ext = xr.concat(aligned, dim='model').mean(dim='model', skipna=True)
+                            label = 'Increasing Frequency Mean' if 'low' in event_key else 'Decreasing Frequency Mean'
+                            label = 'Increasing Frequency Mean (5y-MA)' # To match Fig 2 colors directly: Red = Increasing
+                            line, = ax.plot(mmm_ext.season_year, mmm_ext, color='#b2182b', alpha=0.9, linewidth=2.5, zorder=5)
+                            if label not in final_labels:
+                                final_handles.append(line)
+                                final_labels.append(label)
+                        except Exception as e:
+                            logging.warning(f"Could not compute mean for {key} extreme models: {e}")
+
+                    # Plot Non-Extreme Models Mean
+                    if non_extreme_members:
+                        try:
+                            # Align and average
+                            aligned = xr.align(*non_extreme_members, join='outer')
+                            mmm_non_ext = xr.concat(aligned, dim='model').mean(dim='model', skipna=True)
+                            label = 'Decreasing Frequency Mean (5y-MA)'
+                            line, = ax.plot(mmm_non_ext.season_year, mmm_non_ext, color='#2166ac', alpha=0.9, linewidth=2.5, zorder=5)
+                            if label not in final_labels:
+                                final_handles.append(line)
+                                final_labels.append(label)
+                        except Exception as e:
+                            logging.warning(f"Could not compute mean for {key} non-extreme models: {e}")
                 
                 if cmip6_plot_data.get(key) and cmip6_plot_data[key].get('mmm') is not None:
-                    line, = ax.plot(cmip6_plot_data[key]['mmm'].season_year, cmip6_plot_data[key]['mmm'], color='black', linewidth=2.5, label='Multi-Model Mean')
-                    if 'Multi-Model Mean' not in final_labels:
+                    line, = ax.plot(cmip6_plot_data[key]['mmm'].season_year, cmip6_plot_data[key]['mmm'], color='black', linewidth=2.5, label='Multi-Model Mean (5y-MA)')
+                    if 'Multi-Model Mean (5y-MA)' not in final_labels:
                         final_handles.append(line)
-                        final_labels.append('Multi-Model Mean')
-                
-                if reanalysis_plot_data.get(key) and reanalysis_plot_data[key].get('20CRv3') is not None:
-                    reanalysis_20crv3 = reanalysis_plot_data[key]['20CRv3']
-                    line, = ax.plot(reanalysis_20crv3.season_year, reanalysis_20crv3, color='darkorange', linewidth=1.5, label='20CRv3')
-                    if '20CRv3' not in final_labels:
-                        final_handles.append(line)
-                        final_labels.append('20CRv3')
-                
-                if reanalysis_plot_data.get(key) and reanalysis_plot_data[key].get('ERA5') is not None:
-                    reanalysis_era5 = reanalysis_plot_data[key]['ERA5']
-                    line, = ax.plot(reanalysis_era5.season_year, reanalysis_era5, color='purple', linewidth=1.5, label='ERA5')
-                    if 'ERA5' not in final_labels:
-                        final_handles.append(line)
-                        final_labels.append('ERA5')
+                        final_labels.append('Multi-Model Mean (5y-MA)')
 
                 ax.set_title(p_config['title'], fontsize=10, weight='bold', loc='left')
                 ax.set_ylabel(p_config['ylabel'], fontsize=10)
                 ax.grid(True, linestyle=':', alpha=0.6)
-                ax.set_xlim(1850, 2100)
+                ax.set_xlim(2015, 2100)
                 ax.axhline(0, color='black', linewidth=0.5)
                 ax.set_xlabel('Year', fontsize=10)
+                
+                # Plot GWL Crossing Range
+                if gwl_years:
+                    crossing_years = []
+                    for model, thresholds in gwl_years.items():
+                        if gwl in thresholds and thresholds[gwl] is not None:
+                            crossing_years.append(thresholds[gwl])
+                    
+                    if crossing_years:
+                        min_yr = min(crossing_years)
+                        max_yr = max(crossing_years)
+                        
+                        # Add axvspan for the range
+                        vspan = ax.axvspan(min_yr, max_yr, color='gold', alpha=0.2, zorder=0)
+
+                        # Add Median Crossing Year for Extreme and Non-Extreme Storylines
+                        ext_crossing_years = [gwl_years[m][gwl] for m in extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
+                        non_ext_crossing_years = [gwl_years[m][gwl] for m in non_extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
+                        
+                        if ext_crossing_years:
+                            median_ext = np.median(ext_crossing_years)
+                            ax.axvline(median_ext, color='#b2182b', linestyle='--', linewidth=1.5, zorder=3)
+                        
+                        if non_ext_crossing_years:
+                            median_non_ext = np.median(non_ext_crossing_years)
+                            ax.axvline(median_non_ext, color='#2166ac', linestyle='--', linewidth=1.5, zorder=3)
+                        
+                        # Since we do this for each of the 2 subplots, only add to legend once
+                        if 'GWL Crossing Range' not in final_labels:
+                            gwl_patch = mpatches.Patch(color='gold', alpha=0.3)
+                            final_handles.append(gwl_patch)
+                            final_labels.append('GWL Crossing Range')
 
                 if p_config.get('ylim'):
                     ax.set_ylim(p_config['ylim'])
@@ -6198,7 +6295,7 @@ class Visualizer:
 
         # Add subtitles for the row sections
         fig.text(0.08, 0.935, 'Zonal Wind (UA850) Differences', ha='left', va='center', fontsize=12, weight='bold')
-        fig.text(0.08, 0.42, 'Jet Stream Evolution', ha='left', va='center', fontsize=12, weight='bold')
+        fig.text(0.08, 0.56, 'Jet Stream Evolution', ha='left', va='center', fontsize=12, weight='bold')
 
         filename_out = f"final_figure_3_{event_key}_{scenario}_gwl{gwl}.png"
         filepath = os.path.join(Config.PLOT_DIR, filename_out)

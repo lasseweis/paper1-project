@@ -1545,9 +1545,9 @@ class StorylineAnalyzer:
         reanalysis_plot_data = {'Global_Tas': {}, 'JJA_JetLat': {}, 'DJF_JetSpeed': {}, 
                                 'JJA_JetSpeed': {}, 'DJF_JetLat': {}}
 
-        rolling_window = 20
-        pi_ref_start = config.CMIP6_PRE_INDUSTRIAL_REF_START
-        pi_ref_end = config.CMIP6_PRE_INDUSTRIAL_REF_END
+        rolling_window = 5
+        pi_ref_start = 1960
+        pi_ref_end = 2015
 
         def _get_anomaly_and_smooth(data_array, year_coord, ref_start, ref_end, window):
             """Interne Hilfsfunktion zur Berechnung von Anomalien und gleitenden Mitteln."""
@@ -1596,6 +1596,7 @@ class StorylineAnalyzer:
                     if jet_timeseries is not None:
                         processed_jet = _get_anomaly_and_smooth(jet_timeseries, 'season_year', pi_ref_start, pi_ref_end, rolling_window)
                         if processed_jet is not None:
+                            processed_jet.attrs['model_key'] = model_key
                             cmip6_plot_data[jet_key]['members'].append(processed_jet)
 
             # MMM-Berechnung

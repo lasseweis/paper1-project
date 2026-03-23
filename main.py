@@ -1039,7 +1039,8 @@ class ClimateAnalysis:
                                 cmip6_plot_data=cmip6_plot_data_stored, reanalysis_plot_data=reanalysis_plot_data_stored, config=Config(),
                                 winter_model_rps=w_data[1], summer_model_rps=s_data[1],
                                 winter_n_total=w_data[2], summer_n_total=s_data[2],
-                                fixed_diff_limit=ua_shared_diff_limit
+                                fixed_diff_limit=ua_shared_diff_limit,
+                                gwl_years=cmip6_results.get('gwl_threshold_years')
                             )
                         else:
                             logging.warning(f"Cannot create final figure 3 for GWL {gwl}: missing season data.")

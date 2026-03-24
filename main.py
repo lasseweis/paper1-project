@@ -934,6 +934,13 @@ class ClimateAnalysis:
                     else:
                         logging.info(f"Combined PR diff plot for GWL {gwl} already exists.")
 
+                    # --- NEW: Final Figure 4 Combined Plot (Discharge + PR Diff) ---
+                    if gwl in [2.0, 3.0]:
+                        Visualizer.plot_final_figure_4_combined(
+                            cmip6_results, discharge_data_loaded, pr_stored_composites, 
+                            Config(), scenario, gwl
+                        )
+
                 # --- PLOT: UA Composite Analysis (Zonal Wind 850hPa) ---
                 ua_stored_composites = {}  # Store results for combined plot
                 for gwl in Config.GLOBAL_WARMING_LEVELS:
@@ -1303,23 +1310,7 @@ class ClimateAnalysis:
         else:
             logging.info(f"Discharge events combined plot already exists.")
 
-        # --- PLOT: Discharge Extreme Events Timeseries - SUMMARY (SSP585 only) ---
-        final_fig4_filename = os.path.join(Config.PLOT_DIR, "final_figure_4_storyline_discharge_events_extremes_combined.png")
-        ssp585_extremes_path = os.path.join(Config.PLOT_DIR, "storyline_discharge_events_extremes_ssp585.png")
-
-        if not os.path.exists(final_fig4_filename):
-            if os.path.exists(ssp585_extremes_path):
-                logging.info(f"Creating final extremes plot (SSP585 only): {final_fig4_filename}")
-                try:
-                    import shutil
-                    shutil.copyfile(ssp585_extremes_path, final_fig4_filename)
-                    logging.info(f"Saved final extremes plot: {final_fig4_filename}")
-                except Exception as e:
-                    logging.error(f"Failed to copy final extremes plot: {e}")
-            else:
-                logging.warning("Cannot create final_figure_4: ssp585 extremes plot is missing.")
-        else:
-            logging.info(f"Combined extremes plot '{final_fig4_filename}' already exists.")
+        # --- PLOT: Final Figure 4 is now created within the scenario/GWL loop ---
 
         logging.info("\n\n=====================================================")
         logging.info("=== FULL ANALYSIS COMPLETED ===")

@@ -22,7 +22,7 @@ import seaborn as sns
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import cartopy.io.shapereader as shpreader
-from scipy.stats import chi2
+from scipy.stats import chi2, linregress
 import json
 import seaborn as sns
 import traceback
@@ -5843,7 +5843,7 @@ class Visualizer:
         logging.info(f"Saved discharge events timeseries plot to {filepath}")
 
     @staticmethod
-    def plot_discharge_events_extreme_timeseries(cmip6_results, discharge_data_loaded, config, scenario):
+    def plot_discharge_events_extreme_timeseries(cmip6_results, discharge_data_loaded, config, scenario, target_gwl=None):
         """
         Plots a 2x2 grid.
         Row 1: Extreme Models (Summer left, Winter right)
@@ -5865,11 +5865,17 @@ class Visualizer:
         if storyline_classification_2d:
             gwls_present = [gwl for gwl in config.GLOBAL_WARMING_LEVELS if gwl in storyline_classification_2d]
             if gwls_present:
-                target_gwl = 3.0 if 3.0 in gwls_present else max(gwls_present)
-                extreme_models['Summer'] = storyline_classification_2d[target_gwl].get('JJA_Extreme Models', [])
-                non_extreme_models['Summer'] = storyline_classification_2d[target_gwl].get('JJA_Non-Extreme Models', [])
-                extreme_models['Winter'] = storyline_classification_2d[target_gwl].get('DJF_Extreme Models', [])
-                non_extreme_models['Winter'] = storyline_classification_2d[target_gwl].get('DJF_Non-Extreme Models', [])
+                if target_gwl is None:
+                    target_gwl = 3.0 if 3.0 in gwls_present else max(gwls_present)
+                
+                # Check if target_gwl exists in classification
+                if target_gwl in storyline_classification_2d:
+                    extreme_models['Summer'] = storyline_classification_2d[target_gwl].get('JJA_Extreme Models', [])
+                    non_extreme_models['Summer'] = storyline_classification_2d[target_gwl].get('JJA_Non-Extreme Models', [])
+                    extreme_models['Winter'] = storyline_classification_2d[target_gwl].get('DJF_Extreme Models', [])
+                    non_extreme_models['Winter'] = storyline_classification_2d[target_gwl].get('DJF_Non-Extreme Models', [])
+                else:
+                    logging.warning(f"Target GWL {target_gwl} not found in classification data.")
 
         data_by_season = {'Summer': [], 'Winter': []}
         season_keys = {'Summer': '30Q_low_summer', 'Winter': '30Q_low_winter'}
@@ -5957,6 +5963,175 @@ class Visualizer:
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved extreme discharge events timeseries plot to {filepath}")
+
+
+    @staticmethod
+    def plot_final_figure_4_combined(cmip6_results, discharge_data_loaded, pr_stored_composites, config, scenario, target_gwl):
+        """
+        Creates a combined Figure 4:
+        Top: Extreme vs Non-Extreme discharge timeseries (Summer, Winter)
+        Bottom: Future Precipitation Difference maps (Summer, Winter)
+        """
+        logging.info(f"Plotting combined final figure 4 for GWL +{target_gwl}°C, {scenario}...")
+        Visualizer.ensure_plot_dir_exists()
+        
+        # --- 1. PREPARE DISCHARGE DATA ---
+        metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
+        storyline_classification_2d = cmip6_results.get('storyline_classification_2d', {})
+        extreme_models = {'Summer': [], 'Winter': []}
+        non_extreme_models = {'Summer': [], 'Winter': []}
+
+        if target_gwl in storyline_classification_2d:
+            extreme_models['Summer'] = storyline_classification_2d[target_gwl].get('JJA_Extreme Models', [])
+            non_extreme_models['Summer'] = storyline_classification_2d[target_gwl].get('JJA_Non-Extreme Models', [])
+            extreme_models['Winter'] = storyline_classification_2d[target_gwl].get('DJF_Extreme Models', [])
+            non_extreme_models['Winter'] = storyline_classification_2d[target_gwl].get('DJF_Non-Extreme Models', [])
+
+        data_by_season = {'Summer': [], 'Winter': []}
+        season_keys = {'Summer': '30Q_low_summer', 'Winter': '30Q_low_winter'}
+
+        for sn, mk in season_keys.items():
+            for key, ts_dict in metric_timeseries.items():
+                if not key.endswith(scenario): continue
+                if mk in ts_dict:
+                    da = ts_dict[mk]
+                    if da is not None:
+                        try:
+                            df = da.to_dataframe(name='discharge')
+                        except:
+                            df = da.to_dataframe()
+                            if len(df.columns) == 1: df.columns = ['discharge']
+                        if 'year' in df.index.names: df = df.reset_index()
+                        model_name = key.split('_')[0] 
+                        df['model'] = model_name
+                        data_by_season[sn].append(df)
+
+        # --- 2. PREPARE PR COMPOSITE DATA ---
+        w_data = pr_stored_composites.get((target_gwl, 'Winter'))
+        s_data = pr_stored_composites.get((target_gwl, 'Summer'))
+        
+        # --- 3. SET UP FIGURE ---
+        fig = plt.figure(figsize=(14, 12))
+        gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1.2], hspace=0.3, wspace=0.15)
+        
+        # --- 4. PLOT DISCHARGE (Top Row) ---
+        def _p_ds(ax, df_all, ext_list, non_ext_list, title):
+            if df_all.empty: return
+            def _p_grp(ml, lbl, clr):
+                tn = [m.split('_')[0] for m in ml]
+                df_t = df_all[df_all['model'].isin(tn)]
+                if not df_t.empty:
+                    stats = df_t.groupby('year')['discharge'].agg(['mean', lambda x: np.percentile(x, 10), lambda x: np.percentile(x, 90)]).reset_index()
+                    stats.columns = ['year', 'mmm', 'p10', 'p90']
+                    stats['mmm'] = stats['mmm'].rolling(window=5, center=True).mean()
+                    stats['p10'] = stats['p10'].rolling(window=5, center=True).mean()
+                    stats['p90'] = stats['p90'].rolling(window=5, center=True).mean()
+                    
+                    # Calculate trend and p-value on non-NaN values
+                    valid = ~np.isnan(stats['mmm'])
+                    x_vals = stats['year'][valid]
+                    y_vals = stats['mmm'][valid]
+                    if len(x_vals) > 1:
+                        slope, intercept, _, p_val, _ = linregress(x_vals, y_vals)
+                        trend_line = slope * x_vals + intercept
+                        ax.plot(x_vals, trend_line, color=clr, linestyle='--', alpha=0.9, linewidth=1.5)
+                        
+                        trend_per_decade = slope * 10
+                        if p_val < 0.01:
+                            p_str = "p<0.01"
+                        else:
+                            p_str = f"p={p_val:.2f}"
+                        label_suffix = f" (trend: {trend_per_decade:+.2f}/dec, {p_str})"
+                    else:
+                        label_suffix = ""
+
+                    ax.fill_between(stats['year'], stats['p10'], stats['p90'], color=clr, alpha=0.3)
+                    ax.plot(stats['year'], stats['mmm'], color=clr, linewidth=2.5, label=f'{lbl} (n={len(tn)}){label_suffix}')
+
+            _p_grp(ext_list, 'Increasing Frequency', '#b2182b')
+            _p_grp(non_ext_list, 'Decreasing Frequency', '#2166ac')
+            ax.set_title(title, fontsize=12, weight='bold', loc='left')
+            ax.grid(True, linestyle=':', alpha=0.7)
+            ax.set_xlim(2015, 2100)
+            ax.set_ylim(0, 1750)
+
+        ax_ds_s = fig.add_subplot(gs[0, 0])
+        df_s = pd.concat(data_by_season['Summer'], ignore_index=True) if data_by_season['Summer'] else pd.DataFrame()
+        _p_ds(ax_ds_s, df_s, extreme_models['Summer'], non_extreme_models['Summer'], f'a) Summer Half-Year Discharge')
+        ax_ds_s.set_ylabel('Discharge (m³/s)')
+
+        ax_ds_w = fig.add_subplot(gs[0, 1])
+        df_w = pd.concat(data_by_season['Winter'], ignore_index=True) if data_by_season['Winter'] else pd.DataFrame()
+        _p_ds(ax_ds_w, df_w, extreme_models['Winter'], non_extreme_models['Winter'], f'b) Winter Half-Year Discharge')
+        ax_ds_w.tick_params(labelleft=False)
+
+        h, l = ax_ds_s.get_legend_handles_labels()
+        if h: fig.legend(h, l, loc='upper center', ncol=2, bbox_to_anchor=(0.5, 0.94), frameon=False, fontsize=11)
+
+        # --- 5. PLOT PR COMPOSITES (Bottom Row) ---
+        buf = 5.0
+        ex = [config.BOX_LON_MIN - buf, config.BOX_LON_MAX + buf, config.BOX_LAT_MIN - buf, config.BOX_LAT_MAX + buf]
+        
+        all_d = []
+        for d in [s_data, w_data]:
+            if d and d[0] and 'diff_ext_non_future' in d[0]: all_d.append(d[0]['diff_ext_non_future'])
+        d_lim = 1.0
+        if all_d:
+            v = np.concatenate([m.values.ravel() for m in all_d])
+            v = v[np.isfinite(v)]
+            if len(v) > 0: 
+                # Avoid ceiling function that creates huge bins and washes out colors for small PR diffs. Be exact.
+                d_lim = max(np.percentile(np.abs(v), 98), 0.1)
+
+        import matplotlib.colors as mcolors
+        try:
+            cmap = matplotlib.pyplot.get_cmap('BrBG', 12)
+        except:
+            cmap = matplotlib.cm.get_cmap('BrBG', 12)
+            
+        levs = np.linspace(-d_lim, d_lim, 13)
+        norm = mcolors.BoundaryNorm(levs, ncolors=cmap.N, clip=False)
+
+        def _p_map(ax, comp, title):
+            ax.set_extent(ex, crs=ccrs.PlateCarree())
+            ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
+            ax.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
+            ax.add_patch(mpatches.Rectangle((config.BOX_LON_MIN, config.BOX_LAT_MIN), config.BOX_LON_MAX-config.BOX_LON_MIN, config.BOX_LAT_MAX-config.BOX_LAT_MIN, fill=False, edgecolor='magenta', linewidth=1.5, linestyle='--', transform=ccrs.PlateCarree(), zorder=10))
+            if comp and 'diff_ext_non_future' in comp:
+                dm = comp['diff_ext_non_future']
+                sig = comp.get('sig_mask_ext_non_future')
+                
+                # Removed the `.where(dm.lat < 85)` since it is unnecessary for Central Europe extent, just plot raw data
+                cf = ax.pcolormesh(dm.lon, dm.lat, dm, cmap=cmap, norm=norm, transform=ccrs.PlateCarree())
+                if sig is not None:
+                    sk = 2
+                    lo, la = np.meshgrid(dm.lon, dm.lat)
+                    ax.scatter(lo[::sk, ::sk][sig[::sk, ::sk]], la[::sk, ::sk][sig[::sk, ::sk]], s=1, color='black', alpha=0.4, transform=ccrs.PlateCarree())
+                hc = comp.get('hist_climatology_mean')
+                if hc is not None: ax.contour(hc.lon, hc.lat, hc, levels=10, colors='gray', linewidths=0.5, alpha=0.5, transform=ccrs.PlateCarree())
+                return cf
+            return None
+
+        ax_pr_s = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
+        cf_s = _p_map(ax_pr_s, s_data[0] if s_data else None, "")
+        ax_pr_s.set_title("c) Summer PR Composite Diff", fontsize=12, weight='bold', loc='left')
+
+        ax_pr_w = fig.add_subplot(gs[1, 1], projection=ccrs.PlateCarree())
+        cf_w = _p_map(ax_pr_w, w_data[0] if w_data else None, "")
+        ax_pr_w.set_title("d) Winter PR Composite Diff", fontsize=12, weight='bold', loc='left')
+
+        if cf_s or cf_w:
+            cb_ax = fig.add_axes([0.15, 0.06, 0.7, 0.015])
+            fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cb_ax, orientation='horizontal', label='Precipitation Difference (mm/day)', extend='both')
+
+        s_t = Visualizer._format_scenario_title(scenario)
+        plt.suptitle(f'Annual Minimum Discharge & Precipitation Composites\n{s_t} | GWL +{target_gwl}°C', fontsize=16, weight='bold', y=0.98)
+        fig.tight_layout(rect=[0, 0.08, 1, 0.92])
+        
+        path = os.path.join(config.PLOT_DIR, f"final_figure_4_combined_{scenario}_gwl{target_gwl}.png")
+        plt.savefig(path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Saved combined final figure 4 to {path}")
 
 
     @staticmethod
@@ -6273,10 +6448,32 @@ class Visualizer:
                                 logging.warning(f"Could not compute composite metric for {key} non-extreme models: {e}")
                 
                 if cmip6_plot_data.get(key) and cmip6_plot_data[key].get('mmm') is not None:
-                    line, = ax.plot(cmip6_plot_data[key]['mmm'].season_year, cmip6_plot_data[key]['mmm'], color='black', linewidth=2.5, label='Multi-Model Mean (5y-MA)')
-                    if 'Multi-Model Mean (5y-MA)' not in final_labels:
+                    mmm_ts = cmip6_plot_data[key]['mmm']
+                    
+                    # Calculate trend and p-value on non-NaN values
+                    valid = ~np.isnan(mmm_ts.values)
+                    x_vals = mmm_ts.season_year.values[valid]
+                    y_vals = mmm_ts.values[valid]
+                    
+                    if len(x_vals) > 1:
+                        slope, intercept, _, p_val, _ = linregress(x_vals, y_vals)
+                        trend_line = slope * x_vals + intercept
+                        ax.plot(x_vals, trend_line, color='black', linestyle='--', alpha=0.8, linewidth=1.5, zorder=5)
+                        
+                        trend_per_decade = slope * 10
+                        if p_val < 0.01:
+                            p_str = "p<0.01"
+                        else:
+                            p_str = f"p={p_val:.2f}"
+                        label_suffix = f" (trend: {trend_per_decade:+.2f}/dec, {p_str})"
+                    else:
+                        label_suffix = ""
+
+                    line, = ax.plot(mmm_ts.season_year, mmm_ts, color='black', linewidth=2.5, label=f'Multi-Model Mean (5y-MA){label_suffix}', zorder=6)
+                    if f'Multi-Model Mean (5y-MA){label_suffix}' not in final_labels:
                         final_handles.append(line)
-                        final_labels.append('Multi-Model Mean (5y-MA)')
+                        final_labels.append(f'Multi-Model Mean (5y-MA){label_suffix}')
+
 
                 ax.set_title(p_config['title'], fontsize=10, weight='bold', loc='left')
                 ax.set_ylabel(p_config['ylabel'], fontsize=10)

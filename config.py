@@ -47,11 +47,11 @@ class Config:
     WIND_LEVEL = 850  # 850 hPa pressure level
 
     # Analysis box coordinates (Central/Eastern Europe)
-    BOX_LAT_MIN, BOX_LAT_MAX = 46.0, 51.0
-    BOX_LON_MIN, BOX_LON_MAX = 8.0, 18.0
+    BOX_LAT_MIN, BOX_LAT_MAX = 46.0, 50.0
+    BOX_LON_MIN, BOX_LON_MAX = 8.0, 17.0
 
     # Jet index boxes
-    JET_SPEED_BOX_LAT_MIN, JET_SPEED_BOX_LAT_MAX = 50.0, 60.0
+    JET_SPEED_BOX_LAT_MIN, JET_SPEED_BOX_LAT_MAX = 45.0, 65.0
     JET_SPEED_BOX_LON_MIN, JET_SPEED_BOX_LON_MAX = -20.0, 0.0
     JET_LAT_BOX_LAT_MIN, JET_LAT_BOX_LAT_MAX = 40.0, 70.0
     JET_LAT_BOX_LON_MIN, JET_LAT_BOX_LON_MAX = -30.0, -10.0

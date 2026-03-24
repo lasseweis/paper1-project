@@ -32,6 +32,7 @@ from storyline import StorylineAnalyzer
 from config import Config
 from stats_analyzer import StatsAnalyzer
 from data_processing import DataProcessor
+from jet_analyzer import JetStreamAnalyzer
 
 
 class Visualizer:
@@ -6047,10 +6048,21 @@ class Visualizer:
             ax.set_extent(extent, crs=ccrs.PlateCarree())
             ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
             ax.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
-            lon_min, lon_max = Config.BOX_LON_MIN, Config.BOX_LON_MAX
-            lat_min, lat_max = Config.BOX_LAT_MIN, Config.BOX_LAT_MAX
-            ax.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
-                                              fill=False, edgecolor='magenta', linewidth=2.0, transform=ccrs.PlateCarree(), zorder=10))
+            # Danube Box (original)
+            ax.add_patch(mpatches.Rectangle((Config.BOX_LON_MIN, Config.BOX_LAT_MIN), 
+                                              Config.BOX_LON_MAX - Config.BOX_LON_MIN, 
+                                              Config.BOX_LAT_MAX - Config.BOX_LAT_MIN,
+                                              fill=False, edgecolor='magenta', linewidth=1.5, linestyle='--', transform=ccrs.PlateCarree(), zorder=10))
+            # Jet Speed Box (Red)
+            ax.add_patch(mpatches.Rectangle((Config.JET_SPEED_BOX_LON_MIN, Config.JET_SPEED_BOX_LAT_MIN), 
+                                              Config.JET_SPEED_BOX_LON_MAX - Config.JET_SPEED_BOX_LON_MIN, 
+                                              Config.JET_SPEED_BOX_LAT_MAX - Config.JET_SPEED_BOX_LAT_MIN,
+                                              fill=False, edgecolor='red', linewidth=2.0, transform=ccrs.PlateCarree(), zorder=11))
+            # Jet Lat Box (Blue)
+            ax.add_patch(mpatches.Rectangle((Config.JET_LAT_BOX_LON_MIN, Config.JET_LAT_BOX_LAT_MIN), 
+                                              Config.JET_LAT_BOX_LON_MAX - Config.JET_LAT_BOX_LON_MIN, 
+                                              Config.JET_LAT_BOX_LAT_MAX - Config.JET_LAT_BOX_LAT_MIN,
+                                              fill=False, edgecolor='blue', linewidth=2.0, transform=ccrs.PlateCarree(), zorder=11))
             gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
             gl.top_labels = False
             gl.right_labels = False
@@ -6138,14 +6150,14 @@ class Visualizer:
             if range_val == 0: range_val = 1.0
             return (min_val - 0.05 * range_val, max_val + 0.05 * range_val)
 
-        lat_ylim = (-4, 4)
-        speed_ylim = (-2, 3)
+        lat_ylim = (-2.5, 3.5)
+        speed_ylim = (-2, 2.5)
         
         plot_configs = [
-            {'key': 'JJA_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 0]), 'title': 'c) Summer (JJA) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)', 'ylim': lat_ylim},
-            {'key': 'DJF_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 1]), 'title': 'd) Winter (DJF) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)', 'ylim': lat_ylim},
-            {'key': 'JJA_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 0]), 'title': 'e) Summer (JJA) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)', 'ylim': speed_ylim},
-            {'key': 'DJF_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 1]), 'title': 'f) Winter (DJF) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)', 'ylim': speed_ylim},
+            {'key': 'Hydro_Summer_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 0]), 'title': 'c) Summer (May-Oct) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)', 'ylim': lat_ylim},
+            {'key': 'Hydro_Winter_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 1]), 'title': 'd) Winter (Nov-Apr) Jet Latitude', 'ylabel': 'Latitude Anomaly (°)', 'ylim': lat_ylim},
+            {'key': 'Hydro_Summer_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 0]), 'title': 'e) Summer (May-Oct) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)', 'ylim': speed_ylim},
+            {'key': 'Hydro_Winter_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 1]), 'title': 'f) Winter (Nov-Apr) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)', 'ylim': speed_ylim},
         ]
 
         final_handles = []
@@ -6158,7 +6170,7 @@ class Visualizer:
 
                 if cmip6_plot_data.get(key) and cmip6_plot_data[key]['members']:
                     # Determine extreme/non-extreme for the models
-                    model_rps = summer_model_rps if 'JJA' in key else winter_model_rps
+                    model_rps = summer_model_rps if 'Summer' in key else winter_model_rps
                     extreme_models_set = set()
                     non_extreme_models_set = set()
                     if model_rps:
@@ -6208,32 +6220,57 @@ class Visualizer:
                             logging.warning(f"Could not compute 10-90% range for {key}: {e}")
 
                     # Plot Extreme Models Mean
-                    if extreme_members:
-                        try:
-                            aligned = xr.align(*extreme_members, join='outer')
-                            mmm_ext = xr.concat(aligned, dim='model').mean(dim='model', skipna=True)
-                            label = 'Increasing Frequency Mean' if 'low' in event_key else 'Decreasing Frequency Mean'
-                            label = 'Increasing Frequency Mean (5y-MA)' # To match Fig 2 colors directly: Red = Increasing
-                            line, = ax.plot(mmm_ext.season_year, mmm_ext, color='#b2182b', alpha=0.9, linewidth=2.5, zorder=5)
-                            if label not in final_labels:
-                                final_handles.append(line)
-                                final_labels.append(label)
-                        except Exception as e:
-                            logging.warning(f"Could not compute mean for {key} extreme models: {e}")
-
-                    # Plot Non-Extreme Models Mean
-                    if non_extreme_members:
-                        try:
-                            # Align and average
-                            aligned = xr.align(*non_extreme_members, join='outer')
-                            mmm_non_ext = xr.concat(aligned, dim='model').mean(dim='model', skipna=True)
-                            label = 'Decreasing Frequency Mean (5y-MA)'
-                            line, = ax.plot(mmm_non_ext.season_year, mmm_non_ext, color='#2166ac', alpha=0.9, linewidth=2.5, zorder=5)
-                            if label not in final_labels:
-                                final_handles.append(line)
-                                final_labels.append(label)
-                        except Exception as e:
-                            logging.warning(f"Could not compute mean for {key} non-extreme models: {e}")
+                    # Calculate Composite Jet Indices and Plot Horizontal Lines
+                    season_comp = summer_composite if 'Summer' in key else winter_composite
+                    if season_comp is not None:
+                        comp_fut_ext = season_comp.get('future_extreme_mean')
+                        comp_fut_non = season_comp.get('future_non_extreme_mean')
+                        comp_hist_mmm = season_comp.get('hist_climatology_mean')
+                        
+                        calc_func = JetStreamAnalyzer.calculate_jet_lat_index if 'JetLat' in key else JetStreamAnalyzer.calculate_jet_speed_index
+                        val_hist_mmm = calc_func(comp_hist_mmm) if comp_hist_mmm is not None else None
+                        
+                        # Extreme Models Composite Line
+                        if comp_fut_ext is not None and val_hist_mmm is not None:
+                            try:
+                                val_fut = calc_func(comp_fut_ext)
+                                if val_fut is not None:
+                                    ext_val = float(val_fut.values - val_hist_mmm.values)
+                                    label = 'Increasing Frequency Composite Mean' if 'low' in event_key else 'Decreasing Frequency Composite Mean'
+                                    
+                                    # Get crossing range
+                                    ext_crossing_years = [gwl_years[m][gwl] for m in extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
+                                    if ext_crossing_years:
+                                        t_min, t_max = min(ext_crossing_years), max(ext_crossing_years)
+                                        line = ax.hlines(y=ext_val, xmin=t_min, xmax=t_max, color='#b2182b', alpha=0.9, linewidth=4, zorder=6)
+                                        if label not in final_labels:
+                                            from matplotlib.lines import Line2D
+                                            proxy = Line2D([0], [0], color='#b2182b', linewidth=4, alpha=0.9)
+                                            final_handles.append(proxy)
+                                            final_labels.append(label)
+                            except Exception as e:
+                                logging.warning(f"Could not compute composite metric for {key} extreme models: {e}")
+                                
+                        # Non-Extreme Models Composite Line
+                        if comp_fut_non is not None and val_hist_mmm is not None:
+                            try:
+                                val_fut = calc_func(comp_fut_non)
+                                if val_fut is not None:
+                                    non_ext_val = float(val_fut.values - val_hist_mmm.values)
+                                    label = 'Decreasing Frequency Composite Mean' if 'low' in event_key else 'Increasing Frequency Composite Mean'
+                                    
+                                    # Get crossing range
+                                    non_ext_crossing_years = [gwl_years[m][gwl] for m in non_extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
+                                    if non_ext_crossing_years:
+                                        t_min, t_max = min(non_ext_crossing_years), max(non_ext_crossing_years)
+                                        line = ax.hlines(y=non_ext_val, xmin=t_min, xmax=t_max, color='#2166ac', alpha=0.9, linewidth=4, zorder=6)
+                                        if label not in final_labels:
+                                            from matplotlib.lines import Line2D
+                                            proxy = Line2D([0], [0], color='#2166ac', linewidth=4, alpha=0.9)
+                                            final_handles.append(proxy)
+                                            final_labels.append(label)
+                            except Exception as e:
+                                logging.warning(f"Could not compute composite metric for {key} non-extreme models: {e}")
                 
                 if cmip6_plot_data.get(key) and cmip6_plot_data[key].get('mmm') is not None:
                     line, = ax.plot(cmip6_plot_data[key]['mmm'].season_year, cmip6_plot_data[key]['mmm'], color='black', linewidth=2.5, label='Multi-Model Mean (5y-MA)')
@@ -6262,17 +6299,7 @@ class Visualizer:
                         # Add axvspan for the range
                         vspan = ax.axvspan(min_yr, max_yr, color='gold', alpha=0.2, zorder=0)
 
-                        # Add Median Crossing Year for Extreme and Non-Extreme Storylines
-                        ext_crossing_years = [gwl_years[m][gwl] for m in extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
-                        non_ext_crossing_years = [gwl_years[m][gwl] for m in non_extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
-                        
-                        if ext_crossing_years:
-                            median_ext = np.median(ext_crossing_years)
-                            ax.axvline(median_ext, color='#b2182b', linestyle='--', linewidth=1.5, zorder=3)
-                        
-                        if non_ext_crossing_years:
-                            median_non_ext = np.median(non_ext_crossing_years)
-                            ax.axvline(median_non_ext, color='#2166ac', linestyle='--', linewidth=1.5, zorder=3)
+
                         
                         # Since we do this for each of the 2 subplots, only add to legend once
                         if 'GWL Crossing Range' not in final_labels:

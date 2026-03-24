@@ -242,6 +242,43 @@ class DataProcessor:
             return None
 
     @staticmethod
+    def assign_hydrological_season_to_dataarray(da):
+        """
+        Assign 'season' and 'season_year' coordinates to a DataArray using 
+        hydrological half-years:
+        - Summer (May to October, months 5-10)
+        - Winter (November to April, months 11, 12, 1, 2, 3, 4)
+        """
+        if da is None: return None
+            
+        dt_index = da.time.to_index()
+        df_time = pd.DataFrame({'year': dt_index.year, 'month': dt_index.month})
+        
+        # Hydrological half-years mapping
+        # 11, 12, 1, 2, 3, 4 -> Winter
+        # 5, 6, 7, 8, 9, 10 -> Summer
+        def get_hydro_season(month):
+            if month in [11, 12, 1, 2, 3, 4]:
+                return 'Winter'
+            else:
+                return 'Summer'
+                
+        df_time['season'] = df_time['month'].apply(get_hydro_season)
+        
+        # season_year alignment: Winter starts in Nov of year N-1 and ends in Apr of year N
+        # We assign the year of the April (end of winter) as the season_year
+        df_time['season_year'] = df_time['year']
+        df_time.loc[df_time['month'].isin([11, 12]), 'season_year'] += 1
+        
+        da = da.assign_coords(
+            season=("time", df_time['season'].values),
+            season_year=("time", df_time['season_year'].values)
+        )
+        
+        season_key = [f"{sy}-{s}" for sy, s in zip(da['season_year'].values, da['season'].values)]
+        return da.assign_coords(season_key=("time", season_key))
+
+    @staticmethod
     def assign_season_to_dataarray(da):
         """Assign 'season' and 'season_year' coordinates to a DataArray."""
         if da is None: return None

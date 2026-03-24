@@ -433,6 +433,15 @@ class StorylineAnalyzer:
                 if discharge_seas is not None:
                     # This line is for the original seasonal discharge
                     metric_timeseries[key][f'{s_label}_discharge'] = DataProcessor.filter_by_season(discharge_seas, season)
+
+            # --- START: NEW Hydrological Half-Year Jet Indices (User Request) ---
+            ua_hydro_seas = DataProcessor.calculate_seasonal_means(DataProcessor.assign_hydrological_season_to_dataarray(data['ua']))
+            for season in ['Winter', 'Summer']:
+                ua_season_data_hydro = DataProcessor.filter_by_season(ua_hydro_seas, season)
+                if ua_season_data_hydro is not None:
+                    metric_timeseries[key][f'Hydro_{season}_JetSpeed'] = self.jet_analyzer.calculate_jet_speed_index(ua_season_data_hydro)
+                    metric_timeseries[key][f'Hydro_{season}_JetLat'] = self.jet_analyzer.calculate_jet_lat_index(ua_season_data_hydro)
+            # --- END ---
             
             # --- START: NEW Annual Metrics ---
             # Calculate Annual Means (using season_year to align with other metrics)
@@ -1537,13 +1546,20 @@ class StorylineAnalyzer:
         logging.info("Preparing data for climate projection timeseries plot (all four jet indices)...")
         
         # Initialisierung für alle vier Indizes
+        # Initialisierung für alle vier Indizes plus neue Halbjahres-Indizes
         cmip6_plot_data = {'Global_Tas': {'members': [], 'mmm': None},
                             'JJA_JetLat': {'members': [], 'mmm': None},
                             'DJF_JetSpeed': {'members': [], 'mmm': None},
                             'JJA_JetSpeed': {'members': [], 'mmm': None},
-                            'DJF_JetLat': {'members': [], 'mmm': None}}
-        reanalysis_plot_data = {'Global_Tas': {}, 'JJA_JetLat': {}, 'DJF_JetSpeed': {}, 
-                                'JJA_JetSpeed': {}, 'DJF_JetLat': {}}
+                            'DJF_JetLat': {'members': [], 'mmm': None},
+                            'Hydro_Summer_JetLat': {'members': [], 'mmm': None},
+                            'Hydro_Winter_JetSpeed': {'members': [], 'mmm': None},
+                            'Hydro_Summer_JetSpeed': {'members': [], 'mmm': None},
+                            'Hydro_Winter_JetLat': {'members': [], 'mmm': None}}
+        reanalysis_plot_data = {'Global_Tas': {}, 
+                                'JJA_JetLat': {}, 'DJF_JetSpeed': {}, 'JJA_JetSpeed': {}, 'DJF_JetLat': {},
+                                'Hydro_Summer_JetLat': {}, 'Hydro_Winter_JetSpeed': {}, 
+                                'Hydro_Summer_JetSpeed': {}, 'Hydro_Winter_JetLat': {}}
 
         rolling_window = 5
         pi_ref_start = 1960
@@ -1590,7 +1606,8 @@ class StorylineAnalyzer:
                     if processed_tas is not None:
                         cmip6_plot_data['Global_Tas']['members'].append(processed_tas)
             
-            for jet_key in ['JJA_JetLat', 'DJF_JetSpeed', 'JJA_JetSpeed', 'DJF_JetLat']:
+            for jet_key in ['JJA_JetLat', 'DJF_JetSpeed', 'JJA_JetSpeed', 'DJF_JetLat',
+                            'Hydro_Summer_JetLat', 'Hydro_Winter_JetSpeed', 'Hydro_Summer_JetSpeed', 'Hydro_Winter_JetLat']:
                 for model_key, metrics in cmip6_metrics.items():
                     jet_timeseries = metrics.get(jet_key)
                     if jet_timeseries is not None:
@@ -1672,20 +1689,39 @@ class StorylineAnalyzer:
 
         def get_abs_indices(dset_key):
             ua_seasonal = datasets_reanalysis.get(f'{dset_key}_ua850_seasonal')
-            if ua_seasonal is None: return {}
-            djf_ua = DataProcessor.filter_by_season(ua_seasonal, 'Winter')
-            jja_ua = DataProcessor.filter_by_season(ua_seasonal, 'Summer')
-            return {
-                'DJF_JetSpeed': JetStreamAnalyzer.calculate_jet_speed_index(djf_ua),
-                'DJF_JetLat': JetStreamAnalyzer.calculate_jet_lat_index(djf_ua),
-                'JJA_JetSpeed': JetStreamAnalyzer.calculate_jet_speed_index(jja_ua),
-                'JJA_JetLat': JetStreamAnalyzer.calculate_jet_lat_index(jja_ua)
-            }
+            ua_monthly = datasets_reanalysis.get(f'{dset_key}_ua850_monthly')
+            
+            res = {}
+            if ua_seasonal is not None:
+                djf_ua = DataProcessor.filter_by_season(ua_seasonal, 'Winter')
+                jja_ua = DataProcessor.filter_by_season(ua_seasonal, 'Summer')
+                res.update({
+                    'DJF_JetSpeed': JetStreamAnalyzer.calculate_jet_speed_index(djf_ua),
+                    'DJF_JetLat': JetStreamAnalyzer.calculate_jet_lat_index(djf_ua),
+                    'JJA_JetSpeed': JetStreamAnalyzer.calculate_jet_speed_index(jja_ua),
+                    'JJA_JetLat': JetStreamAnalyzer.calculate_jet_lat_index(jja_ua)
+                })
+            
+            if ua_monthly is not None:
+                ua_hydro_seas = DataProcessor.calculate_seasonal_means(
+                    DataProcessor.assign_hydrological_season_to_dataarray(ua_monthly)
+                )
+                if ua_hydro_seas is not None:
+                    win_ua = DataProcessor.filter_by_season(ua_hydro_seas, 'Winter')
+                    sum_ua = DataProcessor.filter_by_season(ua_hydro_seas, 'Summer')
+                    res.update({
+                        'Hydro_Winter_JetSpeed': JetStreamAnalyzer.calculate_jet_speed_index(win_ua),
+                        'Hydro_Winter_JetLat': JetStreamAnalyzer.calculate_jet_lat_index(win_ua),
+                        'Hydro_Summer_JetSpeed': JetStreamAnalyzer.calculate_jet_speed_index(sum_ua),
+                        'Hydro_Summer_JetLat': JetStreamAnalyzer.calculate_jet_lat_index(sum_ua)
+                    })
+            return res
 
         indices_20crv3 = get_abs_indices("20CRv3")
         indices_era5 = get_abs_indices("ERA5")
 
-        for jet_key in ['DJF_JetSpeed', 'JJA_JetLat', 'DJF_JetLat', 'JJA_JetSpeed']:
+        for jet_key in ['DJF_JetSpeed', 'JJA_JetLat', 'DJF_JetLat', 'JJA_JetSpeed',
+                        'Hydro_Summer_JetLat', 'Hydro_Winter_JetSpeed', 'Hydro_Summer_JetSpeed', 'Hydro_Winter_JetLat']:
             ts_20crv3 = indices_20crv3.get(jet_key)
             ts_era5 = indices_era5.get(jet_key)
             

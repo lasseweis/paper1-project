@@ -4035,10 +4035,14 @@ class Visualizer:
                 ax.text(0.5, 0.5, "No Data", ha='center', va='center', transform=ax.transAxes)
                 continue
 
-            sns.boxplot(data=df, y='GWL', x='Return Period', ax=ax,
-                        order=gwl_display_order, color='lightgray',
-                        showfliers=False, linewidth=1.0, width=0.4, orient='h',
-                        boxprops={'alpha': 0.7})
+            # --- MODIFICATION: Boxplot only based on models with actual 30Q10 event (RP <= 30) ---
+            df_boxplot = df[df['Return Period'] <= 30.0]
+            
+            if not df_boxplot.empty:
+                sns.boxplot(data=df_boxplot, y='GWL', x='Return Period', ax=ax,
+                            order=gwl_display_order, color='lightgray',
+                            showfliers=False, linewidth=1.0, width=0.4, orient='h',
+                            boxprops={'alpha': 0.7})
             
             other = df[df['Category'] == 'Other']
             if not other.empty:
@@ -4053,6 +4057,17 @@ class Visualizer:
                     y_pos = y_ticks_pos[idx_gwl] + np.random.uniform(-0.1, 0.1)
                     ax.plot(row['Return Period'], y_pos, marker='D', color=row['Color'], 
                             markersize=6, alpha=0.9, linestyle='None', zorder=3)
+                
+                # --- MODIFICATION: Median calculation based on ALL models (no RP filter) ---
+                y_pos_center = y_ticks_pos[idx_gwl]
+                for cat, cat_color in [('Extreme', '#b2182b'), ('Non-Extreme', '#2166ac')]:
+                    cat_rps = df[(df['GWL'] == gwl_label) & (df['Category'] == cat)]['Return Period'].values
+                    if len(cat_rps) > 0:
+                        median_rp = np.nanmedian(cat_rps)
+                        if np.isfinite(median_rp):
+                            # Draw a vertical line across the boxplot height
+                            ax.vlines(x=median_rp, ymin=y_pos_center - 0.2, ymax=y_pos_center + 0.2,
+                                     colors=cat_color, linestyles='-', linewidth=2.5, zorder=4)
             
             for idx_gwl, gwl_label in enumerate(gwl_display_order):
                 gwl_val = gwls_to_plot[idx_gwl]
@@ -4106,7 +4121,7 @@ class Visualizer:
                 if not clean: return np.nan
                 return np.median(clean)
 
-            scenario_labels = ['Historical'] + [f'GWL +{g}°C' for g in gwls]
+            scenario_labels = ['Historical (1960-2014)'] + [f'GWL +{g}°C' for g in gwls]
             lettering_start = 97 # ascii for 'a'
             
             # Subplots for bottom row
@@ -4198,7 +4213,7 @@ class Visualizer:
                                            
                     w_str = f"{w_med:.1f}" if np.isfinite(w_med) else "Inf"
                     s_str = f"{s_med:.1f}" if np.isfinite(s_med) else "Inf"
-                    ax.text(0, -1.3, f"Median Return Period\nWinter: {w_str} yrs | Summer: {s_str} yrs",
+                    ax.text(0, -1.3, f"Median Return Period\nSummer: {s_str} yrs | Winter: {w_str} yrs",
                             ha='center', va='center', fontsize=10, 
                             bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', boxstyle='round,pad=0.5'))
                 else:
@@ -6109,7 +6124,7 @@ class Visualizer:
                 if sig is not None:
                     sk = 2
                     lo, la = np.meshgrid(dm.lon, dm.lat)
-                    ax.scatter(lo[::sk, ::sk][sig[::sk, ::sk]], la[::sk, ::sk][sig[::sk, ::sk]], s=1, color='black', alpha=0.4, transform=ccrs.PlateCarree())
+                    ax.scatter(lo[::sk, ::sk][sig[::sk, ::sk]], la[::sk, ::sk][sig[::sk, ::sk]], s=4, color='black', alpha=0.8, transform=ccrs.PlateCarree())
                 hc = comp.get('hist_climatology_mean')
                 if hc is not None: ax.contour(hc.lon, hc.lat, hc, levels=10, colors='gray', linewidths=0.5, alpha=0.5, transform=ccrs.PlateCarree())
                 return cf

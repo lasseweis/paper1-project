@@ -6027,10 +6027,12 @@ class Visualizer:
                     stats['p10'] = stats['p10'].rolling(window=5, center=True).mean()
                     stats['p90'] = stats['p90'].rolling(window=5, center=True).mean()
                     
-                    # Calculate trend and p-value on non-NaN values
-                    valid = ~np.isnan(stats['mmm'])
+                    # Calculate trend and p-value on 2015-2100 values to match the subplot extent
+                    period_mask = (stats['year'] >= 2015) & (stats['year'] <= 2100)
+                    valid = (~np.isnan(stats['mmm'])) & period_mask
                     x_vals = stats['year'][valid]
                     y_vals = stats['mmm'][valid]
+
                     if len(x_vals) > 1:
                         slope, intercept, _, p_val, _ = linregress(x_vals, y_vals)
                         trend_line = slope * x_vals + intercept
@@ -6054,6 +6056,9 @@ class Visualizer:
             ax.grid(True, linestyle=':', alpha=0.7)
             ax.set_xlim(2015, 2100)
             ax.set_ylim(0, 1750)
+            
+            # Add subplot-specific legend
+            ax.legend(loc='lower left', fontsize=9, frameon=True, framealpha=0.8)
 
         ax_ds_s = fig.add_subplot(gs[0, 0])
         df_s = pd.concat(data_by_season['Summer'], ignore_index=True) if data_by_season['Summer'] else pd.DataFrame()
@@ -6065,8 +6070,6 @@ class Visualizer:
         _p_ds(ax_ds_w, df_w, extreme_models['Winter'], non_extreme_models['Winter'], f'b) Winter Half-Year Discharge')
         ax_ds_w.tick_params(labelleft=False)
 
-        h, l = ax_ds_s.get_legend_handles_labels()
-        if h: fig.legend(h, l, loc='upper center', ncol=2, bbox_to_anchor=(0.5, 0.94), frameon=False, fontsize=11)
 
         # --- 5. PLOT PR COMPOSITES (Bottom Row) ---
         buf = 5.0
@@ -6114,11 +6117,11 @@ class Visualizer:
 
         ax_pr_s = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
         cf_s = _p_map(ax_pr_s, s_data[0] if s_data else None, "")
-        ax_pr_s.set_title("c) Summer PR Composite Diff", fontsize=12, weight='bold', loc='left')
+        ax_pr_s.set_title("c) Summer Half-Year PR Composite Diff", fontsize=12, weight='bold', loc='left')
 
         ax_pr_w = fig.add_subplot(gs[1, 1], projection=ccrs.PlateCarree())
         cf_w = _p_map(ax_pr_w, w_data[0] if w_data else None, "")
-        ax_pr_w.set_title("d) Winter PR Composite Diff", fontsize=12, weight='bold', loc='left')
+        ax_pr_w.set_title("d) Winter Half-Year PR Composite Diff", fontsize=12, weight='bold', loc='left')
 
         if cf_s or cf_w:
             cb_ax = fig.add_axes([0.15, 0.06, 0.7, 0.015])
@@ -6335,13 +6338,12 @@ class Visualizer:
             {'key': 'Hydro_Winter_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 1]), 'title': 'f) Winter (Nov-Apr) Jet Speed',    'ylabel': 'Speed Anomaly (m/s)', 'ylim': speed_ylim},
         ]
 
-        final_handles = []
-        final_labels = []
-
-        if cmip6_plot_data and reanalysis_plot_data:
-            for p_config in plot_configs:
-                ax = p_config['ax']
-                key = p_config['key']
+        for p_config in plot_configs:
+            key = p_config['key']
+            ax = p_config['ax']
+            if cmip6_plot_data.get(key) and reanalysis_plot_data:
+                current_handles = []
+                current_labels = []
 
                 if cmip6_plot_data.get(key) and cmip6_plot_data[key]['members']:
                     # Determine extreme/non-extreme for the models
@@ -6387,10 +6389,9 @@ class Visualizer:
                             ax.fill_between(p10.season_year, p10, p90, color='grey', alpha=0.2, zorder=1)
                             
                             label = 'CMIP6 10-90% Range (5y-MA)'
-                            if label not in final_labels:
-                                patch = mpatches.Patch(color='grey', alpha=0.3)
-                                final_handles.append(patch)
-                                final_labels.append(label)
+                            patch = mpatches.Patch(color='grey', alpha=0.3)
+                            current_handles.append(patch)
+                            current_labels.append(label)
                         except Exception as e:
                             logging.warning(f"Could not compute 10-90% range for {key}: {e}")
 
@@ -6417,12 +6418,11 @@ class Visualizer:
                                     ext_crossing_years = [gwl_years[m][gwl] for m in extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
                                     if ext_crossing_years:
                                         t_min, t_max = min(ext_crossing_years), max(ext_crossing_years)
-                                        line = ax.hlines(y=ext_val, xmin=t_min, xmax=t_max, color='#b2182b', alpha=0.9, linewidth=4, zorder=6)
-                                        if label not in final_labels:
-                                            from matplotlib.lines import Line2D
-                                            proxy = Line2D([0], [0], color='#b2182b', linewidth=4, alpha=0.9)
-                                            final_handles.append(proxy)
-                                            final_labels.append(label)
+                                        ax.hlines(y=ext_val, xmin=t_min, xmax=t_max, color='#b2182b', alpha=0.9, linewidth=4, zorder=6)
+                                        from matplotlib.lines import Line2D
+                                        proxy = Line2D([0], [0], color='#b2182b', linewidth=4, alpha=0.9)
+                                        current_handles.append(proxy)
+                                        current_labels.append(label)
                             except Exception as e:
                                 logging.warning(f"Could not compute composite metric for {key} extreme models: {e}")
                                 
@@ -6438,23 +6438,23 @@ class Visualizer:
                                     non_ext_crossing_years = [gwl_years[m][gwl] for m in non_extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
                                     if non_ext_crossing_years:
                                         t_min, t_max = min(non_ext_crossing_years), max(non_ext_crossing_years)
-                                        line = ax.hlines(y=non_ext_val, xmin=t_min, xmax=t_max, color='#2166ac', alpha=0.9, linewidth=4, zorder=6)
-                                        if label not in final_labels:
-                                            from matplotlib.lines import Line2D
-                                            proxy = Line2D([0], [0], color='#2166ac', linewidth=4, alpha=0.9)
-                                            final_handles.append(proxy)
-                                            final_labels.append(label)
+                                        ax.hlines(y=non_ext_val, xmin=t_min, xmax=t_max, color='#2166ac', alpha=0.9, linewidth=4, zorder=6)
+                                        from matplotlib.lines import Line2D
+                                        proxy = Line2D([0], [0], color='#2166ac', linewidth=4, alpha=0.9)
+                                        current_handles.append(proxy)
+                                        current_labels.append(label)
                             except Exception as e:
                                 logging.warning(f"Could not compute composite metric for {key} non-extreme models: {e}")
                 
                 if cmip6_plot_data.get(key) and cmip6_plot_data[key].get('mmm') is not None:
                     mmm_ts = cmip6_plot_data[key]['mmm']
                     
-                    # Calculate trend and p-value on non-NaN values
-                    valid = ~np.isnan(mmm_ts.values)
+                    # Calculate trend and p-value on 2015-2100 values to match the subplot extent
+                    period_mask = (mmm_ts.season_year >= 2015) & (mmm_ts.season_year <= 2100)
+                    valid = (~np.isnan(mmm_ts.values)) & period_mask
                     x_vals = mmm_ts.season_year.values[valid]
                     y_vals = mmm_ts.values[valid]
-                    
+
                     if len(x_vals) > 1:
                         slope, intercept, _, p_val, _ = linregress(x_vals, y_vals)
                         trend_line = slope * x_vals + intercept
@@ -6470,10 +6470,8 @@ class Visualizer:
                         label_suffix = ""
 
                     line, = ax.plot(mmm_ts.season_year, mmm_ts, color='black', linewidth=2.5, label=f'Multi-Model Mean (5y-MA){label_suffix}', zorder=6)
-                    if f'Multi-Model Mean (5y-MA){label_suffix}' not in final_labels:
-                        final_handles.append(line)
-                        final_labels.append(f'Multi-Model Mean (5y-MA){label_suffix}')
-
+                    current_handles.append(line)
+                    current_labels.append(f'Multi-Model Mean (5y-MA){label_suffix}')
 
                 ax.set_title(p_config['title'], fontsize=10, weight='bold', loc='left')
                 ax.set_ylabel(p_config['ylabel'], fontsize=10)
@@ -6494,24 +6492,18 @@ class Visualizer:
                         max_yr = max(crossing_years)
                         
                         # Add axvspan for the range
-                        vspan = ax.axvspan(min_yr, max_yr, color='gold', alpha=0.2, zorder=0)
-
-
+                        ax.axvspan(min_yr, max_yr, color='gold', alpha=0.2, zorder=0)
                         
-                        # Since we do this for each of the 2 subplots, only add to legend once
-                        if 'GWL Crossing Range' not in final_labels:
-                            gwl_patch = mpatches.Patch(color='gold', alpha=0.3)
-                            final_handles.append(gwl_patch)
-                            final_labels.append('GWL Crossing Range')
+                        gwl_patch = mpatches.Patch(color='gold', alpha=0.3)
+                        current_handles.append(gwl_patch)
+                        current_labels.append('GWL Crossing Range')
 
                 if p_config.get('ylim'):
                     ax.set_ylim(p_config['ylim'])
-
-            if final_handles:
-                fig.legend(final_handles, final_labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.005), frameon=False, fontsize=10)
-        else:
-            for p_config in plot_configs:
-                ax = p_config['ax']
+                
+                # Add subplot-specific legend
+                ax.legend(current_handles, current_labels, loc='lower left', fontsize=8, frameon=True, framealpha=0.8)
+            else:
                 ax.text(0.5, 0.5, "No Timeseries Data", ha='center', va='center')
                 ax.set_title(p_config['title'], fontsize=10, weight='bold', loc='left')
 

@@ -871,12 +871,26 @@ class ClimateAnalysis:
                 # Added Feb 2026 - Mirrors Z500 composite but for precipitation
                 pr_stored_composites = {}  # Store results for combined plot
                 for gwl in Config.GLOBAL_WARMING_LEVELS:
+                    # Check if Final Figure 4 is missing for this GWL
+                    is_final_fig4_gwl = gwl in [2.0, 3.0]
+                    final_fig4_fn_check = os.path.join(Config.PLOT_DIR, f"final_figure_4_combined_{scenario}_gwl{gwl}.png")
+                    fig4_missing = is_final_fig4_gwl and not os.path.exists(final_fig4_fn_check)
+
                     for composite_season in ['Winter', 'Summer']:
                         pr_composite_plot_filename = os.path.join(Config.PLOT_DIR, f"composite_analysis_pr_{composite_season.lower()}_{composite_event_key}_{scenario}_gwl{gwl}.png")
                         pr_combined_plot_filename = os.path.join(Config.PLOT_DIR, f"combined_diff_pr_{composite_event_key}_{scenario}_gwl{gwl}.png")
-                        need_compute = not os.path.exists(pr_composite_plot_filename) or not os.path.exists(pr_combined_plot_filename)
+                        
+                        # Data is needed if any individual plot is missing OR if the combined Fig 4 is missing
+                        need_compute = (not os.path.exists(pr_composite_plot_filename) or 
+                                        not os.path.exists(pr_combined_plot_filename) or
+                                        fig4_missing)
+                        
                         if need_compute:
-                            logging.info(f"Running PR composite analysis for GWL +{gwl}°C, Season {composite_season}, Event {composite_event_key}...")
+                            if not os.path.exists(pr_composite_plot_filename) or not os.path.exists(pr_combined_plot_filename):
+                                logging.info(f"Running PR composite analysis for GWL +{gwl}°C, Season {composite_season}, Event {composite_event_key}...")
+                            else:
+                                logging.info(f"PR composite plots already exist, but calculating data for missing Final Figure 4...")
+                                
                             pr_result_tuple = storyline_analyzer.calculate_pr_composites_for_extremes(
                                 cmip6_results, gwl=gwl, event_key=composite_event_key, season=composite_season
                             )
@@ -884,6 +898,8 @@ class ClimateAnalysis:
                                 pr_composite_results, pr_model_lists, pr_model_rps, pr_n_total_models = pr_result_tuple
                                 if pr_composite_results:
                                     pr_stored_composites[(gwl, composite_season)] = (pr_composite_results, pr_model_rps, pr_n_total_models)
+                                    
+                                    # ONLY plot if individual plot is missing
                                     if not os.path.exists(pr_composite_plot_filename):
                                         Visualizer.plot_pr_composite_analysis_panel(
                                             pr_composite_results, gwl, composite_event_key, scenario, composite_season,
@@ -894,7 +910,7 @@ class ClimateAnalysis:
                             else:
                                 logging.warning(f"PR composite analysis returned no results for GWL {gwl}, {composite_season}.")
                         else:
-                            logging.info(f"PR composite plot for GWL {gwl}, {composite_season} already exists.")
+                            logging.info(f"PR composite plot for GWL {gwl}, {composite_season} already exists and data not needed for Final Figure 4.")
 
                 # --- Combined PR Difference Plots (Winter + Summer) ---
                 pr_shared_diff_limit = None
@@ -935,7 +951,9 @@ class ClimateAnalysis:
                         logging.info(f"Combined PR diff plot for GWL {gwl} already exists.")
 
                     # --- NEW: Final Figure 4 Combined Plot (Discharge + PR Diff) ---
-                    if gwl in [2.0, 3.0]:
+                    is_final_fig4_gwl = gwl in [2.0, 3.0]
+                    final_fig4_fn_check = os.path.join(Config.PLOT_DIR, f"final_figure_4_combined_{scenario}_gwl{gwl}.png")
+                    if is_final_fig4_gwl and not os.path.exists(final_fig4_fn_check):
                         Visualizer.plot_final_figure_4_combined(
                             cmip6_results, discharge_data_loaded, pr_stored_composites, 
                             Config(), scenario, gwl

@@ -1240,7 +1240,7 @@ class Visualizer:
         logging.info(f"Saved AMO vs Jet correlation comparison plot to {filename}")
 
     @staticmethod
-    def plot_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, config, filename="climate_indices_evolution.png"):
+    def plot_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, config, filename="climate_indices_evolution.png", window_size=20):
         """
         Plots CMIP6 and Reanalysis changes over time, showing the evolution of key climate indices.
         Original 2x2 layout for backward compatibility.
@@ -1289,7 +1289,7 @@ class Visualizer:
             if p_config['ax'] in [axs[2], axs[3]]: # Bottom row
                 ax.set_xlabel('Year', fontsize=10)
 
-        fig.suptitle('Evolution of Key Climate Indices (20-Year Rolling Mean)', fontsize=16, weight='bold')
+        fig.suptitle(f'Evolution of Key Climate Indices ({window_size}-Year Rolling Mean)', fontsize=16, weight='bold')
         fig.tight_layout(rect=[0, 0, 1, 0.96])
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
@@ -1297,7 +1297,7 @@ class Visualizer:
         logging.info(f"Saved climate projection timeseries plot to {filepath}")
 
     @staticmethod
-    def plot_erl_figure2_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, config, scenario='ssp585'):
+    def plot_erl_figure2_climate_projection_timeseries(cmip6_plot_data, reanalysis_plot_data, config, scenario='ssp585', window_size=20):
         """
         Creates ERL Figure 2: Future Dynamical Uncertainty (Climate Indices Evolution).
         Layout: 3 Rows (Global Temp, Summer Jet, Winter Jet).
@@ -1451,7 +1451,7 @@ class Visualizer:
         # KORREKTUR: Legende näher an die Plots und ohne Rahmen
         fig.legend(final_handles, final_labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.04), frameon=False)
 
-        fig.suptitle(f'Evolution of Key Climate Indices (20-Year Rolling Mean) - {scenario_title}', fontsize=16, weight='bold')
+        fig.suptitle(f'Evolution of Key Climate Indices ({window_size}-Year Rolling Mean) - {scenario_title}', fontsize=16, weight='bold')
         
         # Layout angepasst für engere Legende
         fig.tight_layout(rect=[0, 0.07, 1, 0.96])
@@ -3908,15 +3908,19 @@ class Visualizer:
         # --- PREPARE DATA FOR VERIFICATION ---
         hist_data = return_period_results.get('historical_verification', {})
         future_data = return_period_results.get('data', {})
-        gwls = sorted([g for g in future_data.keys() if g in config.GLOBAL_WARMING_LEVELS])
         
+        # GWL selection based on scenario
+        gwls_to_plot = sorted([g for g in future_data.keys() if g in config.GLOBAL_WARMING_LEVELS])
+        if scenario.lower() == 'ssp245':
+            gwls_to_plot = [g for g in gwls_to_plot if g == 2.0]
+            
         low_keys = sorted([k for k in hist_data.keys() 
                     if hist_data[k]['type'] == 'low' 
                     and '30Q10' in k])
-        n_verif_rows = 1 + len(gwls) if low_keys else 0
+        n_verif_rows = 1 + len(gwls_to_plot) if low_keys else 0
 
         # --- SETUP FIGURE ---
-        n_verif_cols = 1 + len(gwls) if low_keys else 0
+        n_verif_cols = 1 + len(gwls_to_plot) if low_keys else 0
         
         # We need a gridspec that can handle 2 columns in top row, and n_verif_cols in bottom row.
         # A common multiple of 2 and n_verif_cols works well. Let's use 2 * n_verif_cols columns.
@@ -3947,7 +3951,6 @@ class Visualizer:
         scenario_title = Visualizer._format_scenario_title(scenario)
         fig.suptitle(f"Change in Occurrence and Return Periods of 30Q10 Events - {scenario_title}", fontsize=16, weight='bold', y=0.98)
         
-        gwls_to_plot = config.GLOBAL_WARMING_LEVELS
         gwl_colors = {f'+{gwl}°C GWL': Visualizer.GWL_COLORS[gwl] for gwl in gwls_to_plot}
         
         for i, cfg in enumerate(plot_configs_fig3):
@@ -4075,7 +4078,7 @@ class Visualizer:
                 try:
                     event_data_gwl = return_period_results['data'][gwl_val][half_year]['MMM'][event_key]
                     if event_data_gwl and 'model_count_X' in event_data_gwl and 'model_count_Y' in event_data_gwl:
-                        X = event_data_gwl['model_count_X']
+                        X = event_data_gwl['model_count_Y']
                         Y = event_data_gwl['model_count_Y']
                         ax.text(0.98, y_base - 0.35, f"n={X}/{Y}", 
                                 transform=ax.get_yaxis_transform(), 
@@ -4103,13 +4106,39 @@ class Visualizer:
             ax.set_yticks(range(len(gwl_display_order)))
             ax.set_yticklabels(gwl_display_order, fontsize=10, rotation='vertical', va='center')
 
-        from matplotlib.lines import Line2D
-        handles_fig3 = [
-            Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b', label='Increasing Frequency', markersize=7),
-            Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac', label='Decreasing Frequency', markersize=7),
-            Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', label='Other Models', markersize=6, alpha=0.5)
-        ]
-        fig.legend(handles=handles_fig3, loc='lower center', ncol=3, bbox_to_anchor=(0.5, 0.02), frameon=False, fontsize=9)
+            # --- MODIFICATION: Subplot-specific Legend with Model Counts ---
+            legend_labels_local = {
+                'Extreme': 'Increasing Frequency',
+                'Non-Extreme': 'Decreasing Frequency',
+                'Other': 'Other Models'
+            }
+            
+            for cat in ['Extreme', 'Non-Extreme']:
+                count_strings = []
+                for gwl_label in gwl_display_order:
+                    sub_df = df[(df['GWL'] == gwl_label) & (df['Category'] == cat)]
+                    Y_cat = len(sub_df)
+                    if cat == 'Non-Extreme':
+                        # For "Decreasing Frequency", include all models including those with RP > 30
+                        X_cat = len(sub_df)
+                    else:
+                        X_cat = len(sub_df[sub_df['Return Period'] <= 30.0])
+                    gwl_short = gwl_label.replace(' GWL', '')
+                    if Y_cat > 0:
+                        count_strings.append(f"{gwl_short}: n={X_cat}/{Y_cat}")
+                
+                if count_strings:
+                    legend_labels_local[cat] += f" ({', '.join(count_strings)})"
+
+            from matplotlib.lines import Line2D
+            handles_local = [
+                Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b', label=legend_labels_local['Extreme'], markersize=7),
+                Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac', label=legend_labels_local['Non-Extreme'], markersize=7),
+                Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', label=legend_labels_local['Other'], markersize=6, alpha=0.5)
+            ]
+            ax.legend(handles=handles_local, loc='upper right', fontsize=8, frameon=True, facecolor='white', framealpha=0.8)
+
+        # Global legend removed as model counts are now in subplot legends.
 
 
         # ==========================================
@@ -4121,7 +4150,7 @@ class Visualizer:
                 if not clean: return np.nan
                 return np.median(clean)
 
-            scenario_labels = ['Historical (1960-2014)'] + [f'GWL +{g}°C' for g in gwls]
+            scenario_labels = ['Historical (1960-2014)'] + [f'GWL +{g}°C' for g in gwls_to_plot]
             lettering_start = 97 # ascii for 'a'
             
             # Subplots for bottom row
@@ -4131,7 +4160,7 @@ class Visualizer:
                 start_col = c * col_span_bot
                 ax = fig.add_subplot(gs[0, start_col:start_col+col_span_bot]) 
                 is_hist = (c == 0)
-                current_gwl = gwls[c-1] if not is_hist else None
+                current_gwl = gwls_to_plot[c-1] if not is_hist else None
                 col_label = scenario_labels[c]
                 
                 type_title = 'Seasonal Verification'
@@ -4780,8 +4809,11 @@ class Visualizer:
             future_data = results.get('data', {})
             
             # 1. Determine Structure (Rows = Hist + GWLs)
-            gwls = sorted([g for g in future_data.keys() if g in config.GLOBAL_WARMING_LEVELS])
-            n_rows = 1 + len(gwls) # Historical + each GWL
+            gwls_to_plot = sorted([g for g in future_data.keys() if g in config.GLOBAL_WARMING_LEVELS])
+            if scenario.lower() == 'ssp245':
+                gwls_to_plot = [g for g in gwls_to_plot if g == 2.0]
+                
+            n_rows = 1 + len(gwls_to_plot) # Historical + each GWL
             
             # 2. Filter Keys (Exclude Q30 as per previous request)
             low_keys = [k for k in sorted(hist_data.keys()) 
@@ -4803,11 +4835,11 @@ class Visualizer:
                 return np.median(clean)
             
             # --- LOOP THROUGH ROWS (Scenarios) ---
-            scenario_labels = ['Historical (1960-2014)'] + [f'Future GWL +{g}°C' for g in gwls]
+            scenario_labels = ['Historical (1960-2014)'] + [f'Future GWL +{g}°C' for g in gwls_to_plot]
             
             for r in range(n_rows):
                 is_hist = (r == 0)
-                current_gwl = gwls[r-1] if not is_hist else None
+                current_gwl = gwls_to_plot[r-1] if not is_hist else None
                 row_label = scenario_labels[r]
                 
                 # --- LOOP THROUGH COLS (Low/High) ---

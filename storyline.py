@@ -1560,8 +1560,7 @@ class StorylineAnalyzer:
                                 'JJA_JetLat': {}, 'DJF_JetSpeed': {}, 'JJA_JetSpeed': {}, 'DJF_JetLat': {},
                                 'Hydro_Summer_JetLat': {}, 'Hydro_Winter_JetSpeed': {}, 
                                 'Hydro_Summer_JetSpeed': {}, 'Hydro_Winter_JetLat': {}}
-
-        rolling_window = 5
+        rolling_window = config.ROLLING_WINDOW_JET
         pi_ref_start = 1960
         pi_ref_end = 2015
 
@@ -1742,7 +1741,7 @@ class StorylineAnalyzer:
                 anomaly_era5 = adjusted_era5 - pi_mean_20crv3
                 reanalysis_plot_data[jet_key]['ERA5'] = anomaly_era5.rolling({'season_year': rolling_window}, center=True).mean().dropna(dim='season_year')
 
-        return cmip6_plot_data, reanalysis_plot_data
+        return cmip6_plot_data, reanalysis_plot_data, rolling_window
 
     @staticmethod
     def calculate_reanalysis_betas(datasets_reanalysis, jet_data_reanalysis, dataset_key='ERA5'):

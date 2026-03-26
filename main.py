@@ -681,16 +681,16 @@ class ClimateAnalysis:
                 
                 if need_calc_final_fig3 or need_calc_evo:
                     logging.info(f"Calculating data for climate evolution and final fig 3 ({scenario})...")
-                    cmip6_plot_data_stored, reanalysis_plot_data_stored = StorylineAnalyzer.analyze_timeseries_for_projection_plot(cmip6_results, datasets_reanalysis, Config())
+                    cmip6_plot_data_stored, reanalysis_plot_data_stored, window_size_used = StorylineAnalyzer.analyze_timeseries_for_projection_plot(cmip6_results, datasets_reanalysis, Config())
                     
                     if cmip6_plot_data_stored and reanalysis_plot_data_stored:
                         # Plot standard version if missing
                         if not os.path.exists(evolution_plot_filename):
-                            Visualizer.plot_climate_projection_timeseries(cmip6_plot_data_stored, reanalysis_plot_data_stored, Config(), filename=os.path.basename(evolution_plot_filename))
+                            Visualizer.plot_climate_projection_timeseries(cmip6_plot_data_stored, reanalysis_plot_data_stored, Config(), filename=os.path.basename(evolution_plot_filename), window_size=window_size_used)
                         
                         # Plot ERL Figure 2 if missing
                         if not os.path.exists(erl_fig2_filename):
-                            Visualizer.plot_erl_figure2_climate_projection_timeseries(cmip6_plot_data_stored, reanalysis_plot_data_stored, Config(), scenario=scenario)
+                            Visualizer.plot_erl_figure2_climate_projection_timeseries(cmip6_plot_data_stored, reanalysis_plot_data_stored, Config(), scenario=scenario, window_size=window_size_used)
                     else:
                          logging.warning(f"Skipping climate evolution plot for {scenario}, data preparation failed.")
                 else:

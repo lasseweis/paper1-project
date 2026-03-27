@@ -680,19 +680,33 @@ class ClimateAnalysis:
                         break
                 
                 if need_calc_final_fig3 or need_calc_evo:
-                    logging.info(f"Calculating data for climate evolution and final fig 3 ({scenario})...")
-                    cmip6_plot_data_stored, reanalysis_plot_data_stored, window_size_used = StorylineAnalyzer.analyze_timeseries_for_projection_plot(cmip6_results, datasets_reanalysis, Config())
+                    logging.info(f"Calculating timeseries data for {scenario}...")
                     
-                    if cmip6_plot_data_stored and reanalysis_plot_data_stored:
+                    # 1. SPECIAL CASE: Figure 2 (1850-1900 baseline)
+                    cmip6_plot_data_fig2, reanalysis_plot_data_fig2, window_size_used = StorylineAnalyzer.analyze_timeseries_for_projection_plot(
+                        cmip6_results, datasets_reanalysis, Config(), 
+                        ref_start=Config.CMIP6_PRE_INDUSTRIAL_REF_START, 
+                        ref_end=Config.CMIP6_PRE_INDUSTRIAL_REF_END
+                    )
+                    
+                    # 2. STANDARD CASE: Figures 3 & 4 (1960-2014 baseline)
+                    cmip6_plot_data_stored, reanalysis_plot_data_stored, _ = StorylineAnalyzer.analyze_timeseries_for_projection_plot(
+                        cmip6_results, datasets_reanalysis, Config(), 
+                        ref_start=Config.COMPOSITE_HIST_PERIOD_START, 
+                        ref_end=Config.COMPOSITE_HIST_PERIOD_END
+                    )
+                    
+                    if cmip6_plot_data_fig2 and reanalysis_plot_data_fig2:
                         # Plot standard version if missing
                         if not os.path.exists(evolution_plot_filename):
-                            Visualizer.plot_climate_projection_timeseries(cmip6_plot_data_stored, reanalysis_plot_data_stored, Config(), filename=os.path.basename(evolution_plot_filename), window_size=window_size_used)
+                            Visualizer.plot_climate_projection_timeseries(cmip6_plot_data_fig2, reanalysis_plot_data_fig2, Config(), filename=os.path.basename(evolution_plot_filename), window_size=window_size_used)
                         
-                        # Plot ERL Figure 2 if missing
+                        # Plot ERL Figure 2 if missing (uses 1850-1900)
                         if not os.path.exists(erl_fig2_filename):
-                            Visualizer.plot_erl_figure2_climate_projection_timeseries(cmip6_plot_data_stored, reanalysis_plot_data_stored, Config(), scenario=scenario, window_size=window_size_used)
-                    else:
-                         logging.warning(f"Skipping climate evolution plot for {scenario}, data preparation failed.")
+                            Visualizer.plot_erl_figure2_climate_projection_timeseries(cmip6_plot_data_fig2, reanalysis_plot_data_fig2, Config(), scenario=scenario, window_size=window_size_used)
+                    
+                    if not cmip6_plot_data_stored or not reanalysis_plot_data_stored:
+                         logging.warning(f"Skipping standard climate evolution data for {scenario}, data preparation failed.")
                 else:
                     logging.info(f"Climate evolution plots and final fig 3 base for {scenario} already exist. Skipping.")
 

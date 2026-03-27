@@ -1451,7 +1451,9 @@ class Visualizer:
         # KORREKTUR: Legende näher an die Plots und ohne Rahmen
         fig.legend(final_handles, final_labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.04), frameon=False)
 
-        fig.suptitle(f'Evolution of Key Climate Indices ({window_size}-Year Rolling Mean) - {scenario_title}', fontsize=16, weight='bold')
+        main_title = f'Evolution of Key Climate Indices ({window_size}-Year Rolling Mean) - {scenario_title}'
+        ref_text = "All changes relative to 1850-1900 mean"
+        fig.suptitle(f'{main_title}\n{ref_text}', fontsize=16, weight='bold')
         
         # Layout angepasst für engere Legende
         fig.tight_layout(rect=[0, 0.07, 1, 0.96])

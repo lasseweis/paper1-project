@@ -1538,14 +1538,13 @@ class StorylineAnalyzer:
         }
 
     @staticmethod
-    def analyze_timeseries_for_projection_plot(cmip6_results, datasets_reanalysis, config):
+    def analyze_timeseries_for_projection_plot(cmip6_results, datasets_reanalysis, config, ref_start=None, ref_end=None):
         """
         Prepares CMIP6 and reanalysis data for the climate projection timeseries plot.
         This version includes more robust data cleaning to prevent warnings from invalid model values.
         """
-        logging.info("Preparing data for climate projection timeseries plot (all four jet indices)...")
+        logging.info(f"Preparing data for climate projection timeseries plot (Ref: {ref_start}-{ref_end})...")
         
-        # Initialisierung für alle vier Indizes
         # Initialisierung für alle vier Indizes plus neue Halbjahres-Indizes
         cmip6_plot_data = {'Global_Tas': {'members': [], 'mmm': None},
                             'JJA_JetLat': {'members': [], 'mmm': None},
@@ -1561,8 +1560,10 @@ class StorylineAnalyzer:
                                 'Hydro_Summer_JetLat': {}, 'Hydro_Winter_JetSpeed': {}, 
                                 'Hydro_Summer_JetSpeed': {}, 'Hydro_Winter_JetLat': {}}
         rolling_window = config.ROLLING_WINDOW_JET
-        pi_ref_start = 1960
-        pi_ref_end = 2015
+        
+        # Use provided reference period or fallback to original defaults
+        pi_ref_start = ref_start if ref_start is not None else 1960
+        pi_ref_end = ref_end if ref_end is not None else 2015
 
         def _get_anomaly_and_smooth(data_array, year_coord, ref_start, ref_end, window):
             """Interne Hilfsfunktion zur Berechnung von Anomalien und gleitenden Mitteln."""

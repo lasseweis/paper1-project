@@ -80,7 +80,7 @@ class Config:
     CMIP6_RAW_ZG_PATH_PATTERN = '/data/reloclim/normal/CMIP6/ScenarioMIP/*/{model}/{scenario}/*/Amon/zg/*/*/zg_*.nc'
     COMPOSITE_EVENT_KEY = '30Q10_low'
     # COMPOSITE_QUANTILE = 0.25 # Deprecated in favor of fixed N
-    COMPOSITE_N_MODELS = 10
+    COMPOSITE_N_MODELS = 12
 
     # Raw Data Path for Composite Analysis (PSL - Sea Level Pressure)
     CMIP6_RAW_PSL_PATH_PATTERN = '/data/reloclim/normal/CMIP6/ScenarioMIP/*/{model}/{scenario}/*/Amon/psl/*/*/psl_*.nc'

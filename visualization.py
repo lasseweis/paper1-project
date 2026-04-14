@@ -6348,11 +6348,12 @@ class Visualizer:
 
         fig = plt.figure(figsize=(5.9, 10.0))
         # Split layout for better control of spaces and subtitles
-        gs_top = gridspec.GridSpec(1, 2, top=0.90, bottom=0.74, wspace=0.40, left=0.12, right=0.95)
-        gs_cbar = gridspec.GridSpec(1, 1, top=0.72, bottom=0.70, left=0.15, right=0.85)
-        gs_bottom = gridspec.GridSpec(2, 2, top=0.60, bottom=0.16, wspace=0.35, hspace=0.40, left=0.12, right=0.95)
+        gs_top = gridspec.GridSpec(1, 2, top=0.91, bottom=0.73, wspace=0.10, left=0.12, right=0.95)
+        gs_cbar = gridspec.GridSpec(1, 1, top=0.725, bottom=0.705, left=0.20, right=0.80)
+        gs_bottom = gridspec.GridSpec(2, 2, top=0.59, bottom=0.11, wspace=0.35, hspace=0.40, left=0.12, right=0.95)
 
         import matplotlib.colors as mcolors
+        import matplotlib.patheffects as pe
         try:
             custom_cmap = matplotlib.pyplot.get_cmap('RdBu_r')
         except:
@@ -6369,17 +6370,20 @@ class Visualizer:
             ax.add_patch(mpatches.Rectangle((Config.BOX_LON_MIN, Config.BOX_LAT_MIN), 
                                               Config.BOX_LON_MAX - Config.BOX_LON_MIN, 
                                               Config.BOX_LAT_MAX - Config.BOX_LAT_MIN,
-                                              fill=False, edgecolor='magenta', linewidth=1.5, linestyle='--', transform=ccrs.PlateCarree(), zorder=10))
+                                              fill=False, edgecolor='magenta', linewidth=1.5, linestyle='--', transform=ccrs.PlateCarree(), zorder=10,
+                                              path_effects=[pe.withStroke(linewidth=3, foreground="white")]))
             # Jet Speed Box (Red)
             ax.add_patch(mpatches.Rectangle((Config.JET_SPEED_BOX_LON_MIN, Config.JET_SPEED_BOX_LAT_MIN), 
                                               Config.JET_SPEED_BOX_LON_MAX - Config.JET_SPEED_BOX_LON_MIN, 
                                               Config.JET_SPEED_BOX_LAT_MAX - Config.JET_SPEED_BOX_LAT_MIN,
-                                              fill=False, edgecolor='red', linewidth=2.0, transform=ccrs.PlateCarree(), zorder=11))
+                                              fill=False, edgecolor='red', linewidth=1.2, transform=ccrs.PlateCarree(), zorder=11,
+                                              path_effects=[pe.withStroke(linewidth=2.5, foreground="white")]))
             # Jet Lat Box (Blue)
             ax.add_patch(mpatches.Rectangle((Config.JET_LAT_BOX_LON_MIN, Config.JET_LAT_BOX_LAT_MIN), 
                                               Config.JET_LAT_BOX_LON_MAX - Config.JET_LAT_BOX_LON_MIN, 
                                               Config.JET_LAT_BOX_LAT_MAX - Config.JET_LAT_BOX_LAT_MIN,
-                                              fill=False, edgecolor='blue', linewidth=2.0, transform=ccrs.PlateCarree(), zorder=11))
+                                              fill=False, edgecolor='blue', linewidth=1.2, transform=ccrs.PlateCarree(), zorder=11,
+                                              path_effects=[pe.withStroke(linewidth=2.5, foreground="white")]))
 
         def _plot_diff(ax, diff_map, sig_mask, title, contour_map=None):
             _add_map_features(ax)
@@ -6399,7 +6403,7 @@ class Visualizer:
                     mask_sub = sig_mask[::skip, ::skip]
                     lons_sub = lons_mesh[::skip, ::skip]
                     lats_sub = lats_mesh[::skip, ::skip]
-                    ax.scatter(lons_sub[mask_sub], lats_sub[mask_sub], s=1, color='black', alpha=0.5, transform=ccrs.PlateCarree())
+                    ax.scatter(lons_sub[mask_sub], lats_sub[mask_sub], s=1, color='black', alpha=0.5, transform=ccrs.PlateCarree(), zorder=20)
             ax.set_title(title, weight='bold', loc='left')
             return cf
 
@@ -6421,7 +6425,7 @@ class Visualizer:
             ax = fig.add_subplot(gs_top[0, col_idx], projection=ccrs.PlateCarree())
             diff_map = comp.get('diff_ext_non_future')
             sig_mask = comp.get('sig_mask_ext_non_future')
-            title = f"{'(a)' if col_idx==0 else '(b)'} {season_label}: Inc \u2212 Dec"
+            title = f"{'(a)' if col_idx==0 else '(b)'} {season_label}"
             cf = _plot_diff(ax, diff_map, sig_mask, title, contour_map=hist_clim)
             if cf: ref_cf = cf
 
@@ -6462,13 +6466,13 @@ class Visualizer:
             return (min_val - 0.05 * range_val, max_val + 0.05 * range_val)
 
         lat_ylim = (-2.5, 3.5)
-        speed_ylim = (-2, 2.5)
+        speed_ylim = (-1.5, 2)
         
         plot_configs = [
-            {'key': 'Hydro_Summer_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 0]), 'title': '(c) Summer Jet Latitude', 'ylabel': '', 'ylim': lat_ylim},
-            {'key': 'Hydro_Winter_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 1]), 'title': '(d) Winter Jet Latitude', 'ylabel': '', 'ylim': lat_ylim},
-            {'key': 'Hydro_Summer_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 0]), 'title': '(e) Summer Jet Speed',    'ylabel': '', 'ylim': speed_ylim},
-            {'key': 'Hydro_Winter_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 1]), 'title': '(f) Winter Jet Speed',    'ylabel': '', 'ylim': speed_ylim},
+            {'key': 'Hydro_Summer_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 0]), 'title': '(c) Summer Jet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim},
+            {'key': 'Hydro_Winter_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 1]), 'title': '(d) Winter Jet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim},
+            {'key': 'Hydro_Summer_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 0]), 'title': '(e) Summer Jet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim},
+            {'key': 'Hydro_Winter_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 1]), 'title': '(f) Winter Jet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim},
         ]
 
         for p_config in plot_configs:
@@ -6593,12 +6597,8 @@ class Visualizer:
                         trend_line = slope * x_vals + intercept
                         ax.plot(x_vals, trend_line, color='black', linestyle=':', alpha=0.8, linewidth=1.5, zorder=5)
                         
-                        trend_per_decade = slope * 10
-                        if p_val < 0.01:
-                            p_str = "p<0.01"
-                        else:
-                            p_str = f"p={p_val:.2f}"
-                        label_suffix = f" (trend: {trend_per_decade:+.2f}/dec, {p_str})"
+                        unit = "\u00b0N" if 'JetLat' in key else "m/s"
+                        label_suffix = f" (trend: {trend_per_decade:+.2f}{unit}/dec, {p_str})"
                     else:
                         label_suffix = ""
 
@@ -6647,12 +6647,12 @@ class Visualizer:
 
         plt.suptitle(f'Storyline Impacts on Zonal Wind & Jet Stream\nGWL {gwl}°C, {scenario.upper()}', fontsize=12, weight='bold', y=0.99)
         # Add subtitles for the row sections
-        fig.text(0.12, 0.92, 'Zonal Wind (UA850) Differences', ha='left', va='center', fontsize=12, weight='bold')
+        fig.text(0.12, 0.93, 'Zonal Wind Differences (Inc. Freq. \u2212 Dec. Freq.)', ha='left', va='center', fontsize=12, weight='bold')
         fig.text(0.12, 0.64, 'Jet Stream Evolution', ha='left', va='center', fontsize=12, weight='bold')
 
         if 'global_legend_handles' in locals():
             clean_labels = [l.split(' (trend:')[0] if 'MMM' in l else l for l in global_legend_labels]
-            fig.legend(global_legend_handles, clean_labels, loc='lower center', bbox_to_anchor=(0.5, -0.01), ncol=2, frameon=False)
+            fig.legend(global_legend_handles, clean_labels, loc='lower center', bbox_to_anchor=(0.5, -0.04), ncol=2, frameon=False)
 
         filename_out = f"final_figure_3_{event_key}_{scenario}_gwl{gwl}.png"
         filepath = os.path.join(Config.PLOT_DIR, filename_out)

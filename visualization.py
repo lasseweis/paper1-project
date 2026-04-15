@@ -1332,13 +1332,13 @@ class Visualizer:
         if reanalysis_plot_data.get('Global_Tas'):
             if reanalysis_plot_data['Global_Tas'].get('20CRv3') is not None:
                 reanalysis_20crv3_tas = reanalysis_plot_data['Global_Tas']['20CRv3']
-                ax_a.plot(reanalysis_20crv3_tas.year, reanalysis_20crv3_tas, color='darkorange', linewidth=1.5, linestyle='--', marker='o', markersize=3, label='20CRv3')
+                ax_a.plot(reanalysis_20crv3_tas.year, reanalysis_20crv3_tas, color='darkorange', linewidth=1.5, linestyle='-', label='20CRv3')
             if reanalysis_plot_data['Global_Tas'].get('ERA5') is not None:
                 reanalysis_era5_tas = reanalysis_plot_data['Global_Tas']['ERA5']
-                ax_a.plot(reanalysis_era5_tas.year, reanalysis_era5_tas, color='purple', linewidth=1.5, linestyle='-.', marker='x', markersize=4, label='ERA5')
+                ax_a.plot(reanalysis_era5_tas.year, reanalysis_era5_tas, color='purple', linewidth=1.5, linestyle='-', label='ERA5')
         
-        ax_a.set_title('(a) Global Temperature', weight='bold', loc='left')
-        ax_a.set_ylabel('Temp. Anom. (°C)')
+        ax_a.set_title('(a) Global Temperature Change (°C)', weight='bold', loc='left')
+        ax_a.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(nbins=8))
         ax_a.grid(True, linestyle=':', alpha=0.6)
         ax_a.set_xlim(1850, 2100)
         ax_a.axhline(0, color='black', linewidth=0.5)
@@ -1407,10 +1407,10 @@ class Visualizer:
             
             if reanalysis_plot_data.get(key) and reanalysis_plot_data[key].get('20CRv3') is not None:
                 reanalysis_20crv3 = reanalysis_plot_data[key]['20CRv3']
-                ax.plot(reanalysis_20crv3.season_year, reanalysis_20crv3, color='darkorange', linewidth=1.5, linestyle='--', marker='o', markersize=3, label='20CRv3')
+                ax.plot(reanalysis_20crv3.season_year, reanalysis_20crv3, color='darkorange', linewidth=1.5, linestyle='-', label='20CRv3')
             if reanalysis_plot_data.get(key) and reanalysis_plot_data[key].get('ERA5') is not None:
                 reanalysis_era5 = reanalysis_plot_data[key]['ERA5']
-                ax.plot(reanalysis_era5.season_year, reanalysis_era5, color='purple', linewidth=1.5, linestyle='-.', marker='x', markersize=4, label='ERA5')
+                ax.plot(reanalysis_era5.season_year, reanalysis_era5, color='purple', linewidth=1.5, linestyle='-', label='ERA5')
 
             ax.set_title(p_config['title'], weight='bold', loc='left')
             ax.set_ylabel(p_config['ylabel'])
@@ -1449,15 +1449,15 @@ class Visualizer:
             final_handles.append(handles[idx])
             final_labels.append(labels[idx])
 
-        # KORREKTUR: Legende näher an die Plots und ohne Rahmen
-        fig.legend(final_handles, final_labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.04), frameon=False)
+        # KORREKTUR: Legende etwas nach unten verschoben und ohne Rahmen
+        fig.legend(final_handles, final_labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.02), frameon=False)
 
         main_title = f'Climate Indices Evolution ({window_size}-yr mean) — {scenario_title}'
         ref_text = "All changes relative to 1850–1900 mean"
         fig.suptitle(f'{main_title}\n{ref_text}', fontsize=11, weight='bold', y=0.98)
         
-        # Layout angepasst für engere Legende und mehr Platz zwischen subplots
-        fig.tight_layout(rect=[0, 0.07, 1, 0.93], h_pad=3.0, w_pad=2.5)
+        # Layout angepasst für engere Legende und mehr Platz am unteren Rand (rect[1] erhöht)
+        fig.tight_layout(rect=[0, 0.08, 1, 0.93], h_pad=3.0, w_pad=2.5)
         
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
@@ -6131,7 +6131,7 @@ class Visualizer:
         
         # --- 3. SET UP FIGURE ---
         fig = plt.figure(figsize=(8.0, 8.0))
-        gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1], hspace=0.15, wspace=0.15)
+        gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1], hspace=0.5, wspace=0.15)
         
         # --- 4. PLOT DISCHARGE (Top Row) ---
         def _p_ds(ax, df_all, ext_list, non_ext_list, title):
@@ -6171,33 +6171,33 @@ class Visualizer:
                     
                     if label_suffix:
                         clean_suffix = label_suffix.strip(" ()").replace("trend: ", "Trend: ")
-                        ax.text(0.96, text_y, clean_suffix, transform=ax.transAxes, ha='right', va='bottom', color=clr,
+                        ax.text(0.04, text_y, clean_suffix, transform=ax.transAxes, ha='left', va='bottom', color=clr,
                                 bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.3))
 
             _p_grp(ext_list, 'Increasing Freq.', '#b2182b', '--', text_y=0.12)
             _p_grp(non_ext_list, 'Decreasing Freq.', '#2166ac', '-.', text_y=0.04)
-            ax.set_title(title, weight='bold', loc='left')
+            ax.set_title(title, weight='bold', loc='left', fontsize=12)
             ax.grid(True, linestyle=':', alpha=0.7)
             ax.set_xlim(2015, 2100)
-            ax.set_ylim(400, 1750)
+            ax.set_ylim(300, 1750)
             
             return ax.get_legend_handles_labels()
 
         ax_ds_s = fig.add_subplot(gs[0, 0])
         df_s = pd.concat(data_by_season['Summer'], ignore_index=True) if data_by_season['Summer'] else pd.DataFrame()
-        _p_ds(ax_ds_s, df_s, extreme_models['Summer'], non_extreme_models['Summer'], f'(a) Summer Half-Year')
+        _p_ds(ax_ds_s, df_s, extreme_models['Summer'], non_extreme_models['Summer'], f'(a) Summer Half Year')
         # Title is now handled at row level
         ax_ds_s.set_ylabel('Discharge (m³/s)')
 
         ax_ds_w = fig.add_subplot(gs[0, 1])
         df_w = pd.concat(data_by_season['Winter'], ignore_index=True) if data_by_season['Winter'] else pd.DataFrame()
-        handles, labels = _p_ds(ax_ds_w, df_w, extreme_models['Winter'], non_extreme_models['Winter'], f'(b) Winter Half-Year')
+        handles, labels = _p_ds(ax_ds_w, df_w, extreme_models['Winter'], non_extreme_models['Winter'], f'(b) Winter Half Year')
         # Title is now handled at row level
         ax_ds_w.tick_params(labelleft=False)
         
         if handles:
             clean_labels = [l.split(' (trend:')[0] if 'MMM' in l else l for l in labels]
-            fig.legend(handles, clean_labels, loc='lower center', bbox_to_anchor=(0.5, 0.50), ncol=2, frameon=False, fontsize=9)
+            fig.legend(handles, clean_labels, loc='lower center', bbox_to_anchor=(0.5, 0.46), ncol=2, frameon=False, fontsize=9)
 
 
         # --- 5. PLOT PR COMPOSITES (Bottom Row) ---
@@ -6241,21 +6241,21 @@ class Visualizer:
 
         ax_pr_s = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
         cf_s = _p_map(ax_pr_s, s_data[0] if s_data else None, "")
-        ax_pr_s.set_title("(c) summer half-year", weight='bold', loc='left')
+        ax_pr_s.set_title("(c) Summer Half Year", weight='bold', loc='left', fontsize=12)
         # Title is now handled at row level
 
         ax_pr_w = fig.add_subplot(gs[1, 1], projection=ccrs.PlateCarree())
         cf_w = _p_map(ax_pr_w, w_data[0] if w_data else None, "")
-        ax_pr_w.set_title("(d) winter half-year", weight='bold', loc='left')
+        ax_pr_w.set_title("(d) Winter Half Year", weight='bold', loc='left', fontsize=12)
         # Title is now handled at row level
 
         if cf_s or cf_w:
-            cb_ax = fig.add_axes([0.15, 0.06, 0.7, 0.015])
+            cb_ax = fig.add_axes([0.15, 0.06, 0.7, 0.02])
             fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cb_ax, orientation='horizontal', label='Precip. Change (mm/day)', extend='both')
 
         s_t = Visualizer._format_scenario_title(scenario)
         plt.suptitle(f'Annual Minimum Discharge & Precipitation Composites\n{s_t} | GWL {target_gwl}°C', weight='bold', y=0.98, fontsize=12)
-        fig.tight_layout(rect=[0, 0.08, 1, 0.93], h_pad=1.0, w_pad=1.0)
+        fig.tight_layout(rect=[0, 0.08, 1, 0.88], h_pad=1.0, w_pad=1.0)
         
         # Add left-aligned subtitles for both rows after tight_layout (matching Figure 2 style)
         left_x_row0 = ax_ds_s.get_position().x0
@@ -6264,11 +6264,11 @@ class Visualizer:
         left_x_row1 = ax_pr_s.get_position().x0
         top_y_row1  = ax_pr_s.get_position().y1
         
-        nudge = 0.02
-        fig.text(left_x_row0, top_y_row0 + nudge, "Discharge", 
-                 ha='left', va='bottom', fontsize=11, weight='bold')
-        fig.text(left_x_row1, top_y_row1 + nudge, "Precipitation Difference", 
-                 ha='left', va='bottom', fontsize=11, weight='bold')
+        nudge = 0.04
+        fig.text(left_x_row0, top_y_row0 + nudge, "Future Minimum Discharge", 
+                 ha='left', va='bottom', fontsize=12, weight='bold')
+        fig.text(left_x_row1, top_y_row1 + nudge, "Precipitation Difference (Inc. freq. - Dec. freq.)", 
+                 ha='left', va='bottom', fontsize=12, weight='bold')
         
         path = os.path.join(config.PLOT_DIR, f"final_figure_4_combined_{scenario}_gwl{target_gwl}.png")
         plt.savefig(path, dpi=300, bbox_inches='tight')
@@ -6349,8 +6349,8 @@ class Visualizer:
         fig = plt.figure(figsize=(5.9, 10.0))
         # Split layout for better control of spaces and subtitles
         gs_top = gridspec.GridSpec(1, 2, top=0.91, bottom=0.73, wspace=0.10, left=0.12, right=0.95)
-        gs_cbar = gridspec.GridSpec(1, 1, top=0.725, bottom=0.705, left=0.20, right=0.80)
-        gs_bottom = gridspec.GridSpec(2, 2, top=0.59, bottom=0.11, wspace=0.35, hspace=0.40, left=0.12, right=0.95)
+        gs_cbar = gridspec.GridSpec(1, 1, top=0.725, bottom=0.705, left=0.235, right=0.835)
+        gs_bottom = gridspec.GridSpec(2, 2, top=0.57, bottom=0.11, wspace=0.35, hspace=0.55, left=0.12, right=0.95)
 
         import matplotlib.colors as mcolors
         import matplotlib.patheffects as pe
@@ -6370,7 +6370,7 @@ class Visualizer:
             ax.add_patch(mpatches.Rectangle((Config.BOX_LON_MIN, Config.BOX_LAT_MIN), 
                                               Config.BOX_LON_MAX - Config.BOX_LON_MIN, 
                                               Config.BOX_LAT_MAX - Config.BOX_LAT_MIN,
-                                              fill=False, edgecolor='magenta', linewidth=1.5, linestyle='--', transform=ccrs.PlateCarree(), zorder=10,
+                                              fill=False, edgecolor='magenta', linewidth=1.5, linestyle='-', transform=ccrs.PlateCarree(), zorder=10,
                                               path_effects=[pe.withStroke(linewidth=3, foreground="white")]))
             # Jet Speed Box (Red)
             ax.add_patch(mpatches.Rectangle((Config.JET_SPEED_BOX_LON_MIN, Config.JET_SPEED_BOX_LAT_MIN), 
@@ -6417,7 +6417,7 @@ class Visualizer:
             if comp is None:
                 ax = fig.add_subplot(gs_top[0, col_idx], projection=ccrs.PlateCarree())
                 _add_map_features(ax)
-                ax.set_title(f"{season_label}: No Data", loc='left')
+                ax.set_title(f"{season_label} Half-Year: No Data", loc='left')
                 continue
 
             hist_clim = comp.get('hist_climatology_mean')
@@ -6425,7 +6425,7 @@ class Visualizer:
             ax = fig.add_subplot(gs_top[0, col_idx], projection=ccrs.PlateCarree())
             diff_map = comp.get('diff_ext_non_future')
             sig_mask = comp.get('sig_mask_ext_non_future')
-            title = f"{'(a)' if col_idx==0 else '(b)'} {season_label}"
+            title = f"{'(a)' if col_idx==0 else '(b)'} {season_label} Half-Year"
             cf = _plot_diff(ax, diff_map, sig_mask, title, contour_map=hist_clim)
             if cf: ref_cf = cf
 
@@ -6469,10 +6469,10 @@ class Visualizer:
         speed_ylim = (-1.5, 2)
         
         plot_configs = [
-            {'key': 'Hydro_Summer_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 0]), 'title': '(c) Summer Jet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim},
-            {'key': 'Hydro_Winter_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 1]), 'title': '(d) Winter Jet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim},
-            {'key': 'Hydro_Summer_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 0]), 'title': '(e) Summer Jet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim},
-            {'key': 'Hydro_Winter_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 1]), 'title': '(f) Winter Jet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim},
+            {'key': 'Hydro_Summer_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 0]), 'title': '(c) Summer Half-Year\nJet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim},
+            {'key': 'Hydro_Winter_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 1]), 'title': '(d) Winter Half-Year\nJet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim},
+            {'key': 'Hydro_Summer_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 0]), 'title': '(e) Summer Half-Year\nJet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim},
+            {'key': 'Hydro_Winter_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 1]), 'title': '(f) Winter Half-Year\nJet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim},
         ]
 
         for p_config in plot_configs:
@@ -6598,6 +6598,11 @@ class Visualizer:
                         ax.plot(x_vals, trend_line, color='black', linestyle=':', alpha=0.8, linewidth=1.5, zorder=5)
                         
                         unit = "\u00b0N" if 'JetLat' in key else "m/s"
+                        trend_per_decade = slope * 10
+                        if p_val < 0.01:
+                            p_str = "p<0.01"
+                        else:
+                            p_str = f"p={p_val:.2f}"
                         label_suffix = f" (trend: {trend_per_decade:+.2f}{unit}/dec, {p_str})"
                     else:
                         label_suffix = ""
@@ -6648,7 +6653,7 @@ class Visualizer:
         plt.suptitle(f'Storyline Impacts on Zonal Wind & Jet Stream\nGWL {gwl}°C, {scenario.upper()}', fontsize=12, weight='bold', y=0.99)
         # Add subtitles for the row sections
         fig.text(0.12, 0.93, 'Zonal Wind Differences (Inc. Freq. \u2212 Dec. Freq.)', ha='left', va='center', fontsize=12, weight='bold')
-        fig.text(0.12, 0.64, 'Jet Stream Evolution', ha='left', va='center', fontsize=12, weight='bold')
+        fig.text(0.12, 0.62, 'Jet Stream Evolution', ha='left', va='center', fontsize=12, weight='bold')
 
         if 'global_legend_handles' in locals():
             clean_labels = [l.split(' (trend:')[0] if 'MMM' in l else l for l in global_legend_labels]

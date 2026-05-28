@@ -3968,8 +3968,8 @@ class Visualizer:
             ax.set_title(f"({panel_letter}) {season_names[season]}", weight='bold', loc='left', fontsize=12)
             ax.set_xlabel("Historical Counts (30y eq.)", fontsize=10)
             ax.set_ylabel("")
-            ax.set_xlim(0, 4)
-            ax.set_xticks(range(0, 5, 1))
+            ax.set_xlim(0, 14)
+            ax.set_xticks(range(0, 15, 2))
             ax.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
             
             # Rotate y-tick label "Historical" vertically on the left subplot, remove on the right subplot
@@ -3981,7 +3981,7 @@ class Visualizer:
                 ax.tick_params(axis='y', left=False)
             ax.tick_params(axis='x', which='major', labelsize=10)
 
-        # Row 1: Future Change in Counts
+        # Row 1: Future Absolute Counts
         gwl_display_order = [f'+{gwl}°C GWL' for gwl in gwls_to_plot]
         
         for col, season in enumerate(seasons):
@@ -4012,7 +4012,6 @@ class Visualizer:
                     C_hist_scaled = hist_map.get(k, np.nan)
                     if np.isnan(C_hist_scaled):
                         continue
-                    C_change = C_fut - C_hist_scaled
                     
                     if k in extreme_keys:
                         category = 'Extreme'
@@ -4026,7 +4025,7 @@ class Visualizer:
                         
                     records.append({
                         'GWL': gwl_label,
-                        'Change': C_change,
+                        'Counts': C_fut,
                         'Category': category,
                         'Color': color,
                         'Model': k
@@ -4039,7 +4038,7 @@ class Visualizer:
                 continue
                 
             # Boxplot
-            sns.boxplot(data=df, y='GWL', x='Change', ax=ax,
+            sns.boxplot(data=df, y='GWL', x='Counts', ax=ax,
                         order=gwl_display_order, color='lightgray',
                         showfliers=False, linewidth=1.0, width=0.5, orient='h',
                         boxprops={'alpha': 0.7}, medianprops={'color': 'black', 'linewidth': 2.5})
@@ -4068,29 +4067,32 @@ class Visualizer:
                         zorder = 3
                         size = 5
                         alpha = 0.4
-                    ax.plot(row['Change'], y_pos, marker=marker_style, color=color,
+                    ax.plot(row['Counts'], y_pos, marker=marker_style, color=color,
                             markersize=size, alpha=alpha, linestyle='None', zorder=zorder)
             
             # Draw vertical median lines for Extreme (red) and Non-Extreme (blue) groups
             for idx_gwl, gwl_label in enumerate(gwl_display_order):
                 y_pos_center = y_ticks_pos[idx_gwl]
                 for cat, cat_color in [('Extreme', '#b2182b'), ('Non-Extreme', '#2166ac')]:
-                    cat_changes = df[(df['GWL'] == gwl_label) & (df['Category'] == cat)]['Change'].values
+                    cat_changes = df[(df['GWL'] == gwl_label) & (df['Category'] == cat)]['Counts'].values
                     if len(cat_changes) > 0:
                         median_change = np.nanmedian(cat_changes)
                         if np.isfinite(median_change):
                             ax.vlines(x=median_change, ymin=y_pos_center - 0.25, ymax=y_pos_center + 0.25,
                                       colors=cat_color, linestyles='-', linewidth=2.5, zorder=5)
             
-            # Vertical line at 0 (no change)
-            ax.axvline(0, color='black', linestyle='--', linewidth=1.2, zorder=2)
+            # Vertical reference line at historical median
+            scaled_counts = list(hist_map.values())
+            hist_median = np.nanmedian(scaled_counts) if scaled_counts else np.nan
+            if np.isfinite(hist_median):
+                ax.axvline(hist_median, color='black', linestyle='--', linewidth=1.2, zorder=2)
             
             panel_letter = 'c' if col == 0 else 'd'
             ax.set_title(f"({panel_letter}) {season_names[season]}", weight='bold', loc='left', fontsize=12)
-            ax.set_xlabel("Change in Counts", fontsize=10)
+            ax.set_xlabel("Future Counts (30y eq.)", fontsize=10)
             ax.set_ylabel("")
-            ax.set_xlim(-6, 12)
-            ax.set_xticks(range(-6, 13, 2))
+            ax.set_xlim(0, 14)
+            ax.set_xticks(range(0, 15, 2))
             ax.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
             
             # Rotate y-tick labels (+2.0°C GWL, +3.0°C GWL) vertically on the left subplot, remove on the right
@@ -4104,23 +4106,23 @@ class Visualizer:
         
         # Overall figure titles & layouts
         scenario_title = Visualizer._format_scenario_title(scenario)
-        fig.suptitle(f"Verification and Future Changes in 30Q10 Low-Flow Events - {scenario_title}",
+        fig.suptitle(f"Verification and Future Frequency of 30Q10 Low-Flow Events - {scenario_title}",
                      fontsize=12, weight='bold', y=0.97)
         
         # Add subtitles/sub-headlines for upper (Historical) and lower (Future) rows
         fig.text(0.06, 0.93, "Historical Event Frequency (Verification)", ha='left', fontsize=12, weight='bold')
-        fig.text(0.06, 0.61, f"Future Changes under {scenario_title} Scenario", ha='left', fontsize=12, weight='bold')
+        fig.text(0.06, 0.61, f"Future Event Frequency under {scenario_title} Scenario", ha='left', fontsize=12, weight='bold')
         
         plt.tight_layout(rect=[0.02, 0.08, 0.98, 0.90], h_pad=3.5, w_pad=2.0)
         
         # Legend at the bottom
         from matplotlib.lines import Line2D
         legend_handles = [
-            Line2D([0], [0], marker='^', color='w', markerfacecolor='#b2182b', label='Increasing Freq. (Top 14)', markersize=8),
-            Line2D([0], [0], marker='v', color='w', markerfacecolor='#2166ac', label='Decreasing Freq. (Bottom 14)', markersize=8),
+            Line2D([0], [0], marker='^', color='w', markerfacecolor='#b2182b', label='Highest Freq. (Top 14)', markersize=8),
+            Line2D([0], [0], marker='v', color='w', markerfacecolor='#2166ac', label='Lowest Freq. (Bottom 14)', markersize=8),
             Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.5, label='Other Models', markersize=6),
-            Line2D([0], [0], color='#b2182b', lw=2.0, label='Median (Increasing Freq.)'),
-            Line2D([0], [0], color='#2166ac', lw=2.0, label='Median (Decreasing Freq.)')
+            Line2D([0], [0], color='#b2182b', lw=2.0, label='Median (Highest Freq.)'),
+            Line2D([0], [0], color='#2166ac', lw=2.0, label='Median (Lowest Freq.)')
         ]
         fig.legend(handles=legend_handles, loc='lower center', ncol=3, fontsize=9.5, frameon=False, bbox_to_anchor=(0.5, 0.015))
         

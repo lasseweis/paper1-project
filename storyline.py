@@ -3561,15 +3561,14 @@ class StorylineAnalyzer:
                 count_hist = (hist_seasonal.values > thresh).sum()
             C_hist_scaled = count_hist * 30.0 / hist_seasonal.year.size
 
-            # Future count
+            # Future count (absolute counts evaluated directly since future window is 30 years)
             values = fut_seasonal.values
             if metric_type == 'low':
                 count_fut = (values < thresh).sum()
             else:
                 count_fut = (values > thresh).sum()
                 
-            C_change = count_fut - C_hist_scaled
-            model_changes[model_run_key] = C_change
+            model_changes[model_run_key] = count_fut
             
         if len(model_changes) < 1:
             return None, None, None

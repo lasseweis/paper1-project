@@ -168,8 +168,20 @@ class DataProcessor:
         """Process ERA5 NetCDF file and return monthly data. Results are cached."""
         logging.info(f"Processing ERA5 data from {file}...")
         try:
-            ds = xr.open_dataset(file, decode_times=True, use_cftime=True)
+            # Use chunks={'time': 'auto'} for lazy loading via Dask to avoid heavy NFS/memory overhead
+            ds = xr.open_dataset(file, decode_times=True, use_cftime=True, chunks={'time': 'auto'})
             
+            # Slice the time series BEFORE doing the expensive resample to reduce data size and memory usage.
+            # We add a 1-month buffer at the boundaries to ensure clean resampling.
+            start_year = max(1950, Config.ANALYSIS_START_YEAR - 1)
+            end_year = min(2022, Config.ANALYSIS_END_YEAR + 1)
+            
+            # Filter the time coordinate lazily
+            if 'time' in ds.coords:
+                start_date = f"{start_year}-12-01"
+                end_date = f"{end_year}-01-31"
+                ds = ds.sel(time=slice(start_date, end_date))
+
             var_name_used = var_in_file
             if var_name_used not in ds.data_vars:
                 potential_names = {'pr': 'tp', 'tas': 't2m', 'ua': 'u'}

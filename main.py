@@ -93,8 +93,49 @@ class ClimateAnalysis:
     @staticmethod
     @lru_cache(maxsize=1)
     def process_era5_data():
-        """Load and process all ERA5 climate data."""
-        logging.info("Loading and processing ERA5 climate data...")
+        """Load and process all ERA5 climate data only if needed for plots."""
+        # Check if we actually need ERA5 data by looking at which plots depend on it and whether they already exist.
+        era5_dependent_plots = [
+            os.path.join(Config.PLOT_DIR, 'regression_maps_norm_ERA5.png'),
+            os.path.join(Config.PLOT_DIR, 'Figure1_regression_maps_ERA5.png'),
+            os.path.join(Config.PLOT_DIR, 'jet_indices_comparison_seasonal_detrended.png'),
+            os.path.join(Config.PLOT_DIR, 'jet_impact_regression_maps_winter.png'),
+            os.path.join(Config.PLOT_DIR, 'jet_impact_regression_maps_summer.png'),
+            os.path.join(Config.PLOT_DIR, 'jet_correlation_maps_winter.png'),
+            os.path.join(Config.PLOT_DIR, 'jet_correlation_maps_summer.png'),
+            os.path.join(Config.PLOT_DIR, 'winter_correlations_comparison_detrended.png'),
+            os.path.join(Config.PLOT_DIR, 'summer_correlations_comparison_detrended.png'),
+            os.path.join(Config.PLOT_DIR, 'correlation_matrix_comparison_winter_detrended_grouped.png'),
+            os.path.join(Config.PLOT_DIR, 'correlation_matrix_comparison_summer_detrended_grouped.png'),
+            os.path.join(Config.PLOT_DIR, 'danube_box_correlation_comparison.png'),
+            os.path.join(Config.PLOT_DIR, 'spei_drought_analysis_seasonal_comparison.png'),
+            os.path.join(Config.PLOT_DIR, 'spatial_spei_discharge_analysis_era5_summer.png'),
+        ]
+        
+        # Add CMIP6 scenario-specific plots that depend on ERA5 data
+        for scenario in Config.CMIP6_SCENARIOS:
+            era5_dependent_plots.append(os.path.join(Config.PLOT_DIR, f"cmip6_fidelity_vs_future_temporal_slopes_{scenario}.png"))
+            for gwl in Config.GLOBAL_WARMING_LEVELS:
+                era5_dependent_plots.append(os.path.join(Config.PLOT_DIR, f"cmip6_scatter_comparison_gwl_{gwl:.1f}_{scenario}.png"))
+            era5_dependent_plots.append(os.path.join(Config.PLOT_DIR, f"climate_indices_evolution_{scenario}.png"))
+            era5_dependent_plots.append(os.path.join(Config.PLOT_DIR, f"final_figure_5_climate_indices_evolution_{scenario}.png"))
+
+        # If all plots that use ERA5 already exist, skip loading/processing ERA5 entirely
+        all_plots_exist = all(os.path.exists(p) for p in era5_dependent_plots)
+        if all_plots_exist:
+            logging.info("All plots depending on ERA5 already exist. Skipping loading and processing of heavy ERA5 daily files to save memory and time.")
+            return {
+                'ERA5_pr_monthly': None,
+                'ERA5_tas_monthly': None,
+                'ERA5_ua850_monthly': None,
+                'ERA5_pr_seasonal': None, 
+                'ERA5_tas_seasonal': None,
+                'ERA5_ua850_seasonal': None, 
+                'ERA5_pr_box_mean': None,
+                'ERA5_tas_box_mean': None
+            }
+
+        logging.info("Some plots depending on ERA5 are missing or need regeneration. Loading and processing ERA5 climate data...")
         try:
             pr_monthly = DataProcessor.process_era5_file(Config.ERA5_PR_FILE, 'pr')
             tas_monthly = DataProcessor.process_era5_file(Config.ERA5_TAS_FILE, 'tas')
@@ -122,6 +163,7 @@ class ClimateAnalysis:
             }
         except Exception as e:
             logging.error(f"Error in process_era5_data: {e}")
+            return {}
 
     @staticmethod
     def process_historical_discharge_data(qobs_daily_da):
@@ -367,23 +409,34 @@ class ClimateAnalysis:
             return None
 
         logging.info("\n--- Calculating SPEI for Reanalysis Datasets ---")
-        for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
-            logging.info(f"  Calculating SPEI for {dset_key}...")
-            pr_monthly_full = datasets_reanalysis.get(f'{dset_key}_pr_monthly')
-            tas_monthly_full = datasets_reanalysis.get(f'{dset_key}_tas_monthly')
-            if pr_monthly_full is not None and tas_monthly_full is not None:
-                pr_box_monthly = DataProcessor.calculate_spatial_mean(pr_monthly_full, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
-                tas_box_monthly = DataProcessor.calculate_spatial_mean(tas_monthly_full, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
-                if pr_box_monthly is not None and tas_box_monthly is not None:
-                    lat_center_of_box = (Config.BOX_LAT_MIN + Config.BOX_LAT_MAX) / 2
-                    spei4 = DataProcessor.calculate_spei(pr_box_monthly, tas_box_monthly, lat=lat_center_of_box, scale=4)
-                    if spei4 is not None:
-                        # --- MODIFIKATION: Store monthly SPEI for later use ---
-                        datasets_reanalysis[f'{dset_key}_spei4_monthly_box'] = spei4
-                        # --- ENDE MODIFIKATION ---
-                        spei4_seasonal = DataProcessor.assign_season_to_dataarray(spei4)
-                        datasets_reanalysis[f'{dset_key}_spei4'] = spei4_seasonal # Seasonal means are still stored
-                        logging.info(f"    Successfully calculated SPEI-4 for {dset_key}.")
+        spei_dependent_plots = [
+            os.path.join(Config.PLOT_DIR, 'spei_drought_analysis_seasonal_comparison.png'),
+            os.path.join(Config.PLOT_DIR, 'danube_box_correlation_comparison.png'),
+            os.path.join(Config.PLOT_DIR, 'correlation_matrix_comparison_winter_detrended_grouped.png'),
+            os.path.join(Config.PLOT_DIR, 'correlation_matrix_comparison_summer_detrended_grouped.png'),
+        ]
+        need_spei = not all(os.path.exists(p) for p in spei_dependent_plots)
+        
+        if not need_spei:
+            logging.info("  All plots depending on Reanalysis SPEI already exist. Skipping SPEI calculation to save time.")
+        else:
+            for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
+                logging.info(f"  Calculating SPEI for {dset_key}...")
+                pr_monthly_full = datasets_reanalysis.get(f'{dset_key}_pr_monthly')
+                tas_monthly_full = datasets_reanalysis.get(f'{dset_key}_tas_monthly')
+                if pr_monthly_full is not None and tas_monthly_full is not None:
+                    pr_box_monthly = DataProcessor.calculate_spatial_mean(pr_monthly_full, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
+                    tas_box_monthly = DataProcessor.calculate_spatial_mean(tas_monthly_full, Config.BOX_LAT_MIN, Config.BOX_LAT_MAX, Config.BOX_LON_MIN, Config.BOX_LON_MAX)
+                    if pr_box_monthly is not None and tas_box_monthly is not None:
+                        lat_center_of_box = (Config.BOX_LAT_MIN + Config.BOX_LAT_MAX) / 2
+                        spei4 = DataProcessor.calculate_spei(pr_box_monthly, tas_box_monthly, lat=lat_center_of_box, scale=4)
+                        if spei4 is not None:
+                            # --- MODIFIKATION: Store monthly SPEI for later use ---
+                            datasets_reanalysis[f'{dset_key}_spei4_monthly_box'] = spei4
+                            # --- ENDE MODIFIKATION ---
+                            spei4_seasonal = DataProcessor.assign_season_to_dataarray(spei4)
+                            datasets_reanalysis[f'{dset_key}_spei4'] = spei4_seasonal # Seasonal means are still stored
+                            logging.info(f"    Successfully calculated SPEI-4 for {dset_key}.")
 
         # --- START: ÄNDERUNG (Laden der Abflussdaten) ---
         # 1. Lade QOBS-Daten (1960-2021, TÄGLICH) aus der .csv-Datei
@@ -407,17 +460,41 @@ class ClimateAnalysis:
 
         logging.info("\n--- Calculating Base Reanalysis Jet Indices ---")
         jet_data_reanalysis = {}
-        for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
-            ua850_seasonal = datasets_reanalysis[f'{dset_key}_ua850_seasonal']
-            for season in ['Winter', 'Summer']:
-                ua_season = DataProcessor.filter_by_season(ua850_seasonal, season)
-                season_lower = season.lower()
-                jet_speed = JetStreamAnalyzer.calculate_jet_speed_index(ua_season)
-                if jet_speed is not None:
-                    jet_data_reanalysis[f'{dset_key}_{season_lower}_speed_data'] = {'jet': DataProcessor.detrend_data(jet_speed)}
-                jet_lat = JetStreamAnalyzer.calculate_jet_lat_index(ua_season)
-                if jet_lat is not None:
-                    jet_data_reanalysis[f'{dset_key}_{season_lower}_lat_data'] = {'jet': DataProcessor.detrend_data(jet_lat)}
+        
+        jet_dependent_plots = [
+            os.path.join(Config.PLOT_DIR, "jet_indices_comparison_seasonal_detrended.png"),
+            os.path.join(Config.PLOT_DIR, "jet_impact_regression_maps_winter.png"),
+            os.path.join(Config.PLOT_DIR, "jet_impact_regression_maps_summer.png"),
+            os.path.join(Config.PLOT_DIR, "jet_correlation_maps_winter.png"),
+            os.path.join(Config.PLOT_DIR, "jet_correlation_maps_summer.png"),
+            os.path.join(Config.PLOT_DIR, "winter_correlations_comparison_detrended.png"),
+            os.path.join(Config.PLOT_DIR, "summer_correlations_comparison_detrended.png"),
+            os.path.join(Config.PLOT_DIR, "correlation_matrix_comparison_winter_detrended_grouped.png"),
+            os.path.join(Config.PLOT_DIR, "correlation_matrix_comparison_summer_detrended_grouped.png"),
+            os.path.join(Config.PLOT_DIR, "amo_jet_correlations_comparison_rolling_15yr.png"),
+        ]
+        for scenario in Config.CMIP6_SCENARIOS:
+            jet_dependent_plots.append(os.path.join(Config.PLOT_DIR, f"cmip6_fidelity_vs_future_temporal_slopes_{scenario}.png"))
+            for gwl in Config.GLOBAL_WARMING_LEVELS:
+                jet_dependent_plots.append(os.path.join(Config.PLOT_DIR, f"cmip6_scatter_comparison_gwl_{gwl:.1f}_{scenario}.png"))
+
+        need_jet_indices = not all(os.path.exists(p) for p in jet_dependent_plots)
+        if not need_jet_indices:
+            logging.info("  All plots depending on Reanalysis Jet Indices already exist. Skipping Jet Indices calculation to save time.")
+        else:
+            for dset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
+                ua850_seasonal = datasets_reanalysis[f'{dset_key}_ua850_seasonal']
+                if ua850_seasonal is None:
+                    continue
+                for season in ['Winter', 'Summer']:
+                    ua_season = DataProcessor.filter_by_season(ua850_seasonal, season)
+                    season_lower = season.lower()
+                    jet_speed = JetStreamAnalyzer.calculate_jet_speed_index(ua_season)
+                    if jet_speed is not None:
+                        jet_data_reanalysis[f'{dset_key}_{season_lower}_speed_data'] = {'jet': DataProcessor.detrend_data(jet_speed)}
+                    jet_lat = JetStreamAnalyzer.calculate_jet_lat_index(ua_season)
+                    if jet_lat is not None:
+                        jet_data_reanalysis[f'{dset_key}_{season_lower}_lat_data'] = {'jet': DataProcessor.detrend_data(jet_lat)}
 
         # Calculate multivariate betas once from reanalysis, as they are constant for all scenarios
         beta_obs_slopes = storyline_analyzer.calculate_reanalysis_betas(

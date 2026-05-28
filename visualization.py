@@ -1460,7 +1460,7 @@ class Visualizer:
         fig.tight_layout(rect=[0, 0.08, 1, 0.93], h_pad=3.0, w_pad=2.5)
         
         filepath = os.path.join(config.PLOT_DIR, filename)
-        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        plt.savefig(filepath, dpi=600, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved Final Figure 5 to {filepath}")
         
@@ -4245,7 +4245,7 @@ class Visualizer:
                     ax.text(0.5, 0.5, "No Data / Infinite Return Periods", ha='center', va='center', transform=ax.transAxes)
                     ax.axis('off')
 
-        plt.tight_layout(rect=[0, 0.11, 1, 0.94], h_pad=3.5, w_pad=0.8)
+        plt.tight_layout(rect=[0, 0.12, 1, 0.94], h_pad=3.5, w_pad=0.8)
         
         # Add left-aligned subtitles for both rows after tight_layout.
         
@@ -4270,7 +4270,7 @@ class Visualizer:
                  "Event Distribution",
                  ha='left', va='bottom', fontsize=12, weight='bold')
         fig.text(left_x_row1, top_y_row1 + nudge_row1,
-                 "Change in Return Periods",
+                 "Projected Future Return Periods",
                  ha='left', va='bottom', fontsize=12, weight='bold')
 
         # DYNAMIC SUPTITLE TO ELIMINATE WHITESPACE
@@ -4292,10 +4292,10 @@ class Visualizer:
             Line2D([0], [0], color='#2166ac', lw=2.5, label='Median (Decreasing Freq.)'),
             Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', label='Other Models', markersize=6, alpha=0.5)
         ])
-        fig.legend(handles=handles_local, loc='lower center', bbox_to_anchor=(0.5, 0.001), ncol=3, fontsize=9, frameon=False, handletextpad=0.3)
+        fig.legend(handles=handles_local, loc='lower center', bbox_to_anchor=(0.5, -0.01), ncol=3, fontsize=9, frameon=False, handletextpad=0.3)
 
         filename = os.path.join(config.PLOT_DIR, f"final_figure_2_regime_shift_and_verification_{scenario}.png")
-        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.savefig(filename, dpi=600, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved Final Figure 2 to {filename}")
 
@@ -5755,7 +5755,7 @@ class Visualizer:
     @staticmethod
     def plot_discharge_events_timeseries(cmip6_results, discharge_data_loaded, config, scenario):
         """
-        Plots the MMM and spread of annual minimum discharge.
+        Plots the MMM and spread of annual minimum 30-day discharge.
         Creates a single plot showing MMM and the 10th-90th percentile spread along with LNWL crossing events.
         """
         logging.info(f"Plotting discharge events timeseries for {scenario}...")
@@ -5812,9 +5812,9 @@ class Visualizer:
         if discharge_data_loaded:
             threshold_lowflow = discharge_data_loaded.get('winter_lowflow_lnwl', 970.0)
 
-        # Create figure with 2 subplots (map on top, timeseries on bottom)
-        fig = plt.figure(figsize=(5.9, 10.0))
-        gs = gridspec.GridSpec(2, 1, height_ratios=[1, 1])
+        # Create figure with 2 subplots (map on left, timeseries on right)
+        fig = plt.figure(figsize=(12.0, 5.5))
+        gs = gridspec.GridSpec(1, 2, width_ratios=[1, 1], wspace=0.15)
         
         # Define shape CRS: Lambert Azimuthal Equal Area based on zones.prj
         shape_crs = ccrs.LambertAzimuthalEqualArea(
@@ -5823,6 +5823,7 @@ class Visualizer:
             globe=ccrs.Globe(ellipse=None, semimajor_axis=6370997.0, semiminor_axis=6370997.0)
         )
         
+        map_aspect = 0.7832  # Fallback aspect ratio if shapefile loading fails
         
         # --- Top Subplot: Map ---
         ax_map = fig.add_subplot(gs[0], projection=ccrs.PlateCarree())
@@ -5863,11 +5864,19 @@ class Visualizer:
             p_bounds = projected_box.bounds
             
             # Allow some padding (roughly 2 degrees)
-            buffer_lon = 2.0
+            buffer_lon = 3.3
             buffer_lat = 2.0
             ax_map.set_extent([p_bounds[0] - buffer_lon, p_bounds[2] + buffer_lon,
                                p_bounds[1] - buffer_lat, p_bounds[3] + buffer_lat], crs=ccrs.PlateCarree())
             ax_map.set_title("(a) Upper Danube Basin", fontsize=12, weight='bold', loc='left')
+            
+            # Calculate dynamic aspect ratio for PlateCarree map
+            lon_min = p_bounds[0] - buffer_lon
+            lon_max = p_bounds[2] + buffer_lon
+            lat_min = p_bounds[1] - buffer_lat
+            lat_max = p_bounds[3] + buffer_lat
+            lat_mean = (lat_min + lat_max) / 2.0
+            map_aspect = (lat_max - lat_min) / ((lon_max - lon_min) * np.cos(np.radians(lat_mean)))
             
             # --- Add Rivers (Clipped to Basin) and Labels ---
             try:
@@ -5948,16 +5957,20 @@ class Visualizer:
         ax.grid(True, linestyle=':', alpha=0.7)
         
         # Limit the x-axis properly
-        min_year = 1950
+        min_year = 1960
         max_year = 2100
         ax.set_xlim(min_year, max_year)
-        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=2, frameon=False)
+        ax.set_box_aspect(map_aspect)
         
-        plt.suptitle("Study Region and Projected Minimum Discharge", weight='bold', y=0.96, fontsize=12)
-        fig.tight_layout(rect=[0, 0.05, 1, 0.97], h_pad=2.0, w_pad=2.0)
+        plt.suptitle("Study Region and Projected 30-Day Minimum Discharge", weight='bold', y=0.98, fontsize=12)
+        fig.tight_layout(rect=[0, 0.12, 1, 0.93], h_pad=2.0, w_pad=3.0)
+        
+        # Center the figure legend at the bottom of the entire figure
+        handles, labels = ax.get_legend_handles_labels()
+        fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.02), ncol=4, frameon=False)
         filename = f"final_figure_1_storyline_discharge_events_{scenario}.png"
         filepath = os.path.join(config.PLOT_DIR, filename)
-        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        plt.savefig(filepath, dpi=600, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved discharge events timeseries plot to {filepath}")
 
@@ -6131,7 +6144,7 @@ class Visualizer:
         
         # --- 3. SET UP FIGURE ---
         fig = plt.figure(figsize=(8.0, 8.0))
-        gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1], hspace=0.5, wspace=0.15)
+        gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1], hspace=0.8, wspace=0.15)
         
         # --- 4. PLOT DISCHARGE (Top Row) ---
         def _p_ds(ax, df_all, ext_list, non_ext_list, title):
@@ -6179,7 +6192,7 @@ class Visualizer:
             ax.set_title(title, weight='bold', loc='left', fontsize=12)
             ax.grid(True, linestyle=':', alpha=0.7)
             ax.set_xlim(2015, 2100)
-            ax.set_ylim(300, 1750)
+            ax.set_ylim(300, 1850)
             
             return ax.get_legend_handles_labels()
 
@@ -6197,7 +6210,7 @@ class Visualizer:
         
         if handles:
             clean_labels = [l.split(' (trend:')[0] if 'MMM' in l else l for l in labels]
-            fig.legend(handles, clean_labels, loc='lower center', bbox_to_anchor=(0.5, 0.46), ncol=2, frameon=False, fontsize=9)
+            fig.legend(handles, clean_labels, loc='lower center', bbox_to_anchor=(0.5, 0.42), ncol=2, frameon=False, fontsize=9)
 
 
         # --- 5. PLOT PR COMPOSITES (Bottom Row) ---
@@ -6251,11 +6264,11 @@ class Visualizer:
 
         if cf_s or cf_w:
             cb_ax = fig.add_axes([0.15, 0.06, 0.7, 0.02])
-            fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cb_ax, orientation='horizontal', label='Precip. Change (mm/day)', extend='both')
+            fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cb_ax, orientation='horizontal', label='Precip. Diff. (mm/day)', extend='both')
 
         s_t = Visualizer._format_scenario_title(scenario)
-        plt.suptitle(f'Annual Minimum Discharge & Precipitation Composites\n{s_t} | GWL {target_gwl}°C', weight='bold', y=0.98, fontsize=12)
-        fig.tight_layout(rect=[0, 0.08, 1, 0.88], h_pad=1.0, w_pad=1.0)
+        plt.suptitle(f'Annual Minimum 30-Day Discharge & Precipitation Composites\n{s_t} | GWL {target_gwl}°C', weight='bold', y=0.98, fontsize=12)
+        fig.tight_layout(rect=[0, 0.08, 1, 0.80], h_pad=1.0, w_pad=1.0)
         
         # Add left-aligned subtitles for both rows after tight_layout (matching Figure 2 style)
         left_x_row0 = ax_ds_s.get_position().x0
@@ -6265,13 +6278,13 @@ class Visualizer:
         top_y_row1  = ax_pr_s.get_position().y1
         
         nudge = 0.04
-        fig.text(left_x_row0, top_y_row0 + nudge, "Future Minimum Discharge", 
+        fig.text(left_x_row0, top_y_row0 + nudge, "Future 30-Day Minimum Discharge", 
                  ha='left', va='bottom', fontsize=12, weight='bold')
-        fig.text(left_x_row1, top_y_row1 + nudge, "Precipitation Difference (Inc. freq. - Dec. freq.)", 
+        fig.text(left_x_row1, top_y_row1 + nudge, "Precipitation Difference (Inc. Freq. - Dec. Freq.)", 
                  ha='left', va='bottom', fontsize=12, weight='bold')
         
         path = os.path.join(config.PLOT_DIR, f"final_figure_4_combined_{scenario}_gwl{target_gwl}.png")
-        plt.savefig(path, dpi=300, bbox_inches='tight')
+        plt.savefig(path, dpi=600, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved combined final figure 4 to {path}")
 
@@ -6350,7 +6363,7 @@ class Visualizer:
         # Split layout for better control of spaces and subtitles
         gs_top = gridspec.GridSpec(1, 2, top=0.91, bottom=0.73, wspace=0.10, left=0.12, right=0.95)
         gs_cbar = gridspec.GridSpec(1, 1, top=0.725, bottom=0.705, left=0.235, right=0.835)
-        gs_bottom = gridspec.GridSpec(2, 2, top=0.57, bottom=0.11, wspace=0.35, hspace=0.55, left=0.12, right=0.95)
+        gs_bottom = gridspec.GridSpec(2, 2, top=0.58, bottom=0.13, wspace=0.35, hspace=0.55, left=0.12, right=0.95)
 
         import matplotlib.colors as mcolors
         import matplotlib.patheffects as pe
@@ -6469,10 +6482,10 @@ class Visualizer:
         speed_ylim = (-1.5, 2)
         
         plot_configs = [
-            {'key': 'Hydro_Summer_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 0]), 'title': '(c) Summer Half-Year\nJet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim},
-            {'key': 'Hydro_Winter_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 1]), 'title': '(d) Winter Half-Year\nJet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim},
-            {'key': 'Hydro_Summer_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 0]), 'title': '(e) Summer Half-Year\nJet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim},
-            {'key': 'Hydro_Winter_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 1]), 'title': '(f) Winter Half-Year\nJet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim},
+            {'key': 'Hydro_Summer_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 0]), 'title': '(c) Summer Half-Year\n    Jet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim},
+            {'key': 'Hydro_Winter_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 1]), 'title': '(d) Winter Half-Year\n    Jet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim},
+            {'key': 'Hydro_Summer_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 0]), 'title': '(e) Summer Half-Year\n    Jet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim},
+            {'key': 'Hydro_Winter_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 1]), 'title': '(f) Winter Half-Year\n    Jet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim},
         ]
 
         for p_config in plot_configs:
@@ -6650,18 +6663,18 @@ class Visualizer:
                 ax.text(0.5, 0.5, "No Timeseries Data", ha='center', va='center')
                 ax.set_title(p_config['title'], weight='bold', loc='left')
 
-        plt.suptitle(f'Storyline Impacts on Zonal Wind & Jet Stream\nGWL {gwl}°C, {scenario.upper()}', fontsize=12, weight='bold', y=0.99)
+        plt.suptitle(f'Storyline Impacts on Zonal Wind (U850) & Jet Stream\nGWL {gwl}°C, {scenario.upper()}', fontsize=12, weight='bold', y=0.99)
         # Add subtitles for the row sections
-        fig.text(0.12, 0.93, 'Zonal Wind Differences (Inc. Freq. \u2212 Dec. Freq.)', ha='left', va='center', fontsize=12, weight='bold')
+        fig.text(0.12, 0.93, 'Zonal Wind (U850) Differences (Inc. Freq. \u2212 Dec. Freq.)', ha='left', va='center', fontsize=12, weight='bold')
         fig.text(0.12, 0.62, 'Jet Stream Evolution', ha='left', va='center', fontsize=12, weight='bold')
 
         if 'global_legend_handles' in locals():
             clean_labels = [l.split(' (trend:')[0] if 'MMM' in l else l for l in global_legend_labels]
-            fig.legend(global_legend_handles, clean_labels, loc='lower center', bbox_to_anchor=(0.5, -0.04), ncol=2, frameon=False)
+            fig.legend(global_legend_handles, clean_labels, loc='lower center', bbox_to_anchor=(0.5, -0.02), ncol=2, frameon=False)
 
         filename_out = f"final_figure_3_{event_key}_{scenario}_gwl{gwl}.png"
         filepath = os.path.join(Config.PLOT_DIR, filename_out)
-        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        plt.savefig(filepath, dpi=600, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved final figure 3 to {filepath}")
 

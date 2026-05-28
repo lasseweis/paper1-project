@@ -2355,6 +2355,11 @@ class StorylineAnalyzer:
 
              winter_periods = []
              summer_periods = []
+             winter_counts = []
+             summer_counts = []
+             winter_years = []
+             summer_years = []
+             historical_keys = []
              
              for model_key in all_models_runs:
                  # 1. Get Daily Data
@@ -2436,18 +2441,25 @@ class StorylineAnalyzer:
                      winter_extremes = np.array(winter_extremes_list)
                      summer_extremes = np.array(summer_extremes_list)
 
-                     # Berechne Wahrscheinlichkeit im Halbjahr
-                     if len(winter_extremes) > 10:
+                     # Berechne Wahrscheinlichkeit im Halbjahr und Counts
+                     if len(winter_extremes) > 10 and len(summer_extremes) > 10:
                         count_win = (winter_extremes < thresh).sum() if eva_type == 'low' else (winter_extremes > thresh).sum()
                         prob_win = count_win / len(winter_extremes)
                         T_win = 1.0/prob_win if prob_win > 1e-6 else np.nan
-                        winter_periods.append(T_win)
-
-                     if len(summer_extremes) > 10:
+                        
                         count_sum = (summer_extremes < thresh).sum() if eva_type == 'low' else (summer_extremes > thresh).sum()
                         prob_sum = count_sum / len(summer_extremes)
                         T_sum = 1.0/prob_sum if prob_sum > 1e-6 else np.nan
+                        
+                        winter_periods.append(T_win)
+                        winter_counts.append(count_win)
+                        winter_years.append(len(winter_extremes))
+                        
                         summer_periods.append(T_sum)
+                        summer_counts.append(count_sum)
+                        summer_years.append(len(summer_extremes))
+                        
+                        historical_keys.append(model_key)
 
                  except Exception:
                      continue
@@ -2456,6 +2468,11 @@ class StorylineAnalyzer:
              historical_verification[event_key] = {
                  'winter_periods': winter_periods,
                  'summer_periods': summer_periods,
+                 'winter_counts': winter_counts,
+                 'summer_counts': summer_counts,
+                 'winter_years': winter_years,
+                 'summer_years': summer_years,
+                 'historical_keys': historical_keys,
                  'target_T': target_T,
                  'type': eva_type
              }
@@ -2495,6 +2512,9 @@ class StorylineAnalyzer:
                         metric_key_to_use = f"{metric_key_base}_{half_year}" 
                         
                         model_return_periods_future = []
+                        model_counts_future = []
+                        model_years_future = []
+                        model_keys_future = []
                         valid_models_count = 0
                         
                         logging.info(f"  Analyzing {event_key} for {storyline_name} ({half_year}, GWL {gwl})...")
@@ -2553,6 +2573,10 @@ class StorylineAnalyzer:
                                     valid_models_count += 1
                                 # else: Event did not occur, excluded from return periods
                                 
+                                model_counts_future.append(count_exceed)
+                                model_years_future.append(n_fut)
+                                model_keys_future.append(model_run_key)
+
                             except Exception as e:
                                 continue
 
@@ -2575,6 +2599,9 @@ class StorylineAnalyzer:
                         # Store in the structure expected by the plotter
                         storyline_results_storage[event_key] = {
                             'future_return_periods_all_models': model_return_periods_future,
+                            'future_counts_all_models': model_counts_future,
+                            'future_years_all_models': model_years_future,
+                            'future_keys_all_models': model_keys_future,
                             'future_return_period_mean': result_T_median, # PLOTTER uses 'mean' key, but we store MEDIAN here as requested
                             'future_return_period_median': result_T_median,
                             'future_return_period_ci_low': ci_low,
@@ -3468,7 +3495,7 @@ class StorylineAnalyzer:
     def get_composite_extreme_models(self, cmip6_results, gwl, event_key='30Q10_low', season='Summer'):
         """
         Extracts the model selection logic used for composite plots (Extreme vs Non-Extreme).
-        Returns: tuple(extreme_models_list, non_extreme_models_list, model_rps)
+        Returns: tuple(extreme_models_list, non_extreme_models_list, model_changes)
         """
         model_data_loaded = cmip6_results.get('cmip6_model_data_loaded')
         metric_timeseries = cmip6_results.get('model_metric_timeseries')
@@ -3480,7 +3507,7 @@ class StorylineAnalyzer:
              return None, None, None
              
         selection_season = season.lower()
-        model_rps = {}
+        model_changes = {}
         all_models = list(model_data_loaded.keys())
         
         for model_run_key in all_models:
@@ -3503,7 +3530,8 @@ class StorylineAnalyzer:
                 continue
             
             hist_annual = ts_annual.sel(year=slice(1960, 2014)).dropna(dim='year')
-            if hist_annual.year.size < 20: 
+            hist_seasonal = ts_seasonal.sel(year=slice(1960, 2014)).dropna(dim='year')
+            if hist_annual.year.size < 20 or hist_seasonal.year.size < 20: 
                 continue
             
             try:
@@ -3525,25 +3553,29 @@ class StorylineAnalyzer:
             if fut_seasonal.year.size < 10: 
                 continue
             
+            # --- Event Counts ---
+            # Historical count
+            if metric_type == 'low':
+                count_hist = (hist_seasonal.values < thresh).sum()
+            else:
+                count_hist = (hist_seasonal.values > thresh).sum()
+            C_hist_scaled = count_hist * 30.0 / hist_seasonal.year.size
+
+            # Future count
             values = fut_seasonal.values
             if metric_type == 'low':
-                count = (values < thresh).sum()
+                count_fut = (values < thresh).sum()
             else:
-                count = (values > thresh).sum()
+                count_fut = (values > thresh).sum()
                 
-            prob = count / len(values)
-        
-            if prob > 1e-6:
-                T_fut = 1.0 / prob
-            else:
-                T_fut = np.inf
-                
-            model_rps[model_run_key] = T_fut
+            C_change = count_fut - C_hist_scaled
+            model_changes[model_run_key] = C_change
             
-        if len(model_rps) < 1:
+        if len(model_changes) < 1:
             return None, None, None
             
-        sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
+        # Sort models in descending order of change (greatest increase first)
+        sorted_models = sorted(model_changes.items(), key=lambda item: item[1], reverse=True)
         
         n_select = self.config.COMPOSITE_N_MODELS
         if sorted_models and '_ssp585' in sorted_models[0][0]:
@@ -3553,10 +3585,10 @@ class StorylineAnalyzer:
         
         if n_select < 1: n_select = 1
         
-        extreme_models = sorted_models[:n_select]     # Shortest T
-        non_extreme_models = sorted_models[-n_select:] # Longest T
+        extreme_models = sorted_models[:n_select]     # Top 14 (largest increase)
+        non_extreme_models = sorted_models[-n_select:] # Bottom 14 (largest decrease)
         
-        return [m[0] for m in extreme_models], [m[0] for m in non_extreme_models], model_rps
+        return [m[0] for m in extreme_models], [m[0] for m in non_extreme_models], model_changes
 
     def calculate_z500_composites_for_extremes(self, cmip6_results, gwl, event_key='30Q10_low', quantile=None, season='Summer'):
         """
@@ -3657,18 +3689,22 @@ class StorylineAnalyzer:
             return None
             
         # 2. Sort and Select Top/Bottom
-        sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
-        
-        n_select = self.config.COMPOSITE_N_MODELS
-        if sorted_models and '_ssp585' in sorted_models[0][0]:
-            n_select = 14
-        if n_select * 2 > len(sorted_models):
-            n_select = len(sorted_models) // 2
-        
-        if n_select < 1: n_select = 1
-        
-        extreme_models = sorted_models[:n_select]     # Shortest T
-        non_extreme_models = sorted_models[-n_select:] # Longest T
+        sorted_models = list(model_rps.items())
+        res_class = self.get_composite_extreme_models(cmip6_results, gwl, event_key, season)
+        if res_class is not None and res_class[0] is not None:
+            ext_keys, non_ext_keys, _ = res_class
+            extreme_models = [(m, model_rps[m]) for m in ext_keys if m in model_rps]
+            non_extreme_models = [(m, model_rps[m]) for m in non_ext_keys if m in model_rps]
+        else:
+            sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
+            n_select = self.config.COMPOSITE_N_MODELS
+            if sorted_models and '_ssp585' in sorted_models[0][0]:
+                n_select = 14
+            if n_select * 2 > len(sorted_models):
+                n_select = len(sorted_models) // 2
+            if n_select < 1: n_select = 1
+            extreme_models = sorted_models[:n_select]
+            non_extreme_models = sorted_models[-n_select:]
         
         logging.info(f"  Extreme Models (Shortest T): {[m[0] for m in extreme_models]}")
         logging.info(f"  Non-Extreme Models (Longest T): {[m[0] for m in non_extreme_models]}")
@@ -3980,18 +4016,22 @@ class StorylineAnalyzer:
             return None
             
         # 2. Sort and Select Top/Bottom
-        sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
-        
-        n_select = self.config.COMPOSITE_N_MODELS
-        if sorted_models and '_ssp585' in sorted_models[0][0]:
-            n_select = 14
-        if n_select * 2 > len(sorted_models):
-            n_select = len(sorted_models) // 2
-        
-        if n_select < 1: n_select = 1
-        
-        extreme_models = sorted_models[:n_select]     # Shortest T
-        non_extreme_models = sorted_models[-n_select:] # Longest T
+        sorted_models = list(model_rps.items())
+        res_class = self.get_composite_extreme_models(cmip6_results, gwl, event_key, season)
+        if res_class is not None and res_class[0] is not None:
+            ext_keys, non_ext_keys, _ = res_class
+            extreme_models = [(m, model_rps[m]) for m in ext_keys if m in model_rps]
+            non_extreme_models = [(m, model_rps[m]) for m in non_ext_keys if m in model_rps]
+        else:
+            sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
+            n_select = self.config.COMPOSITE_N_MODELS
+            if sorted_models and '_ssp585' in sorted_models[0][0]:
+                n_select = 14
+            if n_select * 2 > len(sorted_models):
+                n_select = len(sorted_models) // 2
+            if n_select < 1: n_select = 1
+            extreme_models = sorted_models[:n_select]
+            non_extreme_models = sorted_models[-n_select:]
         
         logging.info(f"  PSL Extreme Models (Shortest T): {[m[0] for m in extreme_models]}")
         logging.info(f"  PSL Non-Extreme Models (Longest T): {[m[0] for m in non_extreme_models]}")
@@ -4680,23 +4720,29 @@ class StorylineAnalyzer:
             return None
             
         # 2. Sort and Select
-        sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
-        
-        n_select = self.config.COMPOSITE_N_MODELS
-        if sorted_models and '_ssp585' in sorted_models[0][0]:
-            n_select = 14
-        if n_select * 2 > len(sorted_models):
-            n_select = len(sorted_models) // 2
-        if n_select < 1: n_select = 1
-            
-        if 'low' in event_key:
-             # Low flow: Lowest values are Extreme
-            extreme_models = sorted_models[:n_select]
-            non_extreme_models = sorted_models[-n_select:]
+        res_class = self.get_composite_extreme_models(cmip6_results, gwl, event_key, season)
+        if res_class is not None and res_class[0] is not None:
+            ext_keys, non_ext_keys, _ = res_class
+            if 'low' in event_key:
+                extreme_models = [(m, model_rps[m]) for m in ext_keys if m in model_rps]
+                non_extreme_models = [(m, model_rps[m]) for m in non_ext_keys if m in model_rps]
+            else:
+                extreme_models = [(m, model_rps[m]) for m in non_ext_keys if m in model_rps]
+                non_extreme_models = [(m, model_rps[m]) for m in ext_keys if m in model_rps]
         else:
-             # High flow: Highest values are Extreme
-            extreme_models = sorted_models[-n_select:]
-            non_extreme_models = sorted_models[:n_select]
+            sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
+            n_select = self.config.COMPOSITE_N_MODELS
+            if sorted_models and '_ssp585' in sorted_models[0][0]:
+                n_select = 14
+            if n_select * 2 > len(sorted_models):
+                n_select = len(sorted_models) // 2
+            if n_select < 1: n_select = 1
+            if 'low' in event_key:
+                extreme_models = sorted_models[:n_select]
+                non_extreme_models = sorted_models[-n_select:]
+            else:
+                extreme_models = sorted_models[-n_select:]
+                non_extreme_models = sorted_models[:n_select]
             
         logging.info(f"  UA Extreme Models (N={len(extreme_models)}): {[m[0] for m in extreme_models]}")
         logging.info(f"  UA Non-Extreme Models (N={len(non_extreme_models)}): {[m[0] for m in non_extreme_models]}")
@@ -5077,19 +5123,29 @@ class StorylineAnalyzer:
              
         if len(model_rps) < 1: return None
             
-        sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
-        n_select = self.config.COMPOSITE_N_MODELS
-        if sorted_models and '_ssp585' in sorted_models[0][0]:
-            n_select = 14
-        if n_select * 2 > len(sorted_models): n_select = len(sorted_models) // 2
-        if n_select < 1: n_select = 1
-            
-        if 'low' in event_key:
-            extreme_models = sorted_models[:n_select]
-            non_extreme_models = sorted_models[-n_select:]
+        res_class = self.get_composite_extreme_models(cmip6_results, gwl, event_key, season)
+        if res_class is not None and res_class[0] is not None:
+            ext_keys, non_ext_keys, _ = res_class
+            if 'low' in event_key:
+                extreme_models = [(m, model_rps[m]) for m in ext_keys if m in model_rps]
+                non_extreme_models = [(m, model_rps[m]) for m in non_ext_keys if m in model_rps]
+            else:
+                extreme_models = [(m, model_rps[m]) for m in non_ext_keys if m in model_rps]
+                non_extreme_models = [(m, model_rps[m]) for m in ext_keys if m in model_rps]
         else:
-            extreme_models = sorted_models[-n_select:]
-            non_extreme_models = sorted_models[:n_select]
+            sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
+            n_select = self.config.COMPOSITE_N_MODELS
+            if sorted_models and '_ssp585' in sorted_models[0][0]:
+                n_select = 14
+            if n_select * 2 > len(sorted_models): n_select = len(sorted_models) // 2
+            if n_select < 1: n_select = 1
+                
+            if 'low' in event_key:
+                extreme_models = sorted_models[:n_select]
+                non_extreme_models = sorted_models[-n_select:]
+            else:
+                extreme_models = sorted_models[-n_select:]
+                non_extreme_models = sorted_models[:n_select]
             
         logging.info(f"  TAS Extreme Models (N={len(extreme_models)}): {[m[0] for m in extreme_models]}")
         
@@ -5320,18 +5376,22 @@ class StorylineAnalyzer:
             return None
             
         # 2. Sort and Select Top/Bottom
-        sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
-        
-        n_select = self.config.COMPOSITE_N_MODELS
-        if sorted_models and '_ssp585' in sorted_models[0][0]:
-            n_select = 14
-        if n_select * 2 > len(sorted_models):
-            n_select = len(sorted_models) // 2
-        
-        if n_select < 1: n_select = 1
-        
-        extreme_models = sorted_models[:n_select]     # Shortest T
-        non_extreme_models = sorted_models[-n_select:] # Longest T
+        sorted_models = list(model_rps.items())
+        res_class = self.get_composite_extreme_models(cmip6_results, gwl, event_key, season)
+        if res_class is not None and res_class[0] is not None:
+            ext_keys, non_ext_keys, _ = res_class
+            extreme_models = [(m, model_rps[m]) for m in ext_keys if m in model_rps]
+            non_extreme_models = [(m, model_rps[m]) for m in non_ext_keys if m in model_rps]
+        else:
+            sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
+            n_select = self.config.COMPOSITE_N_MODELS
+            if sorted_models and '_ssp585' in sorted_models[0][0]:
+                n_select = 14
+            if n_select * 2 > len(sorted_models):
+                n_select = len(sorted_models) // 2
+            if n_select < 1: n_select = 1
+            extreme_models = sorted_models[:n_select]
+            non_extreme_models = sorted_models[-n_select:]
         
         logging.info(f"  PR Extreme Models (Shortest T): {[m[0] for m in extreme_models]}")
         logging.info(f"  PR Non-Extreme Models (Longest T): {[m[0] for m in non_extreme_models]}")

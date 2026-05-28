@@ -3899,16 +3899,15 @@ class Visualizer:
     @staticmethod
     def plot_final_figure_2_shift_and_verification(return_period_results, config, scenario):
         """
-        Combines Figure 3 (Regime Shift) and Historical Seasonal Verification (Low Flow only).
+        Reconstructs Figure 2 showing Historical Event Counts on top, and Future Change in Counts on the bottom.
         """
         logging.info(f"Plotting Final Figure 2 (Combined Shift and Verification) for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
 
-        if not return_period_results or 'data' not in return_period_results:
+        if not return_period_results or 'data' not in return_period_results or 'historical_verification' not in return_period_results:
             logging.warning("Missing data for Final Figure 2.")
             return
 
-        # --- PREPARE DATA FOR VERIFICATION ---
         hist_data = return_period_results.get('historical_verification', {})
         future_data = return_period_results.get('data', {})
         
@@ -3917,111 +3916,108 @@ class Visualizer:
         if scenario.lower() == 'ssp245':
             gwls_to_plot = [g for g in gwls_to_plot if g == 2.0]
             
-        low_keys = sorted([k for k in hist_data.keys() 
-                    if hist_data[k]['type'] == 'low' 
-                    and '30Q10' in k])
-        n_verif_rows = 1 + len(gwls_to_plot) if low_keys else 0
-
-        # --- SETUP FIGURE ---
-        n_verif_cols = 1 + len(gwls_to_plot) if low_keys else 0
-        
-        # We need a gridspec that can handle 2 columns in top row, and n_verif_cols in bottom row.
-        # A common multiple of 2 and n_verif_cols works well. Let's use 2 * n_verif_cols columns.
-        total_cols = max(2, 2 * n_verif_cols if n_verif_cols > 0 else 2)
-        
-        fig = plt.figure(figsize=(5.9, 8.0))
-        gs = gridspec.GridSpec(2, total_cols, height_ratios=[4.0, 2.2], hspace=0.1, wspace=0.4)
-        
-        # Bottom row: 2 plots (Fig 3: a and b), each spanning half the columns
-        col_span_top = total_cols // 2
-        axs_top = [fig.add_subplot(gs[1, 0:col_span_top]), fig.add_subplot(gs[1, col_span_top:])]
-
-        # ==========================================
-        # PART 1: FIGURE 3 (Core Finding GEV Panel)
-        # ==========================================
         target_event_substring = "30Q10"
         winter_keys = list(return_period_results['thresholds'].get('winter', {}).keys())
         summer_keys = list(return_period_results['thresholds'].get('summer', {}).keys())
         
         low_key_winter = next((k for k in winter_keys if target_event_substring in k and 'low' in k.lower()), None)
         low_key_summer = next((k for k in summer_keys if target_event_substring in k and 'low' in k.lower()), None)
-        
-        plot_configs_fig3 = [
-            {'half_year': 'summer', 'event_key': low_key_summer,  'base_title': 'd) Summer Half-Year', 'ax': axs_top[0]},
-            {'half_year': 'winter', 'event_key': low_key_winter,  'base_title': 'e) Winter Half-Year', 'ax': axs_top[1]},
-        ]
 
-        scenario_title = Visualizer._format_scenario_title(scenario)
-        # fig.suptitle is placed dynamically after tight_layout to eliminate whitespace
+        if not low_key_winter or not low_key_summer:
+            logging.warning("30Q10 event keys not found for Final Figure 2.")
+            return
+
+        # --- PREPARE HISTORICAL COUNTS MAPS ---
+        summer_hist_counts = hist_data[low_key_summer].get('summer_counts', [])
+        summer_hist_years = hist_data[low_key_summer].get('summer_years', [])
+        summer_hist_keys = hist_data[low_key_summer].get('historical_keys', [])
+        summer_hist_map = {k: c * 30.0 / y for k, c, y in zip(summer_hist_keys, summer_hist_counts, summer_hist_years) if y > 0}
+
+        winter_hist_counts = hist_data[low_key_winter].get('winter_counts', [])
+        winter_hist_years = hist_data[low_key_winter].get('winter_years', [])
+        winter_hist_keys = hist_data[low_key_winter].get('historical_keys', [])
+        winter_hist_map = {k: c * 30.0 / y for k, c, y in zip(winter_hist_keys, winter_hist_counts, winter_hist_years) if y > 0}
+
+        # --- SETUP SUBPLOTS GRID (2x2) ---
+        fig, axs = plt.subplots(2, 2, figsize=(9.5, 7.0), gridspec_kw={'height_ratios': [1, 2]})
         
-        gwl_colors = {f'+{gwl}°C GWL': Visualizer.GWL_COLORS[gwl] for gwl in gwls_to_plot}
+        # Season labels & titles
+        seasons = ['summer', 'winter']
+        season_names = {'summer': 'Summer Half-Year', 'winter': 'Winter Half-Year'}
+        event_keys = {'summer': low_key_summer, 'winter': low_key_winter}
+        hist_maps = {'summer': summer_hist_map, 'winter': winter_hist_map}
         
-        for i, cfg in enumerate(plot_configs_fig3):
-            ax = cfg['ax']
-            event_key = cfg['event_key']
-            half_year = cfg['half_year']
+        # Row 0: Historical counts
+        for col, season in enumerate(seasons):
+            ax = axs[0, col]
+            hist_map = hist_maps[season]
+            scaled_counts = list(hist_map.values())
             
-            full_title = cfg['base_title']
-            ax.set_title(full_title, loc='left', weight='bold')
-
-            if event_key and event_key in hist_data:
-                periods = hist_data[event_key].get(f'{half_year}_periods', [])
-                clean_periods = [x for x in periods if np.isfinite(x)]
-                hist_rp = np.median(clean_periods) if clean_periods else None
-                
-                # Fallback to general historical return period (annual target T) if seasonal isn't found
-                if hist_rp is None:
-                    if event_key and half_year in return_period_results['thresholds'] and event_key in return_period_results['thresholds'][half_year]:
-                        thresh_meta = return_period_results['thresholds'][half_year][event_key]
-                        hist_rp = thresh_meta.get('hist_return_period')
+            df_hist = pd.DataFrame({'Counts': scaled_counts, 'Group': 'Historical'})
+            
+            # Boxplot
+            sns.boxplot(data=df_hist, y='Group', x='Counts', ax=ax,
+                        color='lightgray', showfliers=False, linewidth=1.0, width=0.5, orient='h',
+                        boxprops={'alpha': 0.7}, medianprops={'color': 'black', 'linewidth': 2.5})
+            
+            # Stripplot
+            sns.stripplot(data=df_hist, y='Group', x='Counts', ax=ax,
+                          color='gray', alpha=0.6, size=5, jitter=0.15, orient='h')
+            
+            panel_letter = 'a' if col == 0 else 'b'
+            ax.set_title(f"({panel_letter}) {season_names[season]}", weight='bold', loc='left', fontsize=12)
+            ax.set_xlabel("Historical Counts (30y eq.)", fontsize=10)
+            ax.set_ylabel("")
+            ax.set_xlim(0, 4)
+            ax.set_xticks(range(0, 5, 1))
+            ax.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
+            
+            # Rotate y-tick label "Historical" vertically on the left subplot, remove on the right subplot
+            if col == 0:
+                ax.set_yticklabels(['Historical'], rotation=90, va='center', ha='center', fontsize=10)
+                ax.tick_params(axis='y', left=True, labelsize=10)
             else:
-                hist_rp = None
+                ax.set_yticklabels([])
+                ax.tick_params(axis='y', left=False)
+            ax.tick_params(axis='x', which='major', labelsize=10)
+
+        # Row 1: Future Change in Counts
+        gwl_display_order = [f'+{gwl}°C GWL' for gwl in gwls_to_plot]
+        
+        for col, season in enumerate(seasons):
+            ax = axs[1, col]
+            event_key = event_keys[season]
+            hist_map = hist_maps[season]
             
             records = []
-            gwl_display_order = []
-            
             for gwl in gwls_to_plot:
                 gwl_label = f'+{gwl}°C GWL'
-                gwl_display_order.append(gwl_label)
+                try:
+                    future_node = future_data[gwl][season]['MMM'][event_key]
+                    fut_counts = future_node.get('future_counts_all_models', [])
+                    fut_keys = future_node.get('future_keys_all_models', [])
+                except KeyError:
+                    continue
                 
-                try: 
-                    mmm_node = return_period_results['data'][gwl][half_year]['MMM'][event_key]
-                    mmm_rp = mmm_node.get('future_return_periods_all_models', [])
-                    mmm_missing = max(0, mmm_node.get('model_count_Y', len(mmm_rp)) - len(mmm_rp))
-                except KeyError: 
-                    mmm_rp, mmm_missing = [], 0
+                try:
+                    extreme_keys = future_data[gwl][season]['Extreme Models'][event_key].get('future_keys_all_models', [])
+                except KeyError:
+                    extreme_keys = []
+                try:
+                    non_extreme_keys = future_data[gwl][season]['Non-Extreme Models'][event_key].get('future_keys_all_models', [])
+                except KeyError:
+                    non_extreme_keys = []
+                
+                for k, C_fut in zip(fut_keys, fut_counts):
+                    C_hist_scaled = hist_map.get(k, np.nan)
+                    if np.isnan(C_hist_scaled):
+                        continue
+                    C_change = C_fut - C_hist_scaled
                     
-                try: 
-                    ext_node = return_period_results['data'][gwl][half_year]['Extreme Models'][event_key]
-                    ext_rp = ext_node.get('future_return_periods_all_models', [])
-                    ext_missing = max(0, ext_node.get('model_count_Y', len(ext_rp)) - len(ext_rp))
-                except KeyError: 
-                    ext_rp, ext_missing = [], 0
-                    
-                try: 
-                    non_ext_node = return_period_results['data'][gwl][half_year]['Non-Extreme Models'][event_key]
-                    non_ext_rp = non_ext_node.get('future_return_periods_all_models', [])
-                    non_ext_missing = max(0, non_ext_node.get('model_count_Y', len(non_ext_rp)) - len(non_ext_rp))
-                except KeyError: 
-                    non_ext_rp, non_ext_missing = [], 0
-                
-                def cap_rp(rp): return 35.0 if not np.isfinite(rp) or rp >= 35.0 else rp
-                
-                unassigned_mmm = [cap_rp(rp) for rp in mmm_rp] + [35.0] * mmm_missing
-                ext_list_copy = [cap_rp(rp) for rp in ext_rp] + [35.0] * ext_missing
-                non_ext_list_copy = [cap_rp(rp) for rp in non_ext_rp] + [35.0] * non_ext_missing
-                
-                def pop_match(val, lst, tol=1e-5):
-                    for idx, v in enumerate(lst):
-                        if abs(v - val) < tol:
-                            return lst.pop(idx)
-                    return None
-                
-                for r_val in unassigned_mmm:
-                    if pop_match(r_val, ext_list_copy) is not None:
+                    if k in extreme_keys:
                         category = 'Extreme'
                         color = '#b2182b'
-                    elif pop_match(r_val, non_ext_list_copy) is not None:
+                    elif k in non_extreme_keys:
                         category = 'Non-Extreme'
                         color = '#2166ac'
                     else:
@@ -4030,9 +4026,10 @@ class Visualizer:
                         
                     records.append({
                         'GWL': gwl_label,
-                        'Return Period': r_val,
+                        'Change': C_change,
                         'Category': category,
-                        'Color': color
+                        'Color': color,
+                        'Model': k
                     })
             
             df = pd.DataFrame(records)
@@ -4040,260 +4037,93 @@ class Visualizer:
             if df.empty:
                 ax.text(0.5, 0.5, "No Data", ha='center', va='center', transform=ax.transAxes)
                 continue
-
-            # --- MODIFICATION: Boxplot only based on models with actual 30Q10 event (RP <= 30) ---
-            df_boxplot = df[df['Return Period'] <= 30.0]
+                
+            # Boxplot
+            sns.boxplot(data=df, y='GWL', x='Change', ax=ax,
+                        order=gwl_display_order, color='lightgray',
+                        showfliers=False, linewidth=1.0, width=0.5, orient='h',
+                        boxprops={'alpha': 0.7}, medianprops={'color': 'black', 'linewidth': 2.5})
             
-            if not df_boxplot.empty:
-                sns.boxplot(data=df_boxplot, y='GWL', x='Return Period', ax=ax,
-                            order=gwl_display_order, color='lightgray',
-                            showfliers=False, linewidth=1.0, width=0.6, orient='h',
-                            boxprops={'alpha': 0.7})
-            
-            other = df[df['Category'] == 'Other']
-            if not other.empty:
-                sns.stripplot(data=other, y='GWL', x='Return Period', ax=ax,
-                              order=gwl_display_order, color='gray',
-                              alpha=0.4, size=5, jitter=True, orient='h')
-            
+            # Stripplot with custom markers
             y_ticks_pos = np.arange(len(gwl_display_order))
             for idx_gwl, gwl_label in enumerate(gwl_display_order):
-                key_df = df[(df['GWL'] == gwl_label) & (df['Category'] != 'Other')]
+                key_df = df[df['GWL'] == gwl_label]
                 for _, row in key_df.iterrows():
-                    y_pos = y_ticks_pos[idx_gwl] + np.random.uniform(-0.1, 0.1)
-                    marker_style = '^' if row['Category'] == 'Extreme' else 'v'
-                    ax.plot(row['Return Period'], y_pos, marker=marker_style, color=row['Color'], 
-                            markersize=6, alpha=0.9, linestyle='None', zorder=3)
-                
-                # --- MODIFICATION: Median calculation based on ALL models (no RP filter) ---
+                    y_pos = y_ticks_pos[idx_gwl] + np.random.uniform(-0.08, 0.08)
+                    if row['Category'] == 'Extreme':
+                        marker_style = '^'
+                        color = '#b2182b'
+                        zorder = 4
+                        size = 7
+                        alpha = 0.9
+                    elif row['Category'] == 'Non-Extreme':
+                        marker_style = 'v'
+                        color = '#2166ac'
+                        zorder = 4
+                        size = 7
+                        alpha = 0.9
+                    else:
+                        marker_style = 'o'
+                        color = 'gray'
+                        zorder = 3
+                        size = 5
+                        alpha = 0.4
+                    ax.plot(row['Change'], y_pos, marker=marker_style, color=color,
+                            markersize=size, alpha=alpha, linestyle='None', zorder=zorder)
+            
+            # Draw vertical median lines for Extreme (red) and Non-Extreme (blue) groups
+            for idx_gwl, gwl_label in enumerate(gwl_display_order):
                 y_pos_center = y_ticks_pos[idx_gwl]
                 for cat, cat_color in [('Extreme', '#b2182b'), ('Non-Extreme', '#2166ac')]:
-                    cat_rps = df[(df['GWL'] == gwl_label) & (df['Category'] == cat)]['Return Period'].values
-                    if len(cat_rps) > 0:
-                        median_rp = np.nanmedian(cat_rps)
-                        if np.isfinite(median_rp):
-                            # Draw a vertical line across the boxplot height
-                            ax.vlines(x=median_rp, ymin=y_pos_center - 0.3, ymax=y_pos_center + 0.3,
-                                     colors=cat_color, linestyles='-', linewidth=2.5, zorder=4)
+                    cat_changes = df[(df['GWL'] == gwl_label) & (df['Category'] == cat)]['Change'].values
+                    if len(cat_changes) > 0:
+                        median_change = np.nanmedian(cat_changes)
+                        if np.isfinite(median_change):
+                            ax.vlines(x=median_change, ymin=y_pos_center - 0.25, ymax=y_pos_center + 0.25,
+                                      colors=cat_color, linestyles='-', linewidth=2.5, zorder=5)
             
-            for idx_gwl, gwl_label in enumerate(gwl_display_order):
-                y_base = y_ticks_pos[idx_gwl]
-                try:
-                    gwl_df = df[df['GWL'] == gwl_label]
-                    if not gwl_df.empty:
-                        n_valid = len(gwl_df[gwl_df['Return Period'] <= 30.0])
-                        n_total = len(gwl_df)
-                        ax.text(0.98, y_base - 0.40, f"n={n_valid}/{n_total}", 
-                                transform=ax.get_yaxis_transform(), 
-                                horizontalalignment='right', verticalalignment='center',
-                                fontsize=9, color='black',
-                                bbox=dict(facecolor='white', alpha=0.6, pad=0.1, edgecolor='none'))
-                except Exception: pass
+            # Vertical line at 0 (no change)
+            ax.axvline(0, color='black', linestyle='--', linewidth=1.2, zorder=2)
             
-            # --- MODIFICATION: Squeeze the gap between GWL boxplots by expanding Y-limits ---
-            bottom, top = ax.get_ylim()
-            pad = 0.2  # Increase limit padding to squeeze boxplots vertically
-            if bottom > top:
-                ax.set_ylim(bottom + pad, top - pad)
-            else:
-                ax.set_ylim(bottom - pad, top + pad)
-
-            # if hist_rp:
-            #     ax.axvline(hist_rp, color='black', linestyle='--', linewidth=1.5)
-            
-            if ax.get_legend(): ax.get_legend().remove()
-
-            ax.set_xscale('linear')
-            ax.set_xlim(0, 36)
-            ticks = [0, 5, 10, 15, 20, 25, 30, 35]
-            labels = ['0', '5', '10', '15', '20', '25', '30', '...']
-            ax.set_xticks(ticks)
-            ax.set_xticklabels(labels, fontsize=10)
+            panel_letter = 'c' if col == 0 else 'd'
+            ax.set_title(f"({panel_letter}) {season_names[season]}", weight='bold', loc='left', fontsize=12)
+            ax.set_xlabel("Change in Counts", fontsize=10)
+            ax.set_ylabel("")
+            ax.set_xlim(-6, 12)
+            ax.set_xticks(range(-6, 13, 2))
             ax.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
-            ax.tick_params(axis='x', which='both', bottom=True, labelbottom=True)
-            ax.set_xlabel("Return Period (Years)", fontsize=10)
             
-            ax.set_ylabel('')
-            ax.set_yticks(range(len(gwl_display_order)))
-            if i == 0:
-                ax.set_yticklabels(gwl_display_order, fontsize=10, rotation='vertical', va='center')
+            # Rotate y-tick labels (+2.0°C GWL, +3.0°C GWL) vertically on the left subplot, remove on the right
+            if col == 0:
+                ax.set_yticklabels(gwl_display_order, rotation=90, va='center', ha='center', fontsize=10)
+                ax.tick_params(axis='y', left=True, labelsize=10)
             else:
                 ax.set_yticklabels([])
-
-            # --- MODIFICATION: Subplot-specific Legend with Model Counts ---
-            legend_labels_local = {
-                'Extreme': 'Increasing Freq.',
-                'Non-Extreme': 'Decreasing Freq.',
-                'Other': 'Other Models'
-            }
-            
-            from matplotlib.lines import Line2D
-            handles_local = [
-                Line2D([0], [0], marker='^', color='w', markerfacecolor='#b2182b', label=legend_labels_local['Extreme'], markersize=7),
-                Line2D([0], [0], marker='v', color='w', markerfacecolor='#2166ac', label=legend_labels_local['Non-Extreme'], markersize=7),
-            ]
-            # Legend moved to figure level below
-
-        # Global legend removed as model counts are now in subplot legends.
-
-
-        # ==========================================
-        # PART 2: VERIFICATION PANELS (Low Flow Only)
-        # ==========================================
-        if n_verif_cols > 0:
-            def get_median(lst):
-                clean = [x for x in lst if np.isfinite(x)]
-                if not clean: return np.nan
-                return np.median(clean)
-
-            scenario_labels = ['Historical (1960-2014)'] + [f'GWL +{g}°C' for g in gwls_to_plot]
-            lettering_start = 97 # ascii for 'a'
-            
-            # Subplots for bottom row
-            col_span_bot = total_cols // n_verif_cols
-            
-            for c in range(n_verif_cols):
-                start_col = c * col_span_bot
-                ax = fig.add_subplot(gs[0, start_col:start_col+col_span_bot]) 
-                is_hist = (c == 0)
-                current_gwl = gwls_to_plot[c-1] if not is_hist else None
-                col_label = scenario_labels[c]
-                
-                type_title = 'Seasonal Verification'
-                
-                x_pos = np.arange(len(low_keys))
-                width = 0.25
-                
-                annual_targets = []
-                winter_periods = []
-                summer_periods = []
-                winter_medians = []
-                summer_medians = []
-                winter_counts = []
-                summer_counts = []
-                
-                for k in low_keys:
-                    target_T = hist_data[k]['target_T']
-                    annual_targets.append(target_T)
-                    
-                    if is_hist:
-                        w_vals = hist_data[k]['winter_periods']
-                        s_vals = hist_data[k]['summer_periods']
-                        winter_periods.append(w_vals)
-                        summer_periods.append(s_vals)
-                        winter_medians.append(get_median(w_vals))
-                        summer_medians.append(get_median(s_vals))
-                        winter_counts.append((len([x for x in w_vals if np.isfinite(x)]), len(w_vals)))
-                        summer_counts.append((len([x for x in s_vals if np.isfinite(x)]), len(s_vals)))
-                        w_color = Visualizer.GWL_COLORS.get(2.0, 'navy')
-                        s_color = '#ff7f0e'
-                    else:
-                        try:
-                            w_data_node = future_data[current_gwl]['winter']['MMM'][k]
-                            w_vals = w_data_node['future_return_periods_all_models']
-                            winter_periods.append(w_vals)
-                            winter_medians.append(get_median(w_vals))
-                            winter_counts.append((w_data_node['model_count_X'], w_data_node['model_count_Y']))
-                        except Exception:
-                            winter_periods.append([])
-                            winter_medians.append(np.nan)
-                            winter_counts.append((0,0))
-
-                        try:
-                            s_data_node = future_data[current_gwl]['summer']['MMM'][k]
-                            s_vals = s_data_node['future_return_periods_all_models']
-                            summer_periods.append(s_vals)
-                            summer_medians.append(get_median(s_vals))
-                            summer_counts.append((s_data_node['model_count_X'], s_data_node['model_count_Y']))
-                        except Exception:
-                            summer_periods.append([])
-                            summer_medians.append(np.nan)
-                            summer_counts.append((0,0))
-                            
-                        w_color = Visualizer.GWL_COLORS.get(2.0, 'navy')
-                        s_color = '#ff7f0e'
-
-                panel_letter = chr(lettering_start + c)
-                ax.set_title(f'({panel_letter}) {col_label}', weight='bold', loc='center', fontsize=11)
-                
-                if not winter_medians or not summer_medians:
-                    continue
-
-                w_med = winter_medians[0]
-                s_med = summer_medians[0]
-                
-                w_rate = 1.0 / w_med if np.isfinite(w_med) and w_med > 0 else 0
-                s_rate = 1.0 / s_med if np.isfinite(s_med) and s_med > 0 else 0
-                
-                total_rate = w_rate + s_rate
-                
-                if total_rate > 0:
-                    sizes = [w_rate / total_rate, s_rate / total_rate]
-                    labels = [f'{sizes[0]*100:.1f}%', f'{sizes[1]*100:.1f}%']
-                    colors = [w_color, s_color]
-                    
-                    wedges, texts = ax.pie(sizes, labels=labels, colors=colors, startangle=90, radius=0.65,
-                                           wedgeprops={'edgecolor': 'white', 'linewidth': 1, 'alpha': 0.85},
-                                           textprops={'weight': 'bold', 'fontsize': 10})
-                                           
-                    w_str = f"{w_med:.1f}" if np.isfinite(w_med) else "Inf"
-                    s_str = f"{s_med:.1f}" if np.isfinite(s_med) else "Inf"
-                    ax.text(0, -0.85, f"Median Return Period\nSummer: {s_str} yrs\nWinter: {w_str} yrs",
-                            ha='center', va='top', fontsize=9,
-                            bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', boxstyle='round,pad=0.3'))
-                else:
-                    ax.text(0.5, 0.5, "No Data / Infinite Return Periods", ha='center', va='center', transform=ax.transAxes)
-                    ax.axis('off')
-
-        plt.tight_layout(rect=[0, 0.12, 1, 0.94], h_pad=3.5, w_pad=0.8)
+                ax.tick_params(axis='y', left=False)
+            ax.tick_params(axis='x', which='major', labelsize=10)
         
-        # Add left-aligned subtitles for both rows after tight_layout.
+        # Overall figure titles & layouts
+        scenario_title = Visualizer._format_scenario_title(scenario)
+        fig.suptitle(f"Verification and Future Changes in 30Q10 Low-Flow Events - {scenario_title}",
+                     fontsize=12, weight='bold', y=0.97)
         
-        # Row 0 axes = all axes except the two bottom-row (axs_top) axes
-        row0_axes = [ax for ax in fig.axes if ax not in axs_top]
+        # Add subtitles/sub-headlines for upper (Historical) and lower (Future) rows
+        fig.text(0.06, 0.93, "Historical Event Frequency (Verification)", ha='left', fontsize=12, weight='bold')
+        fig.text(0.06, 0.61, f"Future Changes under {scenario_title} Scenario", ha='left', fontsize=12, weight='bold')
         
-        if row0_axes:
-            left_x_row0 = min(ax.get_position().x0 for ax in row0_axes)
-            top_y_row0  = max(ax.get_position().y1 for ax in row0_axes)
-            bottom_y_row0 = min(ax.get_position().y0 for ax in row0_axes)
-        else:
-            left_x_row0, top_y_row0 = 0.08, 0.85
-            bottom_y_row0 = 0.5
+        plt.tight_layout(rect=[0.02, 0.08, 0.98, 0.90], h_pad=3.5, w_pad=2.0)
         
-        left_x_row1 = min(ax.get_position().x0 for ax in axs_top)
-        top_y_row1  = max(ax.get_position().y1 for ax in axs_top)
-        
-        # Upward nudge to place text above the subplot titles
-        nudge_row0 = 0.045
-        nudge_row1 = 0.045
-        fig.text(left_x_row0, top_y_row0 + nudge_row0,
-                 "Event Distribution",
-                 ha='left', va='bottom', fontsize=12, weight='bold')
-        fig.text(left_x_row1, top_y_row1 + nudge_row1,
-                 "Projected Future Return Periods",
-                 ha='left', va='bottom', fontsize=12, weight='bold')
-
-        # DYNAMIC SUPTITLE TO ELIMINATE WHITESPACE
-        fig.text(0.5, top_y_row0 + nudge_row0 + 0.04,
-                 f"Future Changes in 30Q10 Events - {scenario_title}",
-                 ha='center', va='bottom', fontsize=12, weight='bold')
-
-        # Legend for Verification Panels (Summer/Winter) below row 0
-        sum_win_handles = [
-            mpatches.Patch(color='#ff7f0e', label='summer half-year'),
-            mpatches.Patch(color=Visualizer.GWL_COLORS.get(2.0, 'navy'), label='winter half-year')
+        # Legend at the bottom
+        from matplotlib.lines import Line2D
+        legend_handles = [
+            Line2D([0], [0], marker='^', color='w', markerfacecolor='#b2182b', label='Increasing Freq. (Top 14)', markersize=8),
+            Line2D([0], [0], marker='v', color='w', markerfacecolor='#2166ac', label='Decreasing Freq. (Bottom 14)', markersize=8),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.5, label='Other Models', markersize=6),
+            Line2D([0], [0], color='#b2182b', lw=2.0, label='Median (Increasing Freq.)'),
+            Line2D([0], [0], color='#2166ac', lw=2.0, label='Median (Decreasing Freq.)')
         ]
-        # Place it right below the first row of subplots
-        fig.legend(handles=sum_win_handles, loc='upper center', bbox_to_anchor=(0.5, bottom_y_row0 - 0.04), ncol=2, fontsize=9, frameon=False, handletextpad=0.3)
-
-        # Global legend below all plots
-        handles_local.extend([
-            Line2D([0], [0], color='#b2182b', lw=2.5, label='Median (Increasing Freq.)'),
-            Line2D([0], [0], color='#2166ac', lw=2.5, label='Median (Decreasing Freq.)'),
-            Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', label='Other Models', markersize=6, alpha=0.5)
-        ])
-        fig.legend(handles=handles_local, loc='lower center', bbox_to_anchor=(0.5, -0.01), ncol=3, fontsize=9, frameon=False, handletextpad=0.3)
-
+        fig.legend(handles=legend_handles, loc='lower center', ncol=3, fontsize=9.5, frameon=False, bbox_to_anchor=(0.5, 0.015))
+        
         filename = os.path.join(config.PLOT_DIR, f"final_figure_2_regime_shift_and_verification_{scenario}.png")
         plt.savefig(filename, dpi=600, bbox_inches='tight')
         plt.close(fig)
@@ -6363,7 +6193,7 @@ class Visualizer:
         # Split layout for better control of spaces and subtitles
         gs_top = gridspec.GridSpec(1, 2, top=0.91, bottom=0.73, wspace=0.10, left=0.12, right=0.95)
         gs_cbar = gridspec.GridSpec(1, 1, top=0.725, bottom=0.705, left=0.235, right=0.835)
-        gs_bottom = gridspec.GridSpec(2, 2, top=0.58, bottom=0.13, wspace=0.35, hspace=0.55, left=0.12, right=0.95)
+        gs_bottom = gridspec.GridSpec(2, 2, top=0.55, bottom=0.13, wspace=0.35, hspace=0.55, left=0.12, right=0.95)
 
         import matplotlib.colors as mcolors
         import matplotlib.patheffects as pe
@@ -6546,55 +6376,57 @@ class Visualizer:
                             logging.warning(f"Could not compute 95% range for {key}: {e}")
 
                     # Plot Extreme Models Mean
-                    # Calculate Composite Jet Indices and Plot Horizontal Lines
-                    season_comp = summer_composite if 'Summer' in key else winter_composite
-                    if season_comp is not None:
-                        comp_fut_ext = season_comp.get('future_extreme_mean')
-                        comp_fut_non = season_comp.get('future_non_extreme_mean')
-                        comp_hist_mmm = season_comp.get('hist_climatology_mean')
-                        
-                        calc_func = JetStreamAnalyzer.calculate_jet_lat_index if 'JetLat' in key else JetStreamAnalyzer.calculate_jet_speed_index
-                        val_hist_mmm = calc_func(comp_hist_mmm) if comp_hist_mmm is not None else None
-                        
-                        # Extreme Models Composite Line
-                        if comp_fut_ext is not None and val_hist_mmm is not None:
-                            try:
-                                val_fut = calc_func(comp_fut_ext)
-                                if val_fut is not None:
-                                    ext_val = float(val_fut.values - val_hist_mmm.values)
-                                    label = 'Increasing Freq.' if 'low' in event_key else 'Decreasing Freq.'
-                                    
-                                    # Get crossing range
-                                    ext_crossing_years = [gwl_years[m][gwl] for m in extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
-                                    if ext_crossing_years:
-                                        t_min, t_max = min(ext_crossing_years), max(ext_crossing_years)
-                                        ax.hlines(y=ext_val, xmin=t_min, xmax=t_max, color='#b2182b', alpha=0.9, linewidth=4, linestyles='dashed', zorder=6)
-                                        from matplotlib.lines import Line2D
-                                        proxy = Line2D([0], [0], color='#b2182b', linewidth=4, alpha=0.9, linestyle='--')
-                                        current_handles.append(proxy)
-                                        current_labels.append(label)
-                            except Exception as e:
-                                logging.warning(f"Could not compute composite metric for {key} extreme models: {e}")
-                                
-                        # Non-Extreme Models Composite Line
-                        if comp_fut_non is not None and val_hist_mmm is not None:
-                            try:
-                                val_fut = calc_func(comp_fut_non)
-                                if val_fut is not None:
-                                    non_ext_val = float(val_fut.values - val_hist_mmm.values)
-                                    label = 'Decreasing Freq.' if 'low' in event_key else 'Increasing Freq.'
-                                    
-                                    # Get crossing range
-                                    non_ext_crossing_years = [gwl_years[m][gwl] for m in non_extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
-                                    if non_ext_crossing_years:
-                                        t_min, t_max = min(non_ext_crossing_years), max(non_ext_crossing_years)
-                                        ax.hlines(y=non_ext_val, xmin=t_min, xmax=t_max, color='#2166ac', alpha=0.9, linewidth=4, linestyles='dashdot', zorder=6)
-                                        from matplotlib.lines import Line2D
-                                        proxy = Line2D([0], [0], color='#2166ac', linewidth=4, alpha=0.9, linestyle='-.')
-                                        current_handles.append(proxy)
-                                        current_labels.append(label)
-                            except Exception as e:
-                                logging.warning(f"Could not compute composite metric for {key} non-extreme models: {e}")
+                    # Calculate storyline group mean anomalies directly from individual model anomalies
+                    # This avoids the "smearing" effect of calculating a non-linear jet index on averaged wind fields
+                    ext_vals = []
+                    for member_jet in extreme_members:
+                        model_name = member_jet.attrs.get('model_key', '')
+                        gwl_yr = gwl_years.get(model_name, {}).get(gwl)
+                        if gwl_yr is not None and gwl_yr in member_jet.season_year.values:
+                            val = float(member_jet.sel(season_year=gwl_yr).values)
+                            ext_vals.append(val)
+                    ext_val = np.nanmean(ext_vals) if ext_vals else None
+
+                    non_ext_vals = []
+                    for member_jet in non_extreme_members:
+                        model_name = member_jet.attrs.get('model_key', '')
+                        gwl_yr = gwl_years.get(model_name, {}).get(gwl)
+                        if gwl_yr is not None and gwl_yr in member_jet.season_year.values:
+                            val = float(member_jet.sel(season_year=gwl_yr).values)
+                            non_ext_vals.append(val)
+                    non_ext_val = np.nanmean(non_ext_vals) if non_ext_vals else None
+
+                    # Extreme Models Composite Line
+                    if ext_val is not None:
+                        try:
+                            label = 'Increasing Freq.' if 'low' in event_key else 'Decreasing Freq.'
+                            # Get crossing range
+                            ext_crossing_years = [gwl_years[m][gwl] for m in extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
+                            if ext_crossing_years:
+                                t_min, t_max = min(ext_crossing_years), max(ext_crossing_years)
+                                ax.hlines(y=ext_val, xmin=t_min, xmax=t_max, color='#b2182b', alpha=0.9, linewidth=4, linestyles='dashed', zorder=6)
+                                from matplotlib.lines import Line2D
+                                proxy = Line2D([0], [0], color='#b2182b', linewidth=4, alpha=0.9, linestyle='--')
+                                current_handles.append(proxy)
+                                current_labels.append(label)
+                        except Exception as e:
+                            logging.warning(f"Could not plot composite line for {key} extreme models: {e}")
+
+                    # Non-Extreme Models Composite Line
+                    if non_ext_val is not None:
+                        try:
+                            label = 'Decreasing Freq.' if 'low' in event_key else 'Increasing Freq.'
+                            # Get crossing range
+                            non_ext_crossing_years = [gwl_years[m][gwl] for m in non_extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
+                            if non_ext_crossing_years:
+                                t_min, t_max = min(non_ext_crossing_years), max(non_ext_crossing_years)
+                                ax.hlines(y=non_ext_val, xmin=t_min, xmax=t_max, color='#2166ac', alpha=0.9, linewidth=4, linestyles='dashdot', zorder=6)
+                                from matplotlib.lines import Line2D
+                                proxy = Line2D([0], [0], color='#2166ac', linewidth=4, alpha=0.9, linestyle='-.')
+                                current_handles.append(proxy)
+                                current_labels.append(label)
+                        except Exception as e:
+                            logging.warning(f"Could not plot composite line for {key} non-extreme models: {e}")
                 
                 if cmip6_plot_data.get(key) and cmip6_plot_data[key].get('mmm') is not None:
                     mmm_ts = cmip6_plot_data[key]['mmm']
@@ -6666,7 +6498,7 @@ class Visualizer:
         plt.suptitle(f'Storyline Impacts on Zonal Wind (U850) & Jet Stream\nGWL {gwl}°C, {scenario.upper()}', fontsize=12, weight='bold', y=0.99)
         # Add subtitles for the row sections
         fig.text(0.12, 0.93, 'Zonal Wind (U850) Differences (Inc. Freq. \u2212 Dec. Freq.)', ha='left', va='center', fontsize=12, weight='bold')
-        fig.text(0.12, 0.62, 'Jet Stream Evolution', ha='left', va='center', fontsize=12, weight='bold')
+        fig.text(0.12, 0.64, 'Jet Stream Evolution', ha='left', va='center', fontsize=12, weight='bold')
 
         if 'global_legend_handles' in locals():
             clean_labels = [l.split(' (trend:')[0] if 'MMM' in l else l for l in global_legend_labels]

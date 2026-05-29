@@ -3899,7 +3899,8 @@ class Visualizer:
     @staticmethod
     def plot_final_figure_2_shift_and_verification(return_period_results, config, scenario):
         """
-        Reconstructs Figure 2 showing Historical Event Counts on top, and Future Change in Counts on the bottom.
+        Reconstructs Figure 2 showing Historical Event Counts and Future Counts in a combined 90°-rotated 1x2 subplot layout.
+        The x-axis represents the evolution from Historical to +2.0°C and +3.0°C GWL, and the y-axis represents the Event Counts.
         """
         logging.info(f"Plotting Final Figure 2 (Combined Shift and Verification) for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
@@ -3938,8 +3939,8 @@ class Visualizer:
         winter_hist_keys = hist_data[low_key_winter].get('historical_keys', [])
         winter_hist_map = {k: c * 30.0 / y for k, c, y in zip(winter_hist_keys, winter_hist_counts, winter_hist_years) if y > 0}
 
-        # --- SETUP SUBPLOTS GRID (2x2) ---
-        fig, axs = plt.subplots(2, 2, figsize=(9.5, 7.0), gridspec_kw={'height_ratios': [1, 2]})
+        # --- SETUP SUBPLOTS GRID (1x2, side-by-side) ---
+        fig, axs = plt.subplots(1, 2, figsize=(10.0, 5.5))
         
         # Season labels & titles
         seasons = ['summer', 'winter']
@@ -3947,49 +3948,27 @@ class Visualizer:
         event_keys = {'summer': low_key_summer, 'winter': low_key_winter}
         hist_maps = {'summer': summer_hist_map, 'winter': winter_hist_map}
         
-        # Row 0: Historical counts
-        for col, season in enumerate(seasons):
-            ax = axs[0, col]
-            hist_map = hist_maps[season]
-            scaled_counts = list(hist_map.values())
-            
-            df_hist = pd.DataFrame({'Counts': scaled_counts, 'Group': 'Historical'})
-            
-            # Boxplot
-            sns.boxplot(data=df_hist, y='Group', x='Counts', ax=ax,
-                        color='lightgray', showfliers=False, linewidth=1.0, width=0.5, orient='h',
-                        boxprops={'alpha': 0.7}, medianprops={'color': 'black', 'linewidth': 2.5})
-            
-            # Stripplot
-            sns.stripplot(data=df_hist, y='Group', x='Counts', ax=ax,
-                          color='gray', alpha=0.6, size=5, jitter=0.15, orient='h')
-            
-            panel_letter = 'a' if col == 0 else 'b'
-            ax.set_title(f"({panel_letter}) {season_names[season]}", weight='bold', loc='left', fontsize=12)
-            ax.set_xlabel("Historical Counts (30y eq.)", fontsize=10)
-            ax.set_ylabel("")
-            ax.set_xlim(0, 14)
-            ax.set_xticks(range(0, 15, 2))
-            ax.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
-            
-            # Rotate y-tick label "Historical" vertically on the left subplot, remove on the right subplot
-            if col == 0:
-                ax.set_yticklabels(['Historical'], rotation=90, va='center', ha='center', fontsize=10)
-                ax.tick_params(axis='y', left=True, labelsize=10)
-            else:
-                ax.set_yticklabels([])
-                ax.tick_params(axis='y', left=False)
-            ax.tick_params(axis='x', which='major', labelsize=10)
+        gwl_display_order = ['Historical'] + [f'+{gwl}°C GWL' for gwl in gwls_to_plot]
 
-        # Row 1: Future Absolute Counts
-        gwl_display_order = [f'+{gwl}°C GWL' for gwl in gwls_to_plot]
-        
         for col, season in enumerate(seasons):
-            ax = axs[1, col]
+            ax = axs[col]
             event_key = event_keys[season]
             hist_map = hist_maps[season]
             
+            # Construct unified records for this season
             records = []
+            
+            # Add historical records
+            for k, C_hist in hist_map.items():
+                records.append({
+                    'GWL': 'Historical',
+                    'Counts': C_hist,
+                    'Category': 'Historical',
+                    'Color': 'gray',
+                    'Model': k
+                })
+            
+            # Add future records
             for gwl in gwls_to_plot:
                 gwl_label = f'+{gwl}°C GWL'
                 try:
@@ -4037,94 +4016,122 @@ class Visualizer:
                 ax.text(0.5, 0.5, "No Data", ha='center', va='center', transform=ax.transAxes)
                 continue
                 
-            # Boxplot
-            sns.boxplot(data=df, y='GWL', x='Counts', ax=ax,
+            # Vertical Boxplot (orient='v', stage on x-axis, counts on y-axis)
+            sns.boxplot(data=df, x='GWL', y='Counts', ax=ax,
                         order=gwl_display_order, color='lightgray',
-                        showfliers=False, linewidth=1.0, width=0.5, orient='h',
+                        showfliers=False, linewidth=1.0, width=0.5, orient='v',
                         boxprops={'alpha': 0.7}, medianprops={'color': 'black', 'linewidth': 2.5})
             
-            # Stripplot with custom markers
-            y_ticks_pos = np.arange(len(gwl_display_order))
+            # Stripplot with custom markers and ordered horizontal positioning (dodge/swarm)
+            x_ticks_pos = np.arange(len(gwl_display_order))
             for idx_gwl, gwl_label in enumerate(gwl_display_order):
                 key_df = df[df['GWL'] == gwl_label]
-                for _, row in key_df.iterrows():
-                    y_pos = y_ticks_pos[idx_gwl] + np.random.uniform(-0.08, 0.08)
-                    if row['Category'] == 'Extreme':
-                        marker_style = '^'
-                        color = '#b2182b'
-                        zorder = 4
-                        size = 7
-                        alpha = 0.9
-                    elif row['Category'] == 'Non-Extreme':
-                        marker_style = 'v'
-                        color = '#2166ac'
-                        zorder = 4
-                        size = 7
-                        alpha = 0.9
+                
+                # Group by the Counts value rounded to 4 decimal places
+                grouped = key_df.groupby(key_df['Counts'].round(4))
+                for counts_val, group in grouped:
+                    # Sort the group by Category and Model to keep it ordered
+                    category_order = {'Extreme': 0, 'Other': 1, 'Non-Extreme': 2, 'Historical': 3}
+                    sorted_group = group.copy()
+                    sorted_group['sort_key'] = sorted_group['Category'].map(category_order).fillna(4)
+                    sorted_group = sorted_group.sort_values(by=['sort_key', 'Model'])
+                    
+                    N = len(sorted_group)
+                    if N == 1:
+                        offsets = [0.0]
                     else:
-                        marker_style = 'o'
-                        color = 'gray'
-                        zorder = 3
-                        size = 5
-                        alpha = 0.4
-                    ax.plot(row['Counts'], y_pos, marker=marker_style, color=color,
-                            markersize=size, alpha=alpha, linestyle='None', zorder=zorder)
+                        max_spread = 0.42
+                        # We want a preferred spacing of 0.05, but if N is large we reduce spacing
+                        # so that total spread does not exceed max_spread
+                        dx = max_spread / (N - 1)
+                        if dx > 0.05:
+                            dx = 0.05
+                        
+                        # Calculate symmetric offsets centered at 0
+                        offsets = [(i - (N - 1) / 2.0) * dx for i in range(N)]
+                    
+                    for idx_item, (_, row) in enumerate(sorted_group.iterrows()):
+                        x_pos = x_ticks_pos[idx_gwl] + offsets[idx_item]
+                        if row['Category'] == 'Extreme':
+                            marker_style = '^'
+                            color = '#b2182b'
+                            zorder = 4
+                            size = 7
+                            alpha = 0.9
+                        elif row['Category'] == 'Non-Extreme':
+                            marker_style = 'v'
+                            color = '#2166ac'
+                            zorder = 4
+                            size = 7
+                            alpha = 0.9
+                        elif row['Category'] == 'Historical':
+                            marker_style = 'o'
+                            color = 'black'
+                            zorder = 3
+                            size = 6.5
+                            alpha = 0.6
+                        else:
+                            marker_style = 'o'
+                            color = 'gray'
+                            zorder = 3
+                            size = 5
+                            alpha = 0.4
+                        ax.plot(x_pos, row['Counts'], marker=marker_style, color=color,
+                                markersize=size, alpha=alpha, linestyle='None', zorder=zorder)
             
-            # Draw vertical median lines for Extreme (red) and Non-Extreme (blue) groups
+            # Draw horizontal median lines for Extreme (red) and Non-Extreme (blue) groups
             for idx_gwl, gwl_label in enumerate(gwl_display_order):
-                y_pos_center = y_ticks_pos[idx_gwl]
+                x_pos_center = x_ticks_pos[idx_gwl]
                 for cat, cat_color in [('Extreme', '#b2182b'), ('Non-Extreme', '#2166ac')]:
                     cat_changes = df[(df['GWL'] == gwl_label) & (df['Category'] == cat)]['Counts'].values
                     if len(cat_changes) > 0:
                         median_change = np.nanmedian(cat_changes)
                         if np.isfinite(median_change):
-                            ax.vlines(x=median_change, ymin=y_pos_center - 0.25, ymax=y_pos_center + 0.25,
+                            ax.hlines(y=median_change, xmin=x_pos_center - 0.25, xmax=x_pos_center + 0.25,
                                       colors=cat_color, linestyles='-', linewidth=2.5, zorder=5)
             
-            # Vertical reference line at historical median
+            # Horizontal reference line at historical median across the entire subplot
             scaled_counts = list(hist_map.values())
             hist_median = np.nanmedian(scaled_counts) if scaled_counts else np.nan
             if np.isfinite(hist_median):
-                ax.axvline(hist_median, color='black', linestyle='--', linewidth=1.2, zorder=2)
+                ax.axhline(hist_median, color='black', linestyle='--', linewidth=1.2, zorder=2)
             
-            panel_letter = 'c' if col == 0 else 'd'
+            panel_letter = 'a' if col == 0 else 'b'
             ax.set_title(f"({panel_letter}) {season_names[season]}", weight='bold', loc='left', fontsize=12)
-            ax.set_xlabel("Future Counts (30y eq.)", fontsize=10)
-            ax.set_ylabel("")
-            ax.set_xlim(0, 14)
-            ax.set_xticks(range(0, 15, 2))
-            ax.grid(True, which='major', axis='x', linestyle=':', alpha=0.7)
-            
-            # Rotate y-tick labels (+2.0°C GWL, +3.0°C GWL) vertically on the left subplot, remove on the right
+            ax.set_xlabel("")
             if col == 0:
-                ax.set_yticklabels(gwl_display_order, rotation=90, va='center', ha='center', fontsize=10)
-                ax.tick_params(axis='y', left=True, labelsize=10)
+                ax.set_ylabel("Event Counts (30y eq.)", fontsize=11, weight='bold')
             else:
-                ax.set_yticklabels([])
-                ax.tick_params(axis='y', left=False)
+                ax.set_ylabel("")
+            ax.set_ylim(-0.5, 14)
+            ax.set_yticks(range(0, 15, 2))
+            ax.grid(True, which='major', axis='y', linestyle=':', alpha=0.7)
+            
+            ax.set_xticks(range(len(gwl_display_order)))
+            ax.set_xticklabels(gwl_display_order, fontsize=10)
             ax.tick_params(axis='x', which='major', labelsize=10)
+            ax.tick_params(axis='y', which='major', labelsize=10)
         
         # Overall figure titles & layouts
         scenario_title = Visualizer._format_scenario_title(scenario)
         fig.suptitle(f"Verification and Future Frequency of 30Q10 Low-Flow Events - {scenario_title}",
                      fontsize=12, weight='bold', y=0.97)
         
-        # Add subtitles/sub-headlines for upper (Historical) and lower (Future) rows
-        fig.text(0.06, 0.93, "Historical Event Frequency (Verification)", ha='left', fontsize=12, weight='bold')
-        fig.text(0.06, 0.61, f"Future Event Frequency under {scenario_title} Scenario", ha='left', fontsize=12, weight='bold')
+        plt.tight_layout(rect=[0.02, 0.08, 0.98, 0.92], h_pad=2.0, w_pad=2.0)
         
-        plt.tight_layout(rect=[0.02, 0.08, 0.98, 0.90], h_pad=3.5, w_pad=2.0)
-        
-        # Legend at the bottom
+        # Legend at the bottom (ordered for Column-Major legend layout with ncol=4)
         from matplotlib.lines import Line2D
         legend_handles = [
             Line2D([0], [0], marker='^', color='w', markerfacecolor='#b2182b', label='Highest Freq. (Top 14)', markersize=8),
-            Line2D([0], [0], marker='v', color='w', markerfacecolor='#2166ac', label='Lowest Freq. (Bottom 14)', markersize=8),
-            Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.5, label='Other Models', markersize=6),
             Line2D([0], [0], color='#b2182b', lw=2.0, label='Median (Highest Freq.)'),
-            Line2D([0], [0], color='#2166ac', lw=2.0, label='Median (Lowest Freq.)')
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='black', alpha=0.6, label='Historical Models', markersize=6.5),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.4, label='Other Future Models', markersize=5),
+            Line2D([0], [0], marker='v', color='w', markerfacecolor='#2166ac', label='Lowest Freq. (Bottom 14)', markersize=8),
+            Line2D([0], [0], color='#2166ac', lw=2.0, label='Median (Lowest Freq.)'),
+            Line2D([0], [0], color='black', linestyle='--', lw=1.2, label='Historical Median'),
+            Line2D([0], [0], color='black', lw=2.5, label='Multi-Model Median')
         ]
-        fig.legend(handles=legend_handles, loc='lower center', ncol=3, fontsize=9.5, frameon=False, bbox_to_anchor=(0.5, 0.015))
+        fig.legend(handles=legend_handles, loc='lower center', ncol=4, fontsize=9.0, frameon=False, bbox_to_anchor=(0.5, 0.015))
         
         filename = os.path.join(config.PLOT_DIR, f"final_figure_2_regime_shift_and_verification_{scenario}.png")
         plt.savefig(filename, dpi=600, bbox_inches='tight')
@@ -6310,8 +6317,8 @@ class Visualizer:
             if range_val == 0: range_val = 1.0
             return (min_val - 0.05 * range_val, max_val + 0.05 * range_val)
 
-        lat_ylim = (-2.5, 3.5)
-        speed_ylim = (-1.5, 2)
+        lat_ylim = (-2.1, 2.6)
+        speed_ylim = (-1.2, 1.5)
         
         plot_configs = [
             {'key': 'Hydro_Summer_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 0]), 'title': '(c) Summer Half-Year\n    Jet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim},
@@ -6454,9 +6461,9 @@ class Visualizer:
                     else:
                         label_suffix = ""
 
-                    line, = ax.plot(mmm_ts.season_year, mmm_ts, color='black', linewidth=2.5, label=f'All CMIP6 MMM (5y-MA){label_suffix}', zorder=6)
+                    line, = ax.plot(mmm_ts.season_year, mmm_ts, color='black', linewidth=2.5, label=f'CMIP6 MMM{label_suffix}', zorder=6)
                     current_handles.append(line)
-                    current_labels.append(f'All CMIP6 MMM (5y-MA){label_suffix}')
+                    current_labels.append(f'CMIP6 MMM{label_suffix}')
 
                 ax.set_title(p_config['title'], weight='bold', loc='left')
                 ax.set_ylabel(p_config['ylabel'])
@@ -6500,7 +6507,7 @@ class Visualizer:
         plt.suptitle(f'Storyline Impacts on Zonal Wind (U850) & Jet Stream\nGWL {gwl}°C, {scenario.upper()}', fontsize=12, weight='bold', y=0.99)
         # Add subtitles for the row sections
         fig.text(0.12, 0.93, 'Zonal Wind (U850) Differences (Inc. Freq. \u2212 Dec. Freq.)', ha='left', va='center', fontsize=12, weight='bold')
-        fig.text(0.12, 0.64, 'Jet Stream Evolution', ha='left', va='center', fontsize=12, weight='bold')
+        fig.text(0.12, 0.61, 'Jet Stream Evolution', ha='left', va='center', fontsize=12, weight='bold')
 
         if 'global_legend_handles' in locals():
             clean_labels = [l.split(' (trend:')[0] if 'MMM' in l else l for l in global_legend_labels]

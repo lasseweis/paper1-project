@@ -80,7 +80,7 @@ class DataProcessor:
         """Process NetCDF file (e.g., from 20CRv3) and return monthly data. Results are cached."""
         logging.info(f"Processing 20CRv3 data from {file}...")
         try:
-            ds = xr.open_dataset(file, decode_times=True, use_cftime=True, chunks={'time': 'auto'})
+            ds = xr.open_dataset(file, decode_times=True, use_cftime=True, chunks={'time': 1000})
             
             var_mapping = {'pr': 'prate', 'tas': 'air', 'ua': 'uwnd'}
             actual_var = var_mapping.get(var_name, var_name)
@@ -168,8 +168,8 @@ class DataProcessor:
         """Process ERA5 NetCDF file and return monthly data. Results are cached."""
         logging.info(f"Processing ERA5 data from {file}...")
         try:
-            # Use chunks={'time': 'auto'} for lazy loading via Dask to avoid heavy NFS/memory overhead
-            ds = xr.open_dataset(file, decode_times=True, use_cftime=True, chunks={'time': 'auto'})
+            # Use chunks={'time': 1000} for lazy loading via Dask to avoid heavy NFS/memory overhead and auto rechunking errors with object dtype
+            ds = xr.open_dataset(file, decode_times=True, use_cftime=True, chunks={'time': 1000})
             
             # Slice the time series BEFORE doing the expensive resample to reduce data size and memory usage.
             # We add a 1-month buffer at the boundaries to ensure clean resampling.

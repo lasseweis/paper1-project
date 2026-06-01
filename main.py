@@ -119,6 +119,7 @@ class ClimateAnalysis:
                 era5_dependent_plots.append(os.path.join(Config.PLOT_DIR, f"cmip6_scatter_comparison_gwl_{gwl:.1f}_{scenario}.png"))
             era5_dependent_plots.append(os.path.join(Config.PLOT_DIR, f"climate_indices_evolution_{scenario}.png"))
             era5_dependent_plots.append(os.path.join(Config.PLOT_DIR, f"final_figure_5_climate_indices_evolution_{scenario}.png"))
+            era5_dependent_plots.append(os.path.join(Config.PLOT_DIR, f"final_figure_5_climate_indices_evolution_{scenario}.pdf"))
 
         # If all plots that use ERA5 already exist, skip loading/processing ERA5 entirely
         all_plots_exist = all(os.path.exists(p) for p in era5_dependent_plots)
@@ -741,7 +742,7 @@ class ClimateAnalysis:
                 final_fig5_filename = os.path.join(Config.PLOT_DIR, f"final_figure_5_climate_indices_evolution_{scenario}.png")
                 
                 need_calc_evo = not os.path.exists(evolution_plot_filename)
-                if not os.path.exists(final_fig5_filename):
+                if not os.path.exists(final_fig5_filename) or not os.path.exists(final_fig5_filename.replace('.png', '.pdf')):
                     need_calc_evo = True
                 
                 # Store globally for scenario scope
@@ -752,7 +753,7 @@ class ClimateAnalysis:
                 need_calc_final_fig3 = False
                 for gwl in Config.GLOBAL_WARMING_LEVELS:
                     final_fig3_fn = os.path.join(Config.PLOT_DIR, f"final_figure_3_{Config.COMPOSITE_EVENT_KEY}_{scenario}_gwl{gwl}.png")
-                    if not os.path.exists(final_fig3_fn):
+                    if not os.path.exists(final_fig3_fn) or not os.path.exists(final_fig3_fn.replace('.png', '.pdf')):
                         need_calc_final_fig3 = True
                         break
                 
@@ -779,7 +780,7 @@ class ClimateAnalysis:
                             Visualizer.plot_climate_projection_timeseries(cmip6_plot_data_fig2, reanalysis_plot_data_fig2, Config(), filename=os.path.basename(evolution_plot_filename), window_size=window_size_used)
                         
                         # Plot Final Figure 5 if missing (uses 1850-1900)
-                        if not os.path.exists(final_fig5_filename):
+                        if not os.path.exists(final_fig5_filename) or not os.path.exists(final_fig5_filename.replace('.png', '.pdf')):
                             Visualizer.plot_final_figure_5_climate_projection_timeseries(cmip6_plot_data_fig2, reanalysis_plot_data_fig2, Config(), scenario=scenario, window_size=window_size_used)
                     
                     if not cmip6_plot_data_stored or not reanalysis_plot_data_stored:
@@ -965,7 +966,7 @@ class ClimateAnalysis:
                     # Check if Final Figure 4 is missing for this GWL
                     is_final_fig4_gwl = gwl in [2.0, 3.0]
                     final_fig4_fn_check = os.path.join(Config.PLOT_DIR, f"final_figure_4_combined_{scenario}_gwl{gwl}.png")
-                    fig4_missing = is_final_fig4_gwl and not os.path.exists(final_fig4_fn_check)
+                    fig4_missing = is_final_fig4_gwl and (not os.path.exists(final_fig4_fn_check) or not os.path.exists(final_fig4_fn_check.replace('.png', '.pdf')))
 
                     for composite_season in ['Winter', 'Summer']:
                         pr_composite_plot_filename = os.path.join(Config.PLOT_DIR, f"composite_analysis_pr_{composite_season.lower()}_{composite_event_key}_{scenario}_gwl{gwl}.png")
@@ -1044,7 +1045,7 @@ class ClimateAnalysis:
                     # --- NEW: Final Figure 4 Combined Plot (Discharge + PR Diff) ---
                     is_final_fig4_gwl = gwl in [2.0, 3.0]
                     final_fig4_fn_check = os.path.join(Config.PLOT_DIR, f"final_figure_4_combined_{scenario}_gwl{gwl}.png")
-                    if is_final_fig4_gwl and not os.path.exists(final_fig4_fn_check):
+                    if is_final_fig4_gwl and (not os.path.exists(final_fig4_fn_check) or not os.path.exists(final_fig4_fn_check.replace('.png', '.pdf'))):
                         Visualizer.plot_final_figure_4_combined(
                             cmip6_results, discharge_data_loaded, pr_stored_composites, 
                             Config(), scenario, gwl
@@ -1059,7 +1060,8 @@ class ClimateAnalysis:
                         ua_combined_plot_filename = os.path.join(Config.PLOT_DIR, f"combined_diff_ua850_{composite_event_key}_{scenario}_gwl{gwl}.png")
                         need_compute = (not os.path.exists(ua_composite_plot_filename) or 
                                         not os.path.exists(ua_combined_plot_filename) or
-                                        not os.path.exists(final_fig3_fn_check))
+                                        not os.path.exists(final_fig3_fn_check) or
+                                        not os.path.exists(final_fig3_fn_check.replace('.png', '.pdf')))
                         
                         # ALways calculate composites to store it in memory for the final fig 3 
                         # even if plots exist, if final_fig3 is missing OR we need it.
@@ -1145,7 +1147,7 @@ class ClimateAnalysis:
 
                     # --- NEW: Final Figure 3 Plot ---
                     final_fig3_fn = os.path.join(Config.PLOT_DIR, f"final_figure_3_{composite_event_key}_{scenario}_gwl{gwl}.png")
-                    if not os.path.exists(final_fig3_fn):
+                    if not os.path.exists(final_fig3_fn) or not os.path.exists(final_fig3_fn.replace('.png', '.pdf')):
                         w_data = ua_stored_composites.get((gwl, 'Winter'))
                         s_data = ua_stored_composites.get((gwl, 'Summer'))
                         if w_data and s_data:

@@ -1,8 +1,8 @@
 """
-Script to create Table S1: Model GWL crossing years and storyline assignments.
+Script to create Table S1: Model GWL crossing years and model group assignments.
 This table lists the 31 models for SSP5-8.5 and 25 models for SSP2-4.5,
-detailing the year each model crosses +2C and +3C, and their storyline
-assignment ("Increasing Frequency" or "Decreasing Frequency").
+detailing the year each model crosses +2C and +3C, and their model group
+assignment ("High-Frequency" or "Low-Frequency").
 """
 import pandas as pd
 import logging
@@ -17,31 +17,39 @@ import warnings
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
 
-def get_storyline(model_key, ext_list, non_ext_list):
-    """Checks the storyline assignment of a model."""
+def get_model_group(model_key, ext_list, non_ext_list):
+    """Checks the model group assignment of a model."""
     if ext_list and model_key in ext_list: 
-        return "Increasing Frequency"
+        return "High-Frequency"
     if non_ext_list and model_key in non_ext_list: 
-        return "Decreasing Frequency"
+        return "Low-Frequency"
     return "Neutral / Other"
 
 def _render_styled_table(ax, df_chunk, full_columns, title, is_first_page=True):
     """Helper to render a styled table on a given axes."""
     ax.axis('off')
     
+    # Determine column widths based on the number of columns to prevent excessive spacing/stretching
+    if len(full_columns) == 8:
+        # ssp585 (8 columns)
+        col_widths = [0.07, 0.08, 0.10, 0.16, 0.16, 0.10, 0.16, 0.16]
+    else:
+        # ssp245 (5 columns)
+        col_widths = [0.15, 0.12, 0.15, 0.24, 0.24]
+        
     # Create the table
     table = ax.table(
         cellText=df_chunk.values,
         colLabels=full_columns,
         cellLoc='center',
-        loc='center',
-        # colColours=['#f2f2f2'] * len(full_columns)
+        loc='upper center',
+        colWidths=col_widths
     )
 
     # Style the table
     table.auto_set_font_size(False)
-    table.set_fontsize(7.5) 
-    table.scale(1.5, 1.8) # Increased width scale, reduced height scale
+    table.set_fontsize(9.5) # Increased font size for significantly better readability
+    table.scale(1.0, 1.5) # Scale height for elegant cell padding, width is controlled by colWidths
 
     # Professional styling for research papers
     for (row, col), cell in table.get_celld().items():
@@ -70,9 +78,9 @@ def save_dataframe_as_pdf(df, filename, title):
     """Saves a pandas DataFrame as a styled PDF table across multiple pages."""
     print(f"Rendering table to PDF: {filename}...")
     
-    # Configuration for pagination
-    rows_per_page = 28 # Back to 28 since height scale is reduced
-    n_pages = (len(df) + rows_per_page - 1) // rows_per_page
+    # Configuration for pagination - modified to place all models on a single page
+    rows_per_page = max(len(df), 1)
+    n_pages = 1
 
     with PdfPages(filename) as pdf:
         for i in range(n_pages):
@@ -153,11 +161,11 @@ def main():
             y2 = gwl_years[model_key].get(2.0, "N/A")
             y3 = gwl_years[model_key].get(3.0, "N/A")
             
-            # Storyline Assignments
-            w2_st = get_storyline(model_key, ext_models_w_2, non_ext_models_w_2) if y2 != "N/A" else "N/A"
-            s2_st = get_storyline(model_key, ext_models_s_2, non_ext_models_s_2) if y2 != "N/A" else "N/A"
-            w3_st = get_storyline(model_key, ext_models_w_3, non_ext_models_w_3) if y3 != "N/A" else "N/A"
-            s3_st = get_storyline(model_key, ext_models_s_3, non_ext_models_s_3) if y3 != "N/A" else "N/A"
+            # Model Group Assignments
+            w2_mg = get_model_group(model_key, ext_models_w_2, non_ext_models_w_2) if y2 != "N/A" else "N/A"
+            s2_mg = get_model_group(model_key, ext_models_s_2, non_ext_models_s_2) if y2 != "N/A" else "N/A"
+            w3_mg = get_model_group(model_key, ext_models_w_3, non_ext_models_w_3) if y3 != "N/A" else "N/A"
+            s3_mg = get_model_group(model_key, ext_models_s_3, non_ext_models_s_3) if y3 != "N/A" else "N/A"
             
             scen_name = "SSP5-8.5" if scenario == "ssp585" else "SSP2-4.5"
             
@@ -165,16 +173,16 @@ def main():
                 "Model": model_name,
                 "Scenario": scen_name,
                 "GWL +2C Year": y2,
-                "Winter SL (+2C)": w2_st,
-                "Summer SL (+2C)": s2_st,
+                "Winter Model Group (+2C)": w2_mg,
+                "Summer Model Group (+2C)": s2_mg,
             }
             
             # Add +3C details only for SSP5-8.5
             if scenario == 'ssp585':
                 record.update({
                     "GWL +3C Year": y3,
-                    "Winter SL (+3C)": w3_st,
-                    "Summer SL (+3C)": s3_st,
+                    "Winter Model Group (+3C)": w3_mg,
+                    "Summer Model Group (+3C)": s3_mg,
                 })
             
             records.append(record)
@@ -191,8 +199,8 @@ def main():
         
         # Table Title
         scen_title = "SSP5-8.5" if scenario == "ssp585" else "SSP2-4.5"
-        table_id = "S1a" if scenario == "ssp585" else "S1b"
-        title = f"Table {table_id}: Model GWL Crossing Years and Storyline Assignments ({scen_title})"
+        table_id = "S1(a)" if scenario == "ssp585" else "S1(b)"
+        title = f"Table {table_id}: Model GWL Crossing Years and Model Group Assignments ({scen_title})"
         
         # Save files
         df.to_csv(csv_filename, index=False)

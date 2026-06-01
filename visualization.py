@@ -447,6 +447,7 @@ class Visualizer:
         """
         logging.info("Plotting Jet Changes vs GWL (2x2 layout with Storyline Tolerances)...")
         Visualizer.ensure_plot_dir_exists()
+        scenario_title = Visualizer._format_scenario_title(scenario)
 
         if not cmip6_results or 'all_individual_model_deltas_for_plot' not in cmip6_results:
             logging.warning("Cannot plot jet_changes_vs_gwl: Missing CMIP6 analysis results.")
@@ -591,7 +592,7 @@ class Visualizer:
         fig.tight_layout(rect=[0, 0.06, 1, 0.95])
         
         # Use the scenario argument for a dynamic title and filename
-        fig.suptitle(f"CMIP6 Projected Jet Changes vs. Global Warming Level ({scenario.upper()})", fontsize=16, weight='bold')
+        fig.suptitle(f"CMIP6 Projected Jet Changes vs. Global Warming Level ({scenario_title})", fontsize=16, weight='bold')
         if filename is None:
             filename = f"cmip6_jet_changes_vs_gwl_{scenario}.png"
         filepath = os.path.join(Config.PLOT_DIR, filename)
@@ -1461,8 +1462,10 @@ class Visualizer:
         
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=600, bbox_inches='tight')
+        pdf_filepath = os.path.join(config.PLOT_DIR, filename.replace('.png', '.pdf'))
+        plt.savefig(pdf_filepath, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved Final Figure 5 to {filepath}")
+        logging.info(f"Saved Final Figure 5 to {filepath} and {pdf_filepath}")
         
     @staticmethod
     def _plot_single_scatter_panel(ax, cmip6_results, beta_obs_slopes, gwl_to_plot,
@@ -3993,10 +3996,10 @@ class Visualizer:
                         continue
                     
                     if k in extreme_keys:
-                        category = 'Extreme'
+                        category = 'High-Freq.'
                         color = '#b2182b'
                     elif k in non_extreme_keys:
-                        category = 'Non-Extreme'
+                        category = 'Low-Freq.'
                         color = '#2166ac'
                     else:
                         category = 'Other'
@@ -4031,7 +4034,7 @@ class Visualizer:
                 grouped = key_df.groupby(key_df['Counts'].round(4))
                 for counts_val, group in grouped:
                     # Sort the group by Category and Model to keep it ordered
-                    category_order = {'Extreme': 0, 'Other': 1, 'Non-Extreme': 2, 'Historical': 3}
+                    category_order = {'High-Freq.': 0, 'Other': 1, 'Low-Freq.': 2, 'Historical': 3}
                     sorted_group = group.copy()
                     sorted_group['sort_key'] = sorted_group['Category'].map(category_order).fillna(4)
                     sorted_group = sorted_group.sort_values(by=['sort_key', 'Model'])
@@ -4052,13 +4055,13 @@ class Visualizer:
                     
                     for idx_item, (_, row) in enumerate(sorted_group.iterrows()):
                         x_pos = x_ticks_pos[idx_gwl] + offsets[idx_item]
-                        if row['Category'] == 'Extreme':
+                        if row['Category'] == 'High-Freq.':
                             marker_style = '^'
                             color = '#b2182b'
                             zorder = 4
                             size = 7
                             alpha = 0.9
-                        elif row['Category'] == 'Non-Extreme':
+                        elif row['Category'] == 'Low-Freq.':
                             marker_style = 'v'
                             color = '#2166ac'
                             zorder = 4
@@ -4082,7 +4085,7 @@ class Visualizer:
             # Draw horizontal median lines for Extreme (red) and Non-Extreme (blue) groups
             for idx_gwl, gwl_label in enumerate(gwl_display_order):
                 x_pos_center = x_ticks_pos[idx_gwl]
-                for cat, cat_color in [('Extreme', '#b2182b'), ('Non-Extreme', '#2166ac')]:
+                for cat, cat_color in [('High-Freq.', '#b2182b'), ('Low-Freq.', '#2166ac')]:
                     cat_changes = df[(df['GWL'] == gwl_label) & (df['Category'] == cat)]['Counts'].values
                     if len(cat_changes) > 0:
                         median_change = np.nanmedian(cat_changes)
@@ -4100,7 +4103,7 @@ class Visualizer:
             ax.set_title(f"({panel_letter}) {season_names[season]}", weight='bold', loc='left', fontsize=12)
             ax.set_xlabel("")
             if col == 0:
-                ax.set_ylabel("Event Counts (30y eq.)", fontsize=11, weight='bold')
+                ax.set_ylabel("Event Counts (30y eq.)", fontsize=11)
             else:
                 ax.set_ylabel("")
             ax.set_ylim(-0.5, 14)
@@ -4114,7 +4117,7 @@ class Visualizer:
         
         # Overall figure titles & layouts
         scenario_title = Visualizer._format_scenario_title(scenario)
-        fig.suptitle(f"Verification and Future Frequency of 30Q10 Low-Flow Events - {scenario_title}",
+        fig.suptitle(f"Historical and Future Counts of 30Q10 Low-Flow Events - {scenario_title}",
                      fontsize=12, weight='bold', y=0.97)
         
         plt.tight_layout(rect=[0.02, 0.08, 0.98, 0.92], h_pad=2.0, w_pad=2.0)
@@ -4122,12 +4125,12 @@ class Visualizer:
         # Legend at the bottom (ordered for Column-Major legend layout with ncol=4)
         from matplotlib.lines import Line2D
         legend_handles = [
-            Line2D([0], [0], marker='^', color='w', markerfacecolor='#b2182b', label='Highest Freq. (Top 14)', markersize=8),
-            Line2D([0], [0], color='#b2182b', lw=2.0, label='Median (Highest Freq.)'),
+            Line2D([0], [0], marker='^', color='w', markerfacecolor='#b2182b', label='High-Freq. (Top 14)', markersize=8),
+            Line2D([0], [0], color='#b2182b', lw=2.0, label='Median (High-Freq.)'),
             Line2D([0], [0], marker='o', color='w', markerfacecolor='black', alpha=0.6, label='Historical Models', markersize=6.5),
             Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.4, label='Other Future Models', markersize=5),
-            Line2D([0], [0], marker='v', color='w', markerfacecolor='#2166ac', label='Lowest Freq. (Bottom 14)', markersize=8),
-            Line2D([0], [0], color='#2166ac', lw=2.0, label='Median (Lowest Freq.)'),
+            Line2D([0], [0], marker='v', color='w', markerfacecolor='#2166ac', label='Low-Freq. (Bottom 14)', markersize=8),
+            Line2D([0], [0], color='#2166ac', lw=2.0, label='Median (Low-Freq.)'),
             Line2D([0], [0], color='black', linestyle='--', lw=1.2, label='Historical Median'),
             Line2D([0], [0], color='black', lw=2.5, label='Multi-Model Median')
         ]
@@ -4135,8 +4138,10 @@ class Visualizer:
         
         filename = os.path.join(config.PLOT_DIR, f"final_figure_2_regime_shift_and_verification_{scenario}.png")
         plt.savefig(filename, dpi=600, bbox_inches='tight')
+        pdf_filename = os.path.join(config.PLOT_DIR, f"final_figure_2_regime_shift_and_verification_{scenario}.pdf")
+        plt.savefig(pdf_filename, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved Final Figure 2 to {filename}")
+        logging.info(f"Saved Final Figure 2 to {filename} and {pdf_filename}")
 
     @staticmethod
     def plot_core_finding_gev_panel(return_period_results, config, scenario):
@@ -4184,7 +4189,7 @@ class Visualizer:
             'MMM', 'Extreme Models', 'Non-Extreme Models'
         ]
         storyline_display_order = [
-            'Multi-Model Mean', 'Increasing Frequency', 'Decreasing Frequency'
+            'Multi-Model Mean', 'High-Frequency', 'Low-Frequency'
         ]
 
         # Loop through the 4 logical plots
@@ -4205,7 +4210,14 @@ class Visualizer:
             hist_rp = thresh_meta.get('hist_return_period')
             
             for storyline_key in storyline_data_keys:
-                display_name = 'Multi-Model Mean' if storyline_key == 'MMM' else storyline_key
+                if storyline_key == 'MMM':
+                    display_name = 'Multi-Model Mean'
+                elif storyline_key == 'Extreme Models':
+                    display_name = 'High-Frequency'
+                elif storyline_key == 'Non-Extreme Models':
+                    display_name = 'Low-Frequency'
+                else:
+                    display_name = storyline_key
                 for gwl in gwls_to_plot:
                     gwl_label = f'+{gwl}°C GWL'
                     try:
@@ -5126,9 +5138,9 @@ class Visualizer:
             from matplotlib.lines import Line2D
             legend_elements = [
                 Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b',
-                       label=f'Increasing Frequency (N={len(used_ext_keys)})', markersize=7),
+                       label=f'High-Frequency (N={len(used_ext_keys)})', markersize=7),
                 Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac',
-                       label=f'Decreasing Frequency (N={len(used_non_keys)})', markersize=7),
+                       label=f'Low-Frequency (N={len(used_non_keys)})', markersize=7),
                 Line2D([0], [0], marker='o', color='w', markerfacecolor='gray',
                        label='Other Models', markersize=5, alpha=0.5),
             ]
@@ -5148,7 +5160,7 @@ class Visualizer:
             fig.colorbar(ref_cf, cax=cax, orientation='horizontal', label=f'Difference ({diff_unit})', extend='both')
         
         plt.subplots_adjust(bottom=0.10, left=0.06)
-        plt.suptitle(f"{var_label} Composite ({season} half-year): Increasing vs Decreasing Frequency ({event_key})\n"
+        plt.suptitle(f"{var_label} Composite ({season} half-year): High vs Low-Frequency ({event_key})\n"
                      f"GWL {gwl}°C | {scenario.upper()}",
                      fontsize=14, weight='bold', y=0.97)
         
@@ -5458,9 +5470,9 @@ class Visualizer:
             from matplotlib.lines import Line2D
             legend_elements = [
                 Line2D([0], [0], marker='D', color='w', markerfacecolor='#b2182b',
-                       label=f'Increasing Frequency (N={len(used_ext_keys)})', markersize=6),
+                       label=f'High-Frequency (N={len(used_ext_keys)})', markersize=6),
                 Line2D([0], [0], marker='D', color='w', markerfacecolor='#2166ac',
-                       label=f'Decreasing Frequency (N={len(used_non_keys)})', markersize=6),
+                       label=f'Low-Frequency (N={len(used_non_keys)})', markersize=6),
                 Line2D([0], [0], marker='o', color='w', markerfacecolor='gray',
                        label='Other Models', markersize=5, alpha=0.5),
             ]
@@ -5470,7 +5482,7 @@ class Visualizer:
         # --- Row content: only the 3rd column of the original 3×3 ---
         row_configs = [
             {'key_diff': 'diff_ext_non_future', 'key_sig': 'sig_mask_ext_non_future',
-             'title': 'Future: Inc − Dec'},
+             'title': 'Future: High − Low'},
             {'key_diff': 'diff_ext_non_hist', 'key_sig': 'sig_mask_ext_non_hist',
              'title': 'Historical: Ext − Non'},
         ]
@@ -5662,7 +5674,7 @@ class Visualizer:
             globe=ccrs.Globe(ellipse=None, semimajor_axis=6370997.0, semiminor_axis=6370997.0)
         )
         
-        map_aspect = 0.7832  # Fallback aspect ratio if shapefile loading fails
+        map_aspect = 0.5216  # Fallback aspect ratio if shapefile loading fails
         
         # --- Top Subplot: Map ---
         ax_map = fig.add_subplot(gs[0], projection=ccrs.PlateCarree())
@@ -5714,8 +5726,8 @@ class Visualizer:
             lon_max = p_bounds[2] + buffer_lon
             lat_min = p_bounds[1] - buffer_lat
             lat_max = p_bounds[3] + buffer_lat
-            lat_mean = (lat_min + lat_max) / 2.0
-            map_aspect = (lat_max - lat_min) / ((lon_max - lon_min) * np.cos(np.radians(lat_mean)))
+            # Match equirectangular aspect ratio of PlateCarree axes to ensure identical size
+            map_aspect = (lat_max - lat_min) / (lon_max - lon_min)
             
             # --- Add Rivers (Clipped to Basin) and Labels ---
             try:
@@ -5776,19 +5788,19 @@ class Visualizer:
         # --- Bottom Subplot: Timeseries ---
         ax = fig.add_subplot(gs[1])
         
-        # Colors: SSP585 (blueish), SSP245 (orangeish)
-        # We use standard color for SSP585 since it was midnightblue previously.
+        # Colors: SSP5-8.5 (blueish), SSP2-4.5 (orangeish)
+        # We use standard color for SSP5-8.5 since it was midnightblue previously.
         if df_stats_ssp585 is not None:
             ax.fill_between(df_stats_ssp585['year'], df_stats_ssp585['p2_5'], df_stats_ssp585['p97_5'], 
-                            color='royalblue', alpha=0.3, label='SSP585 95% Model Spread')
+                            color='royalblue', alpha=0.3, label='SSP5-8.5 95% Spread')
             ax.plot(df_stats_ssp585['year'], df_stats_ssp585['mmm'], 
-                    color='midnightblue', linewidth=2, linestyle='-', label=f'SSP585 MMM (n={n_ssp585})')
+                    color='midnightblue', linewidth=2, linestyle='-', label=f'SSP5-8.5 MMM (n={n_ssp585})')
 
         if df_stats_ssp245 is not None:
             ax.fill_between(df_stats_ssp245['year'], df_stats_ssp245['p2_5'], df_stats_ssp245['p97_5'], 
-                            color='darkorange', alpha=0.3, label='SSP245 95% Model Spread')
+                            color='darkorange', alpha=0.3, label='SSP2-4.5 95% Spread')
             ax.plot(df_stats_ssp245['year'], df_stats_ssp245['mmm'], 
-                    color='darkorange', linewidth=2, linestyle='-.', label=f'SSP245 MMM (n={n_ssp245})')
+                    color='darkorange', linewidth=2, linestyle='-.', label=f'SSP2-4.5 MMM (n={n_ssp245})')
 
         ax.set_title('(b) Annual Min. 30-Day Discharge', weight='bold', loc='left')
         ax.set_ylabel('Discharge (m³/s)')
@@ -5810,8 +5822,10 @@ class Visualizer:
         filename = f"final_figure_1_storyline_discharge_events_{scenario}.png"
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=600, bbox_inches='tight')
+        pdf_filepath = os.path.join(config.PLOT_DIR, f"final_figure_1_storyline_discharge_events_{scenario}.pdf")
+        plt.savefig(pdf_filepath, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved discharge events timeseries plot to {filepath}")
+        logging.info(f"Saved discharge events timeseries plot to {filepath} and {pdf_filepath}")
 
     @staticmethod
     def plot_discharge_events_extreme_timeseries(cmip6_results, discharge_data_loaded, config, scenario, target_gwl=None):
@@ -5823,6 +5837,7 @@ class Visualizer:
         """
         logging.info(f"Plotting extreme discharge events timeseries for {scenario}...")
         Visualizer.ensure_plot_dir_exists()
+        scenario_title = Visualizer._format_scenario_title(scenario)
         
         metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
         if not metric_timeseries:
@@ -5895,7 +5910,7 @@ class Visualizer:
                     df_target_stats['p10'] = df_target_stats['p10'].rolling(window=5, center=True).mean()
                     df_target_stats['p90'] = df_target_stats['p90'].rolling(window=5, center=True).mean()
 
-                    ax.fill_between(df_target_stats['year'], df_target_stats['p10'], df_target_stats['p90'], color=color_line, alpha=0.3, label=f'{label_prefix} Model Spread (5-yr MA)')
+                    ax.fill_between(df_target_stats['year'], df_target_stats['p10'], df_target_stats['p90'], color=color_line, alpha=0.3, label=f'{label_prefix} Spread (5-yr MA)')
                     ax.plot(df_target_stats['year'], df_target_stats['mmm'], color=color_line, linewidth=2, label=f'{label_prefix} MMM (5-yr MA, n={len(target_names)})')
 
             _plot_group(ext_list, 'Increasing Freq.', '#b2182b')
@@ -5907,11 +5922,11 @@ class Visualizer:
 
         # Plot Summer (Col 0)
         df_summer = pd.concat(data_by_season['Summer'], ignore_index=True) if data_by_season['Summer'] else pd.DataFrame()
-        _plot_combined_panel(axs[0], df_summer, extreme_models['Summer'], non_extreme_models['Summer'], f'Summer Half-Year ({scenario.upper()})')
+        _plot_combined_panel(axs[0], df_summer, extreme_models['Summer'], non_extreme_models['Summer'], f'Summer Half-Year ({scenario_title})')
 
         # Plot Winter (Col 1)
         df_winter = pd.concat(data_by_season['Winter'], ignore_index=True) if data_by_season['Winter'] else pd.DataFrame()
-        _plot_combined_panel(axs[1], df_winter, extreme_models['Winter'], non_extreme_models['Winter'], f'Winter Half-Year ({scenario.upper()})')
+        _plot_combined_panel(axs[1], df_winter, extreme_models['Winter'], non_extreme_models['Winter'], f'Winter Half-Year ({scenario_title})')
 
         axs[0].set_ylabel('Discharge (m³/s)', fontsize=10)
         axs[1].set_ylabel('Discharge (m³/s)', fontsize=10)
@@ -5926,7 +5941,7 @@ class Visualizer:
         if handles:
             fig.legend(handles, labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0.02), frameon=False, fontsize=10)
 
-        plt.suptitle(f'Annual Minimum 30-Day Discharge ({scenario.upper()})', fontsize=16, weight='bold')
+        plt.suptitle(f'Annual Minimum 30-Day Discharge ({scenario_title})', fontsize=16, weight='bold')
         fig.tight_layout()
         fig.subplots_adjust(top=0.88, bottom=0.15)
         filename = f"storyline_discharge_events_extremes_{scenario}.png"
@@ -6026,8 +6041,8 @@ class Visualizer:
                         ax.text(0.04, text_y, clean_suffix, transform=ax.transAxes, ha='left', va='bottom', color=clr,
                                 bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.3))
 
-            _p_grp(ext_list, 'Increasing Freq.', '#b2182b', '--', text_y=0.12)
-            _p_grp(non_ext_list, 'Decreasing Freq.', '#2166ac', '-.', text_y=0.04)
+            _p_grp(ext_list, 'High-Freq.', '#b2182b', '--', text_y=0.12)
+            _p_grp(non_ext_list, 'Low-Freq.', '#2166ac', '-.', text_y=0.04)
             ax.set_title(title, weight='bold', loc='left', fontsize=12)
             ax.grid(True, linestyle=':', alpha=0.7)
             ax.set_xlim(2015, 2100)
@@ -6106,7 +6121,7 @@ class Visualizer:
             fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cb_ax, orientation='horizontal', label='Precip. Diff. (mm/day)', extend='both')
 
         s_t = Visualizer._format_scenario_title(scenario)
-        plt.suptitle(f'Annual Minimum 30-Day Discharge & Precipitation Composites\n{s_t} | GWL {target_gwl}°C', weight='bold', y=0.98, fontsize=12)
+        plt.suptitle(f'Minimum 30-Day Discharge Trend & Precipitation Composites\n{s_t} | GWL {target_gwl}°C', weight='bold', y=0.98, fontsize=12)
         fig.tight_layout(rect=[0, 0.08, 1, 0.80], h_pad=1.0, w_pad=1.0)
         
         # Add left-aligned subtitles for both rows after tight_layout (matching Figure 2 style)
@@ -6117,15 +6132,17 @@ class Visualizer:
         top_y_row1  = ax_pr_s.get_position().y1
         
         nudge = 0.04
-        fig.text(left_x_row0, top_y_row0 + nudge, "Future 30-Day Minimum Discharge", 
+        fig.text(left_x_row0, top_y_row0 + nudge, "30-day Minimum Discharge Trend", 
                  ha='left', va='bottom', fontsize=12, weight='bold')
-        fig.text(left_x_row1, top_y_row1 + nudge, "Precipitation Difference (Inc. Freq. - Dec. Freq.)", 
+        fig.text(left_x_row1, top_y_row1 + nudge, "Precipitation Difference (High-Freq. - Low-Freq.)", 
                  ha='left', va='bottom', fontsize=12, weight='bold')
         
         path = os.path.join(config.PLOT_DIR, f"final_figure_4_combined_{scenario}_gwl{target_gwl}.png")
         plt.savefig(path, dpi=600, bbox_inches='tight')
+        pdf_path = os.path.join(config.PLOT_DIR, f"final_figure_4_combined_{scenario}_gwl{target_gwl}.pdf")
+        plt.savefig(pdf_path, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved combined final figure 4 to {path}")
+        logging.info(f"Saved combined final figure 4 to {path} and {pdf_path}")
 
 
     @staticmethod
@@ -6408,7 +6425,7 @@ class Visualizer:
                     # Extreme Models Composite Line
                     if ext_val is not None:
                         try:
-                            label = 'Increasing Freq.' if 'low' in event_key else 'Decreasing Freq.'
+                            label = 'High-Freq.' if 'low' in event_key else 'Low-Freq.'
                             # Get crossing range
                             ext_crossing_years = [gwl_years[m][gwl] for m in extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
                             if ext_crossing_years:
@@ -6424,7 +6441,7 @@ class Visualizer:
                     # Non-Extreme Models Composite Line
                     if non_ext_val is not None:
                         try:
-                            label = 'Decreasing Freq.' if 'low' in event_key else 'Increasing Freq.'
+                            label = 'Low-Freq.' if 'low' in event_key else 'High-Freq.'
                             # Get crossing range
                             non_ext_crossing_years = [gwl_years[m][gwl] for m in non_extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
                             if non_ext_crossing_years:
@@ -6504,10 +6521,11 @@ class Visualizer:
                 ax.text(0.5, 0.5, "No Timeseries Data", ha='center', va='center')
                 ax.set_title(p_config['title'], weight='bold', loc='left')
 
-        plt.suptitle(f'Storyline Impacts on Zonal Wind (U850) & Jet Stream\nGWL {gwl}°C, {scenario.upper()}', fontsize=12, weight='bold', y=0.99)
+        scenario_title = Visualizer._format_scenario_title(scenario)
+        plt.suptitle(f'Projections of Zonal Wind Differences and Jet Stream Indices\n(GWL {gwl}°C, {scenario_title})', fontsize=12, weight='bold', y=0.99)
         # Add subtitles for the row sections
-        fig.text(0.12, 0.93, 'Zonal Wind (U850) Differences (Inc. Freq. \u2212 Dec. Freq.)', ha='left', va='center', fontsize=12, weight='bold')
-        fig.text(0.12, 0.61, 'Jet Stream Evolution', ha='left', va='center', fontsize=12, weight='bold')
+        fig.text(0.12, 0.93, 'Zonal Wind (u850) Differences (High-Freq. \u2212 Low-Freq.)', ha='left', va='center', fontsize=12, weight='bold')
+        fig.text(0.12, 0.61, 'Jet Stream Indices', ha='left', va='center', fontsize=12, weight='bold')
 
         if 'global_legend_handles' in locals():
             clean_labels = [l.split(' (trend:')[0] if 'MMM' in l else l for l in global_legend_labels]
@@ -6516,6 +6534,8 @@ class Visualizer:
         filename_out = f"final_figure_3_{event_key}_{scenario}_gwl{gwl}.png"
         filepath = os.path.join(Config.PLOT_DIR, filename_out)
         plt.savefig(filepath, dpi=600, bbox_inches='tight')
+        pdf_filepath = os.path.join(Config.PLOT_DIR, f"final_figure_3_{event_key}_{scenario}_gwl{gwl}.pdf")
+        plt.savefig(pdf_filepath, bbox_inches='tight')
         plt.close(fig)
-        logging.info(f"Saved final figure 3 to {filepath}")
+        logging.info(f"Saved final figure 3 to {filepath} and {pdf_filepath}")
 

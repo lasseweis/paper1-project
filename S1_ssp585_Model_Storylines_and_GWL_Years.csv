@@ -1,32 +1,32 @@
-Model,Scenario,GWL +2C Year,Winter SL (+2C),Summer SL (+2C),GWL +3C Year,Winter SL (+3C),Summer SL (+3C)
-ACCESS-CM2,SSP5-8.5,2039,Increasing Frequency,Increasing Frequency,2056,Decreasing Frequency,Neutral / Other
-ACCESS-ESM1-5,SSP5-8.5,2040,Increasing Frequency,Increasing Frequency,2061,Increasing Frequency,Increasing Frequency
-BCC-CSM2-MR,SSP5-8.5,2044,Increasing Frequency,Increasing Frequency,2066,Increasing Frequency,Increasing Frequency
-CESM2,SSP5-8.5,2037,Increasing Frequency,Increasing Frequency,2056,Increasing Frequency,Increasing Frequency
-CESM2-WACCM,SSP5-8.5,2034,Neutral / Other,Neutral / Other,2054,Increasing Frequency,Increasing Frequency
-CMCC-CM2-SR5,SSP5-8.5,2034,Increasing Frequency,Increasing Frequency,2053,Decreasing Frequency,Increasing Frequency
-CMCC-ESM2,SSP5-8.5,2040,Increasing Frequency,Increasing Frequency,2056,Increasing Frequency,Increasing Frequency
-CNRM-CM6-1,SSP5-8.5,2041,Increasing Frequency,Increasing Frequency,2059,Increasing Frequency,Increasing Frequency
-CNRM-CM6-1-HR,SSP5-8.5,2030,Increasing Frequency,Increasing Frequency,2052,Neutral / Other,Neutral / Other
-CNRM-ESM2-1,SSP5-8.5,2046,Decreasing Frequency,Neutral / Other,2065,Decreasing Frequency,Decreasing Frequency
-CanESM5,SSP5-8.5,2023,Decreasing Frequency,Decreasing Frequency,2041,Decreasing Frequency,Decreasing Frequency
-E3SM-1-0,SSP5-8.5,2033,Decreasing Frequency,Decreasing Frequency,2048,Decreasing Frequency,Decreasing Frequency
-EC-Earth3,SSP5-8.5,2036,Decreasing Frequency,Decreasing Frequency,2058,Decreasing Frequency,Decreasing Frequency
-EC-Earth3-CC,SSP5-8.5,2037,Decreasing Frequency,Neutral / Other,2057,Neutral / Other,Decreasing Frequency
-EC-Earth3-Veg-LR,SSP5-8.5,2042,Decreasing Frequency,Decreasing Frequency,2062,Decreasing Frequency,Decreasing Frequency
-GFDL-ESM4,SSP5-8.5,2053,Decreasing Frequency,Decreasing Frequency,2076,Decreasing Frequency,Decreasing Frequency
-HadGEM3-GC31-LL,SSP5-8.5,2031,Increasing Frequency,Decreasing Frequency,2048,Increasing Frequency,Decreasing Frequency
-HadGEM3-GC31-MM,SSP5-8.5,2035,Increasing Frequency,Increasing Frequency,2050,Increasing Frequency,Neutral / Other
-IITM-ESM,SSP5-8.5,2049,Neutral / Other,Decreasing Frequency,2077,Decreasing Frequency,Decreasing Frequency
-INM-CM4-8,SSP5-8.5,2047,Decreasing Frequency,Decreasing Frequency,2070,Increasing Frequency,Increasing Frequency
-INM-CM5-0,SSP5-8.5,2046,Increasing Frequency,Increasing Frequency,2075,Neutral / Other,Increasing Frequency
-IPSL-CM6A-LR,SSP5-8.5,2035,Decreasing Frequency,Decreasing Frequency,2051,Decreasing Frequency,Decreasing Frequency
-KACE-1-0-G,SSP5-8.5,2024,Neutral / Other,Increasing Frequency,2044,Increasing Frequency,Increasing Frequency
-KIOST-ESM,SSP5-8.5,2039,Increasing Frequency,Increasing Frequency,2065,Increasing Frequency,Increasing Frequency
-MIROC-ES2L,SSP5-8.5,2048,Decreasing Frequency,Decreasing Frequency,2071,Decreasing Frequency,Decreasing Frequency
-MIROC6,SSP5-8.5,2054,Decreasing Frequency,Decreasing Frequency,2077,Decreasing Frequency,Decreasing Frequency
-MPI-ESM1-2-HR,SSP5-8.5,2050,Increasing Frequency,Increasing Frequency,2074,Increasing Frequency,Increasing Frequency
-MPI-ESM1-2-LR,SSP5-8.5,2049,Decreasing Frequency,Decreasing Frequency,2072,Increasing Frequency,Increasing Frequency
-MRI-ESM2-0,SSP5-8.5,2039,Decreasing Frequency,Decreasing Frequency,2065,Decreasing Frequency,Decreasing Frequency
-NorESM2-MM,SSP5-8.5,2055,Increasing Frequency,Increasing Frequency,2077,Increasing Frequency,Increasing Frequency
-UKESM1-0-LL,SSP5-8.5,2032,Decreasing Frequency,Decreasing Frequency,2047,Decreasing Frequency,Decreasing Frequency
+Model,Scenario,GWL +2C Year,Winter Model Group (+2C),Summer Model Group (+2C),GWL +3C Year,Winter Model Group (+3C),Summer Model Group (+3C)
+ACCESS-CM2,SSP5-8.5,2038,High-Frequency,High-Frequency,2056,Low-Frequency,Neutral / Other
+ACCESS-ESM1-5,SSP5-8.5,2039,High-Frequency,High-Frequency,2060,High-Frequency,High-Frequency
+BCC-CSM2-MR,SSP5-8.5,2043,High-Frequency,High-Frequency,2066,High-Frequency,High-Frequency
+CESM2,SSP5-8.5,2036,High-Frequency,High-Frequency,2056,High-Frequency,High-Frequency
+CESM2-WACCM,SSP5-8.5,2033,Neutral / Other,Neutral / Other,2053,High-Frequency,High-Frequency
+CMCC-CM2-SR5,SSP5-8.5,2034,High-Frequency,High-Frequency,2052,Low-Frequency,High-Frequency
+CMCC-ESM2,SSP5-8.5,2039,High-Frequency,High-Frequency,2055,High-Frequency,High-Frequency
+CNRM-CM6-1,SSP5-8.5,2040,High-Frequency,High-Frequency,2058,High-Frequency,High-Frequency
+CNRM-CM6-1-HR,SSP5-8.5,2030,High-Frequency,High-Frequency,2050,Neutral / Other,Neutral / Other
+CNRM-ESM2-1,SSP5-8.5,2045,Low-Frequency,Neutral / Other,2064,Low-Frequency,Low-Frequency
+CanESM5,SSP5-8.5,2023,Low-Frequency,Low-Frequency,2041,Low-Frequency,Low-Frequency
+E3SM-1-0,SSP5-8.5,2032,Low-Frequency,Low-Frequency,2047,Low-Frequency,Low-Frequency
+EC-Earth3,SSP5-8.5,2036,Low-Frequency,Low-Frequency,2057,Low-Frequency,Low-Frequency
+EC-Earth3-CC,SSP5-8.5,2035,Low-Frequency,Neutral / Other,2056,Neutral / Other,Low-Frequency
+EC-Earth3-Veg-LR,SSP5-8.5,2042,Low-Frequency,Low-Frequency,2061,Low-Frequency,Low-Frequency
+GFDL-ESM4,SSP5-8.5,2053,Low-Frequency,Low-Frequency,2076,Low-Frequency,Low-Frequency
+HadGEM3-GC31-LL,SSP5-8.5,2030,High-Frequency,Low-Frequency,2048,High-Frequency,Low-Frequency
+HadGEM3-GC31-MM,SSP5-8.5,2034,High-Frequency,High-Frequency,2050,High-Frequency,Neutral / Other
+IITM-ESM,SSP5-8.5,2049,Neutral / Other,Low-Frequency,2076,Low-Frequency,Low-Frequency
+INM-CM4-8,SSP5-8.5,2046,Low-Frequency,Low-Frequency,2070,High-Frequency,High-Frequency
+INM-CM5-0,SSP5-8.5,2046,High-Frequency,High-Frequency,2074,High-Frequency,High-Frequency
+IPSL-CM6A-LR,SSP5-8.5,2033,Low-Frequency,Low-Frequency,2051,Low-Frequency,Low-Frequency
+KACE-1-0-G,SSP5-8.5,2024,Neutral / Other,High-Frequency,2043,High-Frequency,High-Frequency
+KIOST-ESM,SSP5-8.5,2037,High-Frequency,High-Frequency,2065,High-Frequency,High-Frequency
+MIROC-ES2L,SSP5-8.5,2047,Low-Frequency,Low-Frequency,2070,Low-Frequency,Low-Frequency
+MIROC6,SSP5-8.5,2053,Low-Frequency,Low-Frequency,2076,Low-Frequency,Low-Frequency
+MPI-ESM1-2-HR,SSP5-8.5,2049,High-Frequency,High-Frequency,2073,High-Frequency,High-Frequency
+MPI-ESM1-2-LR,SSP5-8.5,2049,Low-Frequency,Low-Frequency,2072,High-Frequency,High-Frequency
+MRI-ESM2-0,SSP5-8.5,2038,Low-Frequency,Low-Frequency,2064,Low-Frequency,Low-Frequency
+NorESM2-MM,SSP5-8.5,2054,High-Frequency,High-Frequency,2076,Neutral / Other,High-Frequency
+UKESM1-0-LL,SSP5-8.5,2032,Low-Frequency,Low-Frequency,2047,Low-Frequency,Low-Frequency

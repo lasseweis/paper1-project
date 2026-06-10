@@ -1565,7 +1565,7 @@ class StorylineAnalyzer:
         pi_ref_start = ref_start if ref_start is not None else 1960
         pi_ref_end = ref_end if ref_end is not None else 2015
 
-        def _get_anomaly_and_smooth(data_array, year_coord, ref_start, ref_end, window):
+        def _get_anomaly_and_smooth(data_array, year_coord, ref_start, ref_end, window, get_absolute=False):
             """Interne Hilfsfunktion zur Berechnung von Anomalien und gleitenden Mitteln."""
             if data_array is None or data_array.size == 0: return None
             
@@ -1573,6 +1573,11 @@ class StorylineAnalyzer:
             sane_data = data_array.where(np.abs(data_array) < 1e10)
 
             try:
+                if get_absolute:
+                    if sane_data.sizes.get(year_coord, 0) >= window:
+                        return sane_data.rolling({year_coord: window}, center=True).mean().dropna(dim=year_coord)
+                    return sane_data
+
                 ref_period_data = sane_data.sel({year_coord: slice(ref_start, ref_end)})
                 if ref_period_data.sizes.get(year_coord, 0) == 0:
                     logging.warning(f"No valid data in reference period {ref_start}-{ref_end} for an index.")
@@ -1611,7 +1616,9 @@ class StorylineAnalyzer:
                 for model_key, metrics in cmip6_metrics.items():
                     jet_timeseries = metrics.get(jet_key)
                     if jet_timeseries is not None:
-                        processed_jet = _get_anomaly_and_smooth(jet_timeseries, 'season_year', pi_ref_start, pi_ref_end, rolling_window)
+                        # Keep absolute values for Hydro_ prefixed keys (used in final figure 3)
+                        is_absolute = jet_key.startswith('Hydro_')
+                        processed_jet = _get_anomaly_and_smooth(jet_timeseries, 'season_year', pi_ref_start, pi_ref_end, rolling_window, get_absolute=is_absolute)
                         if processed_jet is not None:
                             processed_jet.attrs['model_key'] = model_key
                             cmip6_plot_data[jet_key]['members'].append(processed_jet)
@@ -3578,14 +3585,14 @@ class StorylineAnalyzer:
         
         n_select = self.config.COMPOSITE_N_MODELS
         if sorted_models and '_ssp585' in sorted_models[0][0]:
-            n_select = 14
+            n_select = 10
         if n_select * 2 > len(sorted_models):
             n_select = len(sorted_models) // 2
         
         if n_select < 1: n_select = 1
         
-        extreme_models = sorted_models[:n_select]     # Top 14 (largest increase)
-        non_extreme_models = sorted_models[-n_select:] # Bottom 14 (largest decrease)
+        extreme_models = sorted_models[:n_select]     # Top n_select (largest increase)
+        non_extreme_models = sorted_models[-n_select:] # Bottom n_select (largest decrease)
         
         return [m[0] for m in extreme_models], [m[0] for m in non_extreme_models], model_changes
 
@@ -3698,7 +3705,7 @@ class StorylineAnalyzer:
             sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
             n_select = self.config.COMPOSITE_N_MODELS
             if sorted_models and '_ssp585' in sorted_models[0][0]:
-                n_select = 14
+                n_select = 10
             if n_select * 2 > len(sorted_models):
                 n_select = len(sorted_models) // 2
             if n_select < 1: n_select = 1
@@ -4025,7 +4032,7 @@ class StorylineAnalyzer:
             sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
             n_select = self.config.COMPOSITE_N_MODELS
             if sorted_models and '_ssp585' in sorted_models[0][0]:
-                n_select = 14
+                n_select = 10
             if n_select * 2 > len(sorted_models):
                 n_select = len(sorted_models) // 2
             if n_select < 1: n_select = 1
@@ -4732,7 +4739,7 @@ class StorylineAnalyzer:
             sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
             n_select = self.config.COMPOSITE_N_MODELS
             if sorted_models and '_ssp585' in sorted_models[0][0]:
-                n_select = 14
+                n_select = 10
             if n_select * 2 > len(sorted_models):
                 n_select = len(sorted_models) // 2
             if n_select < 1: n_select = 1
@@ -5135,7 +5142,7 @@ class StorylineAnalyzer:
             sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
             n_select = self.config.COMPOSITE_N_MODELS
             if sorted_models and '_ssp585' in sorted_models[0][0]:
-                n_select = 14
+                n_select = 10
             if n_select * 2 > len(sorted_models): n_select = len(sorted_models) // 2
             if n_select < 1: n_select = 1
                 
@@ -5385,7 +5392,7 @@ class StorylineAnalyzer:
             sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
             n_select = self.config.COMPOSITE_N_MODELS
             if sorted_models and '_ssp585' in sorted_models[0][0]:
-                n_select = 14
+                n_select = 10
             if n_select * 2 > len(sorted_models):
                 n_select = len(sorted_models) // 2
             if n_select < 1: n_select = 1

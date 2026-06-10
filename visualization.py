@@ -1455,7 +1455,7 @@ class Visualizer:
 
         main_title = f'Climate Indices Evolution ({window_size}-yr mean) — {scenario_title}'
         ref_text = "All changes relative to 1850–1900 mean"
-        fig.suptitle(f'{main_title}\n{ref_text}', fontsize=11, weight='bold', y=0.98)
+        fig.suptitle(f'{main_title}\n{ref_text}', fontsize=15, weight='bold', y=0.98)
         
         # Layout angepasst für engere Legende und mehr Platz am unteren Rand (rect[1] erhöht)
         fig.tight_layout(rect=[0, 0.08, 1, 0.93], h_pad=3.0, w_pad=2.5)
@@ -3953,6 +3953,23 @@ class Visualizer:
         
         gwl_display_order = ['Historical'] + [f'+{gwl}°C GWL' for gwl in gwls_to_plot]
 
+        # Get the number of extreme models from the future data
+        n_extreme = 14
+        for gwl in gwls_to_plot:
+            try:
+                ext_models = future_data[gwl]['summer']['Extreme Models'][low_key_summer].get('future_keys_all_models', [])
+                if ext_models:
+                    n_extreme = len(ext_models)
+                    break
+            except KeyError:
+                try:
+                    ext_models = future_data[gwl]['winter']['Extreme Models'][low_key_winter].get('future_keys_all_models', [])
+                    if ext_models:
+                        n_extreme = len(ext_models)
+                        break
+                except KeyError:
+                    continue
+
         for col, season in enumerate(seasons):
             ax = axs[col]
             event_key = event_keys[season]
@@ -4118,18 +4135,18 @@ class Visualizer:
         # Overall figure titles & layouts
         scenario_title = Visualizer._format_scenario_title(scenario)
         fig.suptitle(f"Historical and Future Counts of 30Q10 Low-Flow Events - {scenario_title}",
-                     fontsize=12, weight='bold', y=0.97)
+                     fontsize=16, weight='bold', y=0.97)
         
         plt.tight_layout(rect=[0.02, 0.08, 0.98, 0.92], h_pad=2.0, w_pad=2.0)
         
         # Legend at the bottom (ordered for Column-Major legend layout with ncol=4)
         from matplotlib.lines import Line2D
         legend_handles = [
-            Line2D([0], [0], marker='^', color='w', markerfacecolor='#b2182b', label='High-Freq. (Top 14)', markersize=8),
+            Line2D([0], [0], marker='^', color='w', markerfacecolor='#b2182b', label=f'High-Freq. (Top {n_extreme})', markersize=8),
             Line2D([0], [0], color='#b2182b', lw=2.0, label='Median (High-Freq.)'),
             Line2D([0], [0], marker='o', color='w', markerfacecolor='black', alpha=0.6, label='Historical Models', markersize=6.5),
             Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.4, label='Other Future Models', markersize=5),
-            Line2D([0], [0], marker='v', color='w', markerfacecolor='#2166ac', label='Low-Freq. (Bottom 14)', markersize=8),
+            Line2D([0], [0], marker='v', color='w', markerfacecolor='#2166ac', label=f'Low-Freq. (Bottom {n_extreme})', markersize=8),
             Line2D([0], [0], color='#2166ac', lw=2.0, label='Median (Low-Freq.)'),
             Line2D([0], [0], color='black', linestyle='--', lw=1.2, label='Historical Median'),
             Line2D([0], [0], color='black', lw=2.5, label='Multi-Model Median')
@@ -5813,7 +5830,7 @@ class Visualizer:
         ax.set_xlim(min_year, max_year)
         ax.set_box_aspect(map_aspect)
         
-        plt.suptitle("Study Region and Projected 30-Day Minimum Discharge", weight='bold', y=0.98, fontsize=12)
+        plt.suptitle("Study Region and Projected 30-Day Minimum Discharge", weight='bold', y=0.98, fontsize=16)
         fig.tight_layout(rect=[0, 0.12, 1, 0.93], h_pad=2.0, w_pad=3.0)
         
         # Center the figure legend at the bottom of the entire figure
@@ -6121,7 +6138,7 @@ class Visualizer:
             fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cb_ax, orientation='horizontal', label='Precip. Diff. (mm/day)', extend='both')
 
         s_t = Visualizer._format_scenario_title(scenario)
-        plt.suptitle(f'Minimum 30-Day Discharge Trend & Precipitation Composites\n{s_t} | GWL {target_gwl}°C', weight='bold', y=0.98, fontsize=12)
+        plt.suptitle(f'Minimum 30-Day Discharge Trend & Precipitation Composites\n{s_t} | GWL {target_gwl}°C', weight='bold', y=0.98, fontsize=16)
         fig.tight_layout(rect=[0, 0.08, 1, 0.80], h_pad=1.0, w_pad=1.0)
         
         # Add left-aligned subtitles for both rows after tight_layout (matching Figure 2 style)
@@ -6334,14 +6351,14 @@ class Visualizer:
             if range_val == 0: range_val = 1.0
             return (min_val - 0.05 * range_val, max_val + 0.05 * range_val)
 
-        lat_ylim = (-2.1, 2.6)
-        speed_ylim = (-1.2, 1.5)
+        lat_ylim = (45, 56.2)
+        speed_ylim = (1.5, 9)
         
         plot_configs = [
-            {'key': 'Hydro_Summer_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 0]), 'title': '(c) Summer Half-Year\n    Jet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim},
-            {'key': 'Hydro_Winter_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 1]), 'title': '(d) Winter Half-Year\n    Jet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim},
-            {'key': 'Hydro_Summer_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 0]), 'title': '(e) Summer Half-Year\n    Jet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim},
-            {'key': 'Hydro_Winter_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 1]), 'title': '(f) Winter Half-Year\n    Jet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim},
+            {'key': 'Hydro_Summer_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 0]), 'title': '(c) Summer Half-Year\n    Jet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim, 'yticks': [45, 50, 55]},
+            {'key': 'Hydro_Winter_JetLat',   'ax': fig.add_subplot(gs_bottom[0, 1]), 'title': '(d) Winter Half-Year\n    Jet Latitude (\u00b0N)', 'ylabel': '', 'ylim': lat_ylim, 'yticks': [45, 50, 55]},
+            {'key': 'Hydro_Summer_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 0]), 'title': '(e) Summer Half-Year\n    Jet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim, 'yticks': [2, 4, 6, 8]},
+            {'key': 'Hydro_Winter_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 1]), 'title': '(f) Winter Half-Year\n    Jet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim, 'yticks': [2, 4, 6, 8]},
         ]
 
         for p_config in plot_configs:
@@ -6360,7 +6377,7 @@ class Visualizer:
                         sorted_models = sorted(model_rps.items(), key=lambda item: item[1])
                         n_select = config.COMPOSITE_N_MODELS
                         if sorted_models and '_ssp585' in sorted_models[0][0]:
-                            n_select = 14
+                            n_select = 10
                         if n_select * 2 > len(sorted_models):
                             n_select = len(sorted_models) // 2
                         if n_select < 1: n_select = 1
@@ -6486,7 +6503,6 @@ class Visualizer:
                 ax.set_ylabel(p_config['ylabel'])
                 ax.grid(True, linestyle=':', alpha=0.6)
                 ax.set_xlim(2015, 2100)
-                ax.axhline(0, color='black', linewidth=0.5)
                 ax.set_xlabel('Year')
                 
                 # Plot GWL Crossing Range
@@ -6509,6 +6525,8 @@ class Visualizer:
 
                 if p_config.get('ylim'):
                     ax.set_ylim(p_config['ylim'])
+                if p_config.get('yticks'):
+                    ax.set_yticks(p_config['yticks'])
                 
                 # Plot isolated trend text natively in the subplot and forward handles
                 if label_suffix:
@@ -6522,7 +6540,7 @@ class Visualizer:
                 ax.set_title(p_config['title'], weight='bold', loc='left')
 
         scenario_title = Visualizer._format_scenario_title(scenario)
-        plt.suptitle(f'Projections of Zonal Wind Differences and Jet Stream Indices\n(GWL {gwl}°C, {scenario_title})', fontsize=12, weight='bold', y=0.99)
+        plt.suptitle(f'Projections of Zonal Wind Differences and Jet Stream Indices\n(GWL {gwl}°C, {scenario_title})', fontsize=16, weight='bold', y=0.99)
         # Add subtitles for the row sections
         fig.text(0.12, 0.93, 'Zonal Wind (u850) Differences (High-Freq. \u2212 Low-Freq.)', ha='left', va='center', fontsize=12, weight='bold')
         fig.text(0.12, 0.61, 'Jet Stream Indices', ha='left', va='center', fontsize=12, weight='bold')

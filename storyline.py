@@ -18,6 +18,7 @@ import pandas as pd
 import logging
 import os
 import json
+from typing import Any
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from scipy.stats import chi2
@@ -87,7 +88,7 @@ class StorylineAnalyzer:
 
         try:
             preprocess_func = None
-            common_args = {
+            common_args: dict[str, Any] = {
                 "paths": all_files, "parallel": False, "engine": 'netcdf4',
                 "use_cftime": True, "coords": 'minimal', "data_vars": 'minimal',
                 "compat": 'override', "chunks": {'time': 120}
@@ -173,7 +174,7 @@ class StorylineAnalyzer:
         else:
             tas_anom_smoothed = tas_anom.rolling(year=smoothing_window, center=True).mean().dropna(dim='year')
         
-        gwl_years = {gwl: None for gwl in gwl_levels}
+        gwl_years: dict[float, int | None] = {gwl: None for gwl in gwl_levels}
         for gwl in gwl_levels:
             exceed_years = tas_anom_smoothed.where(tas_anom_smoothed > gwl, drop=True).year
             if exceed_years.size > 0:
@@ -446,14 +447,16 @@ class StorylineAnalyzer:
             # --- START: NEW Annual Metrics ---
             # Calculate Annual Means (using season_year to align with other metrics)
             da_tas_ann = DataProcessor.assign_season_to_dataarray(data['tas'])
-            metric_timeseries[key]['Annual_tas'] = DataProcessor.calculate_spatial_mean(
-                da_tas_ann.groupby('season_year').mean('time'), *box_coords
-            )
+            if da_tas_ann is not None:
+                metric_timeseries[key]['Annual_tas'] = DataProcessor.calculate_spatial_mean(
+                    da_tas_ann.groupby('season_year').mean('time'), *box_coords
+                )
 
             da_pr_ann = DataProcessor.assign_season_to_dataarray(data['pr'])
-            metric_timeseries[key]['Annual_pr'] = DataProcessor.calculate_spatial_mean(
-                da_pr_ann.groupby('season_year').mean('time'), *box_coords
-            )
+            if da_pr_ann is not None:
+                metric_timeseries[key]['Annual_pr'] = DataProcessor.calculate_spatial_mean(
+                    da_pr_ann.groupby('season_year').mean('time'), *box_coords
+                )
 
             if discharge_monthly_full is not None:
                 # discharge_monthly_full already has season_year from assign_season_to_dataarray earlier
@@ -475,7 +478,8 @@ class StorylineAnalyzer:
                      spei_full = DataProcessor.calculate_spei(pr_box_full, tas_box_full, lat=lat_center, scale=4)
                      if spei_full is not None:
                          da_spei_ann = DataProcessor.assign_season_to_dataarray(spei_full)
-                         metric_timeseries[key]['Annual_spei'] = da_spei_ann.groupby('season_year').mean('time')
+                         if da_spei_ann is not None:
+                             metric_timeseries[key]['Annual_spei'] = da_spei_ann.groupby('season_year').mean('time')
             # --- END: NEW Annual Metrics ---
 
         # Step 4: Calculate absolute metric values at historical reference and at each GWL
@@ -1040,16 +1044,23 @@ class StorylineAnalyzer:
             slopes_pr, p_values_pr = StorylineAnalyzer._calculate_regression_for_variable(pr_idx_norm, ua_season_detrended)
             slopes_tas, p_values_tas = StorylineAnalyzer._calculate_regression_for_variable(tas_idx_norm, ua_season_detrended)
             
-            ua850_mean_orig = DataProcessor.filter_by_season(mmm_seasonal['ua'], season).mean(dim='season_year', skipna=True).compute()
+            ua_filtered = DataProcessor.filter_by_season(mmm_seasonal['ua'], season)
+            ua850_mean_orig = ua_filtered.mean(dim='season_year', skipna=True).compute() if ua_filtered is not None else None
+
+            std_pr_filtered = DataProcessor.filter_by_season(mmm_pr_box_detrended, season)
+            std_dev_pr = std_pr_filtered.std().item() if std_pr_filtered is not None else None
+
+            std_tas_filtered = DataProcessor.filter_by_season(mmm_tas_box_detrended, season)
+            std_dev_tas = std_tas_filtered.std().item() if std_tas_filtered is not None else None
 
             cmip6_regression_results[season] = {
                 'slopes_pr': slopes_pr, 'p_values_pr': p_values_pr,
                 'slopes_tas': slopes_tas, 'p_values_tas': p_values_tas,
                 'ua850_mean': ua850_mean_orig.values if ua850_mean_orig is not None else None,
-                'lons': ua_season_detrended.lon.values if 'lon' in ua_season_detrended.coords else None,
-                'lats': ua_season_detrended.lat.values if 'lat' in ua_season_detrended.coords else None,
-                'std_dev_pr': DataProcessor.filter_by_season(mmm_pr_box_detrended, season).std().item(),
-                'std_dev_tas': DataProcessor.filter_by_season(mmm_tas_box_detrended, season).std().item()
+                'lons': ua_season_detrended.lon.values if (ua_season_detrended is not None and 'lon' in ua_season_detrended.coords) else None,
+                'lats': ua_season_detrended.lat.values if (ua_season_detrended is not None and 'lat' in ua_season_detrended.coords) else None,
+                'std_dev_pr': std_dev_pr,
+                'std_dev_tas': std_dev_tas
             }
         
         logging.info("Calculation of CMIP6 regression maps finished.")
@@ -1215,13 +1226,18 @@ class StorylineAnalyzer:
             slopes_pr, p_values_pr = StorylineAnalyzer._calculate_regression_for_variable(pr_idx_norm, ua_season_detrended)
             slopes_tas, p_values_tas = StorylineAnalyzer._calculate_regression_for_variable(tas_idx_norm, ua_season_detrended)
             
+            ua850_seas = DataProcessor.filter_by_season(ua850_seasonal, season)
+            std_pr_s = DataProcessor.filter_by_season(pr_box_detrended, season)
+            std_tas_s = DataProcessor.filter_by_season(tas_box_detrended, season)
+
             all_season_data[season] = {
                 'slopes_pr': slopes_pr, 'p_values_pr': p_values_pr,
                 'slopes_tas': slopes_tas, 'p_values_tas': p_values_tas,
-                'ua850_mean': DataProcessor.filter_by_season(ua850_seasonal, season).mean('season_year').values,
-                'lons': ua850_seasonal.lon.values, 'lats': ua850_seasonal.lat.values,
-                'std_dev_pr': DataProcessor.filter_by_season(pr_box_detrended, season).std().item(),
-                'std_dev_tas': DataProcessor.filter_by_season(tas_box_detrended, season).std().item()
+                'ua850_mean': ua850_seas.mean('season_year').values if ua850_seas is not None else None,
+                'lons': ua850_seasonal.lon.values if ua850_seasonal is not None else None,
+                'lats': ua850_seasonal.lat.values if ua850_seasonal is not None else None,
+                'std_dev_pr': std_pr_s.std().item() if std_pr_s is not None else None,
+                'std_dev_tas': std_tas_s.std().item() if std_tas_s is not None else None
             }
         return all_season_data
 
@@ -1402,27 +1418,28 @@ class StorylineAnalyzer:
                     jet_detrended = jet_bundle['jet']
                     jet_smooth = StatsAnalyzer.calculate_rolling_mean(jet_detrended, window=window_size)
                     
-                    common_years = np.intersect1d(jet_smooth.season_year.values, amo_smooth.season_year.values)
-                    if len(common_years) > window_size:
-                        s, i, r, p, e = StatsAnalyzer.calculate_regression(
-                            amo_smooth.sel(season_year=common_years).values,
-                            jet_smooth.sel(season_year=common_years).values
-                        )
-                        if not np.isnan(r):
-                            # --- START MODIFICATION ---
-                            # Use 'latitude' as the key to match the plotting function's expectation
-                            result_key = 'latitude' if jet_type == 'lat' else 'speed'
-                            
-                            # Store the actual data needed for the plot, not just the result
-                            dataset_correlations[result_key] = {
-                                'r_value': r, 
-                                'p_value': p, 
-                                'window_size': window_size,
-                                'common_years': common_years,
-                                'amo_values': amo_smooth.sel(season_year=common_years).values,
-                                'jet_values': jet_smooth.sel(season_year=common_years).values
-                            }
-                            # --- END MODIFICATION ---
+                    if isinstance(jet_smooth, xr.DataArray) and isinstance(amo_smooth, xr.DataArray):
+                        common_years = np.intersect1d(jet_smooth.season_year.values, amo_smooth.season_year.values)
+                        if len(common_years) > window_size:
+                            s, i, r, p, e = StatsAnalyzer.calculate_regression(
+                                amo_smooth.sel(season_year=common_years).values,
+                                jet_smooth.sel(season_year=common_years).values
+                            )
+                            if not np.isnan(r):
+                                # --- START MODIFICATION ---
+                                # Use 'latitude' as the key to match the plotting function's expectation
+                                result_key = 'latitude' if jet_type == 'lat' else 'speed'
+                                
+                                # Store the actual data needed for the plot, not just the result
+                                dataset_correlations[result_key] = {
+                                    'r_value': r, 
+                                    'p_value': p, 
+                                    'window_size': window_size,
+                                    'common_years': common_years,
+                                    'amo_values': amo_smooth.sel(season_year=common_years).values,
+                                    'jet_values': jet_smooth.sel(season_year=common_years).values
+                                }
+                                # --- END MODIFICATION ---
 
             if dataset_correlations:
                 correlations[dataset_key] = dataset_correlations
@@ -1546,7 +1563,7 @@ class StorylineAnalyzer:
         logging.info(f"Preparing data for climate projection timeseries plot (Ref: {ref_start}-{ref_end})...")
         
         # Initialisierung für alle vier Indizes plus neue Halbjahres-Indizes
-        cmip6_plot_data = {'Global_Tas': {'members': [], 'mmm': None},
+        cmip6_plot_data: dict[str, dict[str, Any]] = {'Global_Tas': {'members': [], 'mmm': None},
                             'JJA_JetLat': {'members': [], 'mmm': None},
                             'DJF_JetSpeed': {'members': [], 'mmm': None},
                             'JJA_JetSpeed': {'members': [], 'mmm': None},
@@ -2023,7 +2040,10 @@ class StorylineAnalyzer:
                 if monthly_hist.time.size == 0:
                     raise ValueError(f"No data for {var} in period {historical_period}")
                 seasonal_full = DataProcessor.assign_season_to_dataarray(monthly_hist)
-                seasonal_means[var] = DataProcessor.calculate_seasonal_means(seasonal_full).load()
+                seas_means = DataProcessor.calculate_seasonal_means(seasonal_full)
+                if seas_means is None:
+                    raise ValueError(f"Failed to calculate seasonal means for {var}")
+                seasonal_means[var] = seas_means.load()
         except Exception as e:
             logging.error(f"  Error processing data for {model_key}: {e}")
             return {}
@@ -2045,16 +2065,21 @@ class StorylineAnalyzer:
 
             slopes_pr, p_values_pr = StorylineAnalyzer._calculate_regression_for_variable(pr_idx_norm, ua_season_detrended)
             slopes_tas, p_values_tas = StorylineAnalyzer._calculate_regression_for_variable(tas_idx_norm, ua_season_detrended)
-            ua850_mean_orig = DataProcessor.filter_by_season(seasonal_means['ua'], season).mean(dim='season_year', skipna=True)
+            
+            ua_s = DataProcessor.filter_by_season(seasonal_means['ua'], season)
+            ua850_mean_orig = ua_s.mean(dim='season_year', skipna=True) if ua_s is not None else None
+
+            std_pr_f = DataProcessor.filter_by_season(pr_box_detrended, season)
+            std_tas_f = DataProcessor.filter_by_season(tas_box_detrended, season)
 
             regression_results[season] = {
                 'slopes_pr': slopes_pr, 'p_values_pr': p_values_pr,
                 'slopes_tas': slopes_tas, 'p_values_tas': p_values_tas,
                 'ua850_mean': ua850_mean_orig.values if ua850_mean_orig is not None else None,
-                'lons': ua_season_detrended.lon.values if 'lon' in ua_season_detrended.coords else None,
-                'lats': ua_season_detrended.lat.values if 'lat' in ua_season_detrended.coords else None,
-                'std_dev_pr': DataProcessor.filter_by_season(pr_box_detrended, season).std().item(),
-                'std_dev_tas': DataProcessor.filter_by_season(tas_box_detrended, season).std().item(),
+                'lons': ua_season_detrended.lon.values if (ua_season_detrended is not None and 'lon' in ua_season_detrended.coords) else None,
+                'lats': ua_season_detrended.lat.values if (ua_season_detrended is not None and 'lat' in ua_season_detrended.coords) else None,
+                'std_dev_pr': std_pr_f.std().item() if std_pr_f is not None else None,
+                'std_dev_tas': std_tas_f.std().item() if std_tas_f is not None else None,
             }
         return regression_results
     
@@ -2245,7 +2270,7 @@ class StorylineAnalyzer:
         results = {'thresholds': {'winter': {}, 'summer': {}, 'full_year': {}}, 'data': {}}
         
         # --- 1. Definiere die zu analysierenden EVA-Ereignisse ---
-        eva_events_to_analyze = [
+        eva_events_to_analyze: list[tuple[str, str, int, int | None, str, str]] = [
             # 1Q Events REMOVED as per user request
             
             # 7Q Events
@@ -2398,9 +2423,9 @@ class StorylineAnalyzer:
                  try:
                      # Berechne den Annual Threshold
                      if eva_type == 'low':
-                        thresh = np.quantile(annual_extremes.values, 1.0/target_T, interpolation='linear')
+                        thresh = np.quantile(annual_extremes.values, 1.0/target_T, method='linear')
                      else:
-                        thresh = np.quantile(annual_extremes.values, 1.0 - 1.0/target_T, interpolation='linear')
+                        thresh = np.quantile(annual_extremes.values, 1.0 - 1.0/target_T, method='linear')
                         
                      # 3. Check Seasonal Recurrence (Hydrological Half-Years)
                      
@@ -2554,14 +2579,14 @@ class StorylineAnalyzer:
                                 # (User Request: "also wird als referenz ein wert genommen, der in der vergangenheit 1 mal jährlich alle 10 jahre vorkommt")
                                 if eva_type == 'low':
                                     prob_target = 1.0 / target_T
-                                    model_threshold = np.quantile(hist_slice_annual.values, prob_target, interpolation='linear')
+                                    model_threshold = np.quantile(hist_slice_annual.to_numpy(), prob_target, method='linear')
                                 else:
                                     prob_target = 1.0 - (1.0 / target_T)
-                                    model_threshold = np.quantile(hist_slice_annual.values, prob_target, interpolation='linear')
+                                    model_threshold = np.quantile(hist_slice_annual.to_numpy(), prob_target, method='linear')
                                 
                                 # --- B. FUTURE PERIOD (Apply Annual Threshold to Seasonal Data) ---
                                 # Count how often the ANNUAL threshold is exceeded in the FUTURE SEASON
-                                fut_values = fut_slice_seasonal.values
+                                fut_values = fut_slice_seasonal.to_numpy()
                                 n_fut = len(fut_values)
                                 
                                 # Empirical Probability:
@@ -2623,8 +2648,6 @@ class StorylineAnalyzer:
 
         return results
 
-        return results
-
     @staticmethod
     def calculate_storyline_spei_impacts(storyline_impacts, historical_monthly_data, config):
         """
@@ -2653,15 +2676,21 @@ class StorylineAnalyzer:
             return {}
         
         hist_spei_ts_seasonal = DataProcessor.assign_season_to_dataarray(hist_spei_ts_monthly)
+        spei_winter = DataProcessor.filter_by_season(hist_spei_ts_seasonal, 'Winter')
+        spei_summer = DataProcessor.filter_by_season(hist_spei_ts_seasonal, 'Summer')
         hist_mean_spei = {
-            'DJF': DataProcessor.filter_by_season(hist_spei_ts_seasonal, 'Winter').mean().item(),
-            'JJA': DataProcessor.filter_by_season(hist_spei_ts_seasonal, 'Summer').mean().item()
+            'DJF': spei_winter.mean().item() if spei_winter is not None else 0.0,
+            'JJA': spei_summer.mean().item() if spei_summer is not None else 0.0
         }
         logging.info(f"Historical mean SPEI calculated: DJF={hist_mean_spei['DJF']:.2f}, JJA={hist_mean_spei['JJA']:.2f}")
 
         # Stelle sicher, dass die monatlichen Daten eine 'season'-Koordinate haben
         hist_pr_monthly_seas = DataProcessor.assign_season_to_dataarray(hist_pr_monthly)
         hist_tas_monthly_seas = DataProcessor.assign_season_to_dataarray(hist_tas_monthly)
+
+        if hist_pr_monthly_seas is None or hist_tas_monthly_seas is None:
+            logging.error("Failed to assign season to historical monthly data.")
+            return {}
 
         for gwl, impacts in storyline_impacts.items():
             if gwl not in config.GLOBAL_WARMING_LEVELS:
@@ -2772,6 +2801,8 @@ class StorylineAnalyzer:
                         ua_seasonal = DataProcessor.calculate_seasonal_means(
                             DataProcessor.assign_season_to_dataarray(ua_data)
                         )
+                        if ua_seasonal is None:
+                            continue
                         
                         hist_ua_season = DataProcessor.filter_by_season(
                             ua_seasonal.sel(season_year=slice(hist_period[0], hist_period[1])),
@@ -2848,6 +2879,9 @@ class StorylineAnalyzer:
 
         hist_pr_monthly_seas = DataProcessor.assign_season_to_dataarray(hist_pr_monthly)
         hist_tas_monthly_seas = DataProcessor.assign_season_to_dataarray(hist_tas_monthly)
+        if hist_pr_monthly_seas is None or hist_tas_monthly_seas is None:
+            logging.error("Failed to assign season to historical monthly pr or tas.")
+            return {}
         lat_center_of_box = (config.BOX_LAT_MIN + config.BOX_LAT_MAX) / 2
 
         for gwl in config.GLOBAL_WARMING_LEVELS:
@@ -2885,7 +2919,10 @@ class StorylineAnalyzer:
                         logging.info(f"    - DEBUG: SKIP {model_run_key}, da SPEI-Berechnung fehlschlug.") # DEBUG
                         continue
                     
-                    future_spei_seasonal = DataProcessor.filter_by_season(DataProcessor.assign_season_to_dataarray(future_spei_monthly), season_name)
+                    spei_assigned = DataProcessor.assign_season_to_dataarray(future_spei_monthly)
+                    future_spei_seasonal = DataProcessor.filter_by_season(spei_assigned, season_name)
+                    if future_spei_seasonal is None:
+                        continue
                     future_spei_ts = future_spei_seasonal.groupby('season_year').mean('time')
 
                     # 4. Get future Discharge timeseries for THIS model
@@ -3403,8 +3440,8 @@ class StorylineAnalyzer:
         
         # Convert to numpy for faster iteration
         # shape: (n_models, lat, lon)
-        combined_np = combined.values
-        obs_diff_np = obs_diff.values
+        combined_np = combined.to_numpy()
+        obs_diff_np = obs_diff.to_numpy()
         
         count_exceed = np.zeros(obs_diff_np.shape)
         
@@ -3566,9 +3603,9 @@ class StorylineAnalyzer:
                 count_hist = (hist_seasonal.values < thresh).sum()
             else:
                 count_hist = (hist_seasonal.values > thresh).sum()
-            C_hist_scaled = count_hist * 30.0 / hist_seasonal.year.size
+            C_hist_scaled = count_hist * float(window) / hist_seasonal.year.size
 
-            # Future count (absolute counts evaluated directly since future window is 30 years)
+            # Future count (absolute counts evaluated directly since future window size matches window config)
             values = fut_seasonal.values
             if metric_type == 'low':
                 count_fut = (values < thresh).sum()
@@ -3781,7 +3818,7 @@ class StorylineAnalyzer:
         composites = {}
         
         # Check that we have all 4 components
-        if all(x is not None for x in [fut_mean_ext, fut_mean_non, hist_mean_ext, hist_mean_non]):
+        if fut_mean_ext is not None and fut_mean_non is not None and hist_mean_ext is not None and hist_mean_non is not None:
             # Compute 4 difference maps
             diff_ext_non_future = fut_mean_ext - fut_mean_non
             diff_ext_non_hist = hist_mean_ext - hist_mean_non
@@ -4106,7 +4143,7 @@ class StorylineAnalyzer:
         
         composites = {}
         
-        if all(x is not None for x in [fut_mean_ext, fut_mean_non, hist_mean_ext, hist_mean_non]):
+        if fut_mean_ext is not None and fut_mean_non is not None and hist_mean_ext is not None and hist_mean_non is not None:
             diff_ext_non_future = fut_mean_ext - fut_mean_non
             diff_ext_non_hist = hist_mean_ext - hist_mean_non
             diff_fut_hist_ext = fut_mean_ext - hist_mean_ext
@@ -4805,7 +4842,7 @@ class StorylineAnalyzer:
         hist_mean_non, hist_stack_non, hist_used_non = get_group_maps(non_extreme_models, 'historical')
         
         composites = {}
-        if all(x is not None for x in [fut_mean_ext, fut_mean_non, hist_mean_ext, hist_mean_non]):
+        if fut_mean_ext is not None and fut_mean_non is not None and hist_mean_ext is not None and hist_mean_non is not None:
             diff_ext_non_future = fut_mean_ext - fut_mean_non
             diff_ext_non_hist = hist_mean_ext - hist_mean_non
             diff_fut_hist_ext = fut_mean_ext - hist_mean_ext
@@ -5200,7 +5237,7 @@ class StorylineAnalyzer:
         hist_mean_non, hist_stack_non, hist_used_non = get_group_maps(non_extreme_models, 'historical')
         
         composites = {}
-        if all(x is not None for x in [fut_mean_ext, fut_mean_non, hist_mean_ext, hist_mean_non]):
+        if fut_mean_ext is not None and fut_mean_non is not None and hist_mean_ext is not None and hist_mean_non is not None:
             hist_mean_all = (hist_mean_ext + hist_mean_non) / 2.0
             
             composites = {
@@ -5466,7 +5503,7 @@ class StorylineAnalyzer:
         
         composites = {}
         
-        if all(x is not None for x in [fut_mean_ext, fut_mean_non, hist_mean_ext, hist_mean_non]):
+        if fut_mean_ext is not None and fut_mean_non is not None and hist_mean_ext is not None and hist_mean_non is not None:
             diff_ext_non_future = fut_mean_ext - fut_mean_non
             diff_ext_non_hist = hist_mean_ext - hist_mean_non
             diff_fut_hist_ext = fut_mean_ext - hist_mean_ext

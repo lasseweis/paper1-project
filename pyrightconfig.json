@@ -1,0 +1,10 @@
+{
+  "venvPath": "/nas/home/vlw/.mambaenvs",
+  "venv": "STREAM",
+  "pythonPath": "/nas/home/vlw/.mambaenvs/STREAM/bin/python",
+  "pythonVersion": "3.10",
+  "extraPaths": [
+    ".",
+    "/nas/home/vlw/.mambaenvs/STREAM/lib/python3.10/site-packages"
+  ]
+}

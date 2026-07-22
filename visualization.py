@@ -7,6 +7,7 @@ figure, such as time series plots, regression maps, or correlation
 matrices. It separates the analysis logic from the presentation.
 """
 import os
+import sys
 import logging
 import numpy as np
 import pandas as pd
@@ -15,6 +16,8 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.ticker
+import matplotlib.gridspec
 from matplotlib import gridspec
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
@@ -22,10 +25,12 @@ import seaborn as sns
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import cartopy.io.shapereader as shpreader
+import shapely.ops
+import shapely.geometry
 from scipy.stats import chi2, linregress
 import json
-import seaborn as sns
 import traceback
+from typing import cast, Any
 
 # Import local modules
 from storyline import StorylineAnalyzer 
@@ -181,7 +186,7 @@ class Visualizer:
             cax_tas = fig.add_subplot(gs[1, 2]); fig.colorbar(cf_tas, cax=cax_tas, extend='both', label=label_tas)
             
         plt.suptitle(f"{dataset_key}: U850 Regression onto Box Climate Indices (Detrended, Normalized Predictors)", fontsize=14, weight='bold')
-        fig.tight_layout(rect=[0, 0, 0.95, 0.95])
+        fig.tight_layout(rect=(0, 0, 0.95, 0.95))
         filename = os.path.join(Config.PLOT_DIR, f'regression_maps_norm_{dataset_key}.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -283,16 +288,18 @@ class Visualizer:
 
         # --- Colorbars (Horizontal at bottom) ---
         # PR Colorbar (Left side)
-        cax_pr = fig.add_axes([0.1, 0.04, 0.35, 0.02])
-        fig.colorbar(cf_pr, cax=cax_pr, orientation='horizontal', label=label_pr, extend='both')
+        cax_pr = fig.add_axes((0.1, 0.04, 0.35, 0.02))
+        if cf_pr is not None:
+            fig.colorbar(cf_pr, cax=cax_pr, orientation='horizontal', label=label_pr, extend='both')
         
         # TAS Colorbar (Right side)
-        cax_tas = fig.add_axes([0.55, 0.04, 0.35, 0.02])
-        fig.colorbar(cf_tas, cax=cax_tas, orientation='horizontal', label=label_tas, extend='both')
+        cax_tas = fig.add_axes((0.55, 0.04, 0.35, 0.02))
+        if cf_tas is not None:
+            fig.colorbar(cf_tas, cax=cax_tas, orientation='horizontal', label=label_tas, extend='both')
 
         plt.suptitle(f"{dataset_key}: Historical Jet Influence on Local Climate", weight='bold') 
         
-        fig.tight_layout(rect=[0, 0.1, 1, 0.95], h_pad=2.0, w_pad=2.0)
+        fig.tight_layout(rect=(0, 0.1, 1, 0.95), h_pad=2.0, w_pad=2.0)
         filename = os.path.join(Config.PLOT_DIR, 'Figure1_regression_maps_ERA5.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -319,6 +326,7 @@ class Visualizer:
         fig = plt.figure(figsize=(12, 18))
         gs = gridspec.GridSpec(len(plot_configs), 3, width_ratios=[10, 10, 1], wspace=0.1, hspace=0.3)
 
+        cf = None
         row_idx = 0
         for key, config in plot_configs.items():
             if 'speed' in key:
@@ -331,6 +339,7 @@ class Visualizer:
                 jet_box_edgecolor = 'red'
             else:
                 jet_box_coords = None
+                jet_box_edgecolor = 'black'
             
             analysis_box_coords = (Config.BOX_LON_MIN, Config.BOX_LON_MAX, 
                                    Config.BOX_LAT_MIN, Config.BOX_LAT_MAX)
@@ -428,12 +437,13 @@ class Visualizer:
                 unit = "m/s" if "Speed" in config['title'] else "°Lat"
                 final_label += f'\n(1 std. dev. = {std_dev_val:.2f} {unit})'
             
-            fig.colorbar(cf, cax=cax, extend='both', label=final_label)
+            if cf is not None:
+                fig.colorbar(cf, cax=cax, extend='both', label=final_label)
 
             row_idx += 1
         
         plt.suptitle(f"Correlation Maps of Jet Variations and Climate ({season}, Detrended)", fontsize=16, weight='bold')
-        fig.tight_layout(rect=[0, 0, 0.95, 0.96])
+        fig.tight_layout(rect=(0, 0, 0.95, 0.96))
         filename = os.path.join(Config.PLOT_DIR, f'jet_correlation_maps_{season.lower()}.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -469,7 +479,7 @@ class Visualizer:
         ]
         master_legend_labels = [
             'Individual CMIP6 Models',
-            '10-90th Percentile Spread',
+            '100% Model Spread',
             'Multi-Model Mean'
         ]
 
@@ -526,8 +536,8 @@ class Visualizer:
                     ax.plot(gwls_sorted, values_sorted, marker='.', linestyle='-', color='darkgray', alpha=0.5, lw=0.8)
 
             delta_values_per_gwl = [list(deltas_by_gwl[gwl].values()) for gwl in gwls_fine]
-            p10 = [np.percentile(d, 10) if d else np.nan for d in delta_values_per_gwl]
-            p90 = [np.percentile(d, 90) if d else np.nan for d in delta_values_per_gwl]
+            p10 = [np.nanmin(d) if d else np.nan for d in delta_values_per_gwl]
+            p90 = [np.nanmax(d) if d else np.nan for d in delta_values_per_gwl]
             
             valid_indices = [j for j, (p10_val, p90_val) in enumerate(zip(p10, p90)) if not np.isnan(p10_val) and not np.isnan(p90_val)]
             if valid_indices:
@@ -555,7 +565,7 @@ class Visualizer:
                             yerr=tolerance,  # The vertical error bar
                             marker=style['marker'],
                             color=style['color'],
-                            markersize=style['s'] / 7, # Adjust markersize, as 's' in scatter scales differently
+                            markersize=float(style['s']) / 7, # Adjust markersize, as 's' in scatter scales differently
                             markeredgecolor='black',
                             markeredgewidth=0.8,
                             linestyle='none', # No connecting line
@@ -589,7 +599,7 @@ class Visualizer:
                 fontsize=11,
                 frameon=True)
 
-        fig.tight_layout(rect=[0, 0.06, 1, 0.95])
+        fig.tight_layout(rect=(0, 0.06, 1, 0.95))
         
         # Use the scenario argument for a dynamic title and filename
         fig.suptitle(f"CMIP6 Projected Jet Changes vs. Global Warming Level ({scenario_title})", fontsize=16, weight='bold')
@@ -635,6 +645,9 @@ class Visualizer:
                 jet_box_coords = (Config.JET_LAT_BOX_LON_MIN, Config.JET_LAT_BOX_LON_MAX,
                                 Config.JET_LAT_BOX_LAT_MIN, Config.JET_LAT_BOX_LAT_MAX)
                 jet_box_edgecolor = 'red'
+            else:
+                jet_box_coords = None
+                jet_box_edgecolor = 'black'
             
             analysis_box_coords = (Config.BOX_LON_MIN, Config.BOX_LON_MAX, 
                                 Config.BOX_LAT_MIN, Config.BOX_LAT_MAX)
@@ -672,10 +685,11 @@ class Visualizer:
                 # --- END OF CHANGE ---
                 
                 # Draw boxes
-                lon_min, lon_max, lat_min, lat_max = jet_box_coords
-                ax1.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
-                                fill=False, edgecolor=jet_box_edgecolor, linewidth=1.5, linestyle='--',
-                                zorder=10, transform=ccrs.PlateCarree()))
+                if jet_box_coords is not None:
+                    lon_min, lon_max, lat_min, lat_max = jet_box_coords
+                    ax1.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
+                                    fill=False, edgecolor=jet_box_edgecolor, linewidth=1.5, linestyle='--',
+                                    zorder=10, transform=ccrs.PlateCarree()))
                 lon_min, lon_max, lat_min, lat_max = analysis_box_coords
                 ax1.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
                                             fill=False, edgecolor='lime', linewidth=2, linestyle='-',
@@ -716,8 +730,9 @@ class Visualizer:
                 # --- END OF CHANGE ---
                 
                 # Draw boxes
-                lon_min, lon_max, lat_min, lat_max = jet_box_coords
-                ax2.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
+                if jet_box_coords is not None:
+                    lon_min, lon_max, lat_min, lat_max = jet_box_coords
+                    ax2.add_patch(mpatches.Rectangle((lon_min, lat_min), lon_max - lon_min, lat_max - lat_min,
                                                 fill=False, edgecolor=jet_box_edgecolor, linewidth=1.5, linestyle='--',
                                                 zorder=10, transform=ccrs.PlateCarree()))
                 lon_min, lon_max, lat_min, lat_max = analysis_box_coords
@@ -728,21 +743,21 @@ class Visualizer:
                 ax2.text(0.5, 0.5, "Data not available", transform=ax2.transAxes, ha='center', va='center')
 
             # --- Colorbar ---
-            if cf:
-                cax = fig.add_subplot(gs[row_idx, 2])
-                final_label = config['base_label']
-                std_dev_val = data_era5.get('std_dev_predictor') if data_era5 and data_era5.get('std_dev_predictor') is not None else (data_20crv3.get('std_dev_predictor') if data_20crv3 else None)
-
-                if std_dev_val is not None and not np.isnan(std_dev_val):
-                    unit = "m/s" if "Speed" in config['title'] else "°Lat"
-                    final_label += f'\n(1 std. dev. = {std_dev_val:.2f} {unit})'
-                
+            cax = fig.add_subplot(gs[row_idx, 2])
+            
+            final_label = config['base_label']
+            std_dev_val = data_era5.get('std_dev_jet') if data_era5 else data_20crv3.get('std_dev_jet')
+            if std_dev_val is not None and not np.isnan(std_dev_val):
+                unit = "m/s" if "Speed" in config['title'] else "°Lat"
+                final_label += f'\n(1 std. dev. = {std_dev_val:.2f} {unit})'
+            
+            if cf is not None:
                 fig.colorbar(cf, cax=cax, extend='both', label=final_label)
 
             row_idx += 1
         
-        plt.suptitle(f"Regression of Climate Variables on Jet Variations ({season}, Detrended)", fontsize=16, weight='bold')
-        fig.tight_layout(rect=[0, 0, 0.95, 0.96])
+        plt.suptitle(f"Impact Maps of Jet Variations on Local Climate ({season}, Detrended)", fontsize=16, weight='bold')
+        fig.tight_layout(rect=(0, 0, 0.95, 0.96))
         filename = os.path.join(Config.PLOT_DIR, f'jet_impact_regression_maps_{season.lower()}.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -768,8 +783,8 @@ class Visualizer:
         all_years = []
         
         for config in plot_configs:
-            ax = config['ax']
-            season_lower = config['season'].lower()
+            ax: Any = config['ax']
+            season_lower = str(config['season']).lower()
             
             # Store data for correlation calculation
             ts_data = {}
@@ -936,7 +951,7 @@ class Visualizer:
 
         fig.suptitle(f"{season} Correlations with Jet Stream Indices: 20CRv3 vs ERA5 (Detrended)", fontsize=16, weight='bold')
         # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
-        fig.tight_layout(rect=[0, 0, 1, 0.96])
+        fig.tight_layout(rect=(0, 0, 1, 0.96))
         filename = os.path.join(Config.PLOT_DIR, f'{season_lower}_correlations_comparison_detrended.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -1046,7 +1061,7 @@ class Visualizer:
 
         fig.suptitle("Correlation: Danube Flow (Obs) vs. Analysis Box Climate Indices (ERA5) [Detrended]", fontsize=16)
         # Adjust layout to make room for legend at bottom
-        plt.tight_layout(rect=[0, 0.08, 1, 0.95])
+        plt.tight_layout(rect=(0, 0.08, 1, 0.95))
         
         filename = os.path.join(Config.PLOT_DIR, "danube_box_correlation_comparison.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -1146,7 +1161,7 @@ class Visualizer:
         plt.figtext(0.5, 0.01, "* p < 0.05, ** p < 0.01, *** p < 0.001", ha="center", fontsize=10)
 
         # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
-        fig.tight_layout(rect=[0, 0.05, 1, 0.95])
+        fig.tight_layout(rect=(0, 0.05, 1, 0.95))
         filename = os.path.join(Config.PLOT_DIR, f'correlation_matrix_comparison_{season.lower()}_detrended_grouped.png')
         plt.savefig(filename, dpi=300)
         plt.close(fig)
@@ -1179,10 +1194,15 @@ class Visualizer:
         jet_type_map = {'speed': 'speed', 'lat': 'latitude'}
 
         for config in plot_configs:
-            ax = axs[config['ax_idx']]
-            season_data = correlation_data.get(config['season'])
+            ax_idx = int(config['ax_idx'])
+            jet_type = str(config['jet_type'])
+            season_key = str(config['season'])
+            title_key = str(config['title'])
             
-            ax.set_title(f"{config['title']}, {window_size}-yr mean")
+            ax = axs[ax_idx]
+            season_data = correlation_data.get(season_key)
+            
+            ax.set_title(f"{title_key}, {window_size}-yr mean")
             ax.grid(True, linestyle=':', alpha=0.6)
 
             if not season_data:
@@ -1192,7 +1212,8 @@ class Visualizer:
             plotted_amo = False
             for dataset_key in [Config.DATASET_20CRV3, Config.DATASET_ERA5]:
                 # The data structure from analyze_amo_jet_correlations is {'20CRv3': {'speed': {...}, 'latitude': {...}}}
-                jet_data = season_data.get(dataset_key, {}).get(jet_type_map[config['jet_type']])
+                mapped_jet_key = jet_type_map.get(jet_type, jet_type)
+                jet_data = season_data.get(dataset_key, {}).get(mapped_jet_key)
                 
                 if jet_data and 'amo_values' in jet_data and 'jet_values' in jet_data:
                     # Normalize data for consistent plotting scale
@@ -1206,7 +1227,7 @@ class Visualizer:
                         plotted_amo = True
 
                     # Plot jet series
-                    label = f"{dataset_key} Jet {config['jet_type'].capitalize()} ({window_size}yr)"
+                    label = f"{dataset_key} Jet {jet_type.capitalize()} ({window_size}yr)"
                     ax.plot(years, jet_norm, '--', color=colors[dataset_key], linewidth=2.0, label=label)
 
                     # Add correlation text
@@ -1236,7 +1257,7 @@ class Visualizer:
 
         fig.suptitle('Relationship Between AMO Index and Jet Stream Indices (Detrended)', fontsize=16, weight='bold')
         # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
-        fig.tight_layout(rect=[0, 0.03, 1, 0.96])
+        fig.tight_layout(rect=(0, 0.03, 1, 0.96))
         filename = os.path.join(Config.PLOT_DIR, f'amo_jet_correlations_comparison_rolling_{window_size}yr.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -1268,8 +1289,10 @@ class Visualizer:
         ]
 
         for p_config in plot_configs:
-            ax = p_config['ax']
-            key = p_config['key']
+            ax: Any = p_config['ax']
+            key = str(p_config['key'])
+            title_str = str(p_config['title'])
+            ylabel_str = str(p_config['ylabel'])
 
             if cmip6_plot_data.get(key) and cmip6_plot_data[key]['members']:
                 for member_jet in cmip6_plot_data[key]['members']:
@@ -1284,16 +1307,16 @@ class Visualizer:
                 reanalysis_era5 = reanalysis_plot_data[key]['ERA5']
                 ax.plot(reanalysis_era5.season_year, reanalysis_era5, color='purple', linewidth=2, label='ERA5')
 
-            ax.set_title(p_config['title'], fontsize=12, weight='bold', loc='left')
-            ax.set_ylabel(p_config['ylabel'], fontsize=10)
+            ax.set_title(title_str, fontsize=12, weight='bold', loc='left')
+            ax.set_ylabel(ylabel_str, fontsize=10)
             ax.grid(True, linestyle=':', alpha=0.7)
             ax.set_xlim(1850, 2100)
             ax.axhline(0, color='black', linewidth=0.5)
-            if p_config['ax'] in [axs[2], axs[3]]: # Bottom row
+            if ax in [axs[2], axs[3]]: # Bottom row
                 ax.set_xlabel('Year', fontsize=10)
 
         fig.suptitle(f'Evolution of Key Climate Indices ({window_size}-Year Rolling Mean)', fontsize=16, weight='bold')
-        fig.tight_layout(rect=[0, 0, 1, 0.96])
+        fig.tight_layout(rect=(0, 0, 1, 0.96))
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -1396,8 +1419,10 @@ class Visualizer:
         ]
 
         for p_config in plot_configs:
-            ax = p_config['ax']
-            key = p_config['key']
+            ax: Any = p_config['ax']
+            key = str(p_config['key'])
+            title_str = str(p_config['title'])
+            ylabel_str = str(p_config['ylabel'])
 
             if cmip6_plot_data.get(key) and cmip6_plot_data[key]['members']:
                 for member_jet in cmip6_plot_data[key]['members']:
@@ -1413,8 +1438,8 @@ class Visualizer:
                 reanalysis_era5 = reanalysis_plot_data[key]['ERA5']
                 ax.plot(reanalysis_era5.season_year, reanalysis_era5, color='purple', linewidth=1.5, linestyle='-', label='ERA5')
 
-            ax.set_title(p_config['title'], weight='bold', loc='left')
-            ax.set_ylabel(p_config['ylabel'])
+            ax.set_title(title_str, weight='bold', loc='left')
+            ax.set_ylabel(ylabel_str)
             ax.grid(True, linestyle=':', alpha=0.6)
             ax.set_xlim(1850, 2100)
             ax.axhline(0, color='black', linewidth=0.5)
@@ -1494,8 +1519,8 @@ class Visualizer:
 
         # Plot CMIP6 inter-model regression fit
         slope_cmip6, intercept_cmip6, _, _, _ = StatsAnalyzer.calculate_regression(jet_vals, impact_vals)
+        x_fit = np.array(ax.get_xlim())
         if not np.isnan(slope_cmip6):
-            x_fit = np.array(ax.get_xlim())
             y_fit = intercept_cmip6 + slope_cmip6 * x_fit
             ax.plot(x_fit, y_fit, color='black', linestyle='-', linewidth=2, label=f'CMIP6 Fit (Slope={slope_cmip6:.2f})')
 
@@ -1824,7 +1849,7 @@ class Visualizer:
         ax_djf = fig.add_subplot(gs[0, 0], projection=ccrs.PlateCarree())
         djf_data = u850_change_results['DJF']
         if djf_data and djf_data.get('u850_change_mmm') is not None:
-            cf_djf, _ = Visualizer.plot_u850_change_map(
+            res_djf = Visualizer.plot_u850_change_map(
                 ax_djf,
                 djf_data['u850_change_mmm'].data,
                 djf_data['u850_historical_mean_mmm'].data,
@@ -1832,7 +1857,9 @@ class Visualizer:
                 djf_data['u850_change_mmm'].lat.values,
                 "CMIP6 MMM U850 Change", "DJF"
             )
-            if cf_djf: cf_ref = cf_djf
+            if res_djf is not None:
+                cf_djf, _ = res_djf
+                if cf_djf: cf_ref = cf_djf
         else:
             ax_djf.text(0.5,0.5, "DJF Data Missing", transform=ax_djf.transAxes, ha='center', va='center')
             ax_djf.set_title("CMIP6 MMM U850 Change\nDJF\n(Data Missing)")
@@ -1841,7 +1868,7 @@ class Visualizer:
         ax_jja = fig.add_subplot(gs[0, 1], projection=ccrs.PlateCarree())
         jja_data = u850_change_results['JJA']
         if jja_data and jja_data.get('u850_change_mmm') is not None:
-            cf_jja, label_jja = Visualizer.plot_u850_change_map(
+            res_jja = Visualizer.plot_u850_change_map(
                 ax_jja,
                 jja_data['u850_change_mmm'].data,
                 jja_data['u850_historical_mean_mmm'].data,
@@ -1849,7 +1876,9 @@ class Visualizer:
                 jja_data['u850_change_mmm'].lat.values,
                 "CMIP6 MMM U850 Change", "JJA"
             )
-            if cf_jja and cf_ref is None: cf_ref = cf_jja
+            if res_jja is not None:
+                cf_jja, label_jja = res_jja
+                if cf_jja and cf_ref is None: cf_ref = cf_jja
         else:
             ax_jja.text(0.5,0.5, "JJA Data Missing", transform=ax_jja.transAxes, ha='center', va='center')
             ax_jja.set_title("CMIP6 MMM U850 Change\nJJA\n(Data Missing)")
@@ -1863,7 +1892,7 @@ class Visualizer:
         
         plt.suptitle(f"CMIP6 MMM U850 Change ({future_period[0]}-{future_period[1]} minus {historical_period[0]}-{historical_period[1]})", fontsize=14, weight='bold')
         # [KORREKTUR] fig.tight_layout() anstelle von plt.tight_layout()
-        fig.tight_layout(rect=[0, 0, 0.95, 0.95])
+        fig.tight_layout(rect=(0, 0, 0.95, 0.95))
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         logging.info(f"Saved CMIP6 U850 change panel to {filepath}")
@@ -1939,7 +1968,7 @@ class Visualizer:
             # Geänderte Y-Achsen-Beschriftung für mehr Klarheit
             axs[i, 0].set_ylabel(f'Regression Slope for\n{title_parts}', fontsize=9, weight='bold')
 
-            all_row_data = model_slopes_hist
+            all_row_data = list(cmip6_historical_slopes.get(key, []))
             for j, gwl in enumerate(gwls_to_plot):
                  all_row_data.extend(cmip6_future_temporal_slopes.get(key, {}).get(gwl, []))
             
@@ -1970,7 +1999,7 @@ class Visualizer:
         
         # Geänderte Überschrift für mehr Klarheit
         fig.suptitle('Comparison of Jet-Impact Regression Slopes: Historical vs. Future', fontsize=16, weight='bold')
-        fig.tight_layout(rect=[0, 0.08, 1, 0.93])
+        fig.tight_layout(rect=(0, 0.08, 1, 0.93))
         
         filename = os.path.join(Config.PLOT_DIR, f"cmip6_fidelity_vs_future_temporal_slopes_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -2744,7 +2773,7 @@ class Visualizer:
         
         # Add value labels on top of bars
         for container in ax.containers:
-            ax.bar_label(container, fmt='%.2f%%', fontsize=9, padding=3)
+            ax.bar_label(cast(Any, container), fmt='%.2f%%', fontsize=9, padding=3)
 
         # Adjust ylim for padding
         ax.set_ylim(top=ax.get_ylim()[1] * 1.15)
@@ -3126,10 +3155,10 @@ class Visualizer:
         for row, row_config in enumerate(row_configs):
             
             ax_row_start = axs[row, 0]
-            half_year = row_config['half_year']
-            event_list = row_config['events']
-            mmm_only = row_config['mmm_only']
-            limit_dict = row_config['limit_dict']
+            half_year = str(row_config['half_year'])
+            event_list = cast(list, row_config['events'])
+            mmm_only = bool(row_config['mmm_only'])
+            limit_dict = cast(dict, row_config['limit_dict'])
             
             current_storyline_order = storyline_display_order_mmm if mmm_only else storyline_display_order
             current_y_tick_labels = [s.replace(' & ', ' &\n') for s in current_storyline_order]
@@ -3282,7 +3311,8 @@ class Visualizer:
         
         # --- Unbenutzte Achsen ausschalten ---
         for r_idx, row_config in enumerate(row_configs):
-            num_events_in_row = len(row_config['events'])
+            events = row_config.get('events', [])
+            num_events_in_row = len(events) if isinstance(events, (list, tuple, dict, str)) else 0
             for c_idx in range(num_events_in_row, num_cols):
                 axs[r_idx, c_idx].axis('off')
         
@@ -3400,7 +3430,7 @@ class Visualizer:
                         change_map = data['mean_change_map']
                         hist_map = data['historical_mean_map']
                         
-                        cf, _ = Visualizer.plot_u850_change_map(
+                        plot_res = Visualizer.plot_u850_change_map(
                             ax, u850_change_data=change_map.data, 
                             historical_mean_contours=hist_map.data,
                             lons=change_map.lon.values, lats=change_map.lat.values,
@@ -3408,7 +3438,8 @@ class Visualizer:
                             season_label=storyline_title_formatted,
                             vmin=-2.5, vmax=2.5
                         )
-                        if cf is not None:
+                        if plot_res is not None:
+                            cf, _ = plot_res
                             cf_ref = cf
                     else:
                         ax.set_title(f'GWL {gwl}°C, {season}\n{storyline_name}', fontsize=10)
@@ -3561,6 +3592,7 @@ class Visualizer:
             # --- 2. Plot-Grid erstellen ---
             nrows = len(gwls)
             ncols = len(storyline_plot_order)
+            fig = None
             
             fig, axs = plt.subplots(
                 nrows, ncols, 
@@ -3634,7 +3666,7 @@ class Visualizer:
             title = f"Monatliche Verteilung von Niedrigwasser-Ereignissen (Abfluss < {lnwl_threshold:.0f} m³/s) für {scenario.upper()}"
             fig.suptitle(title, fontsize=16, weight='bold', y=0.99)
             
-            fig.tight_layout(rect=[0.03, 0.05, 1, 0.95], h_pad=2.0, w_pad=0.5)
+            fig.tight_layout(rect=(0.03, 0.05, 1, 0.95), h_pad=2.0, w_pad=0.5)
             
             filename = os.path.join(config.PLOT_DIR, f"storyline_lnwl_monthly_distribution_{scenario}.png")
             plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -3644,7 +3676,7 @@ class Visualizer:
         except Exception as e:
             logging.error(f"Fehler beim Zeichnen des LNWL-Grid-Plots: {e}")
             logging.error(traceback.format_exc())
-            if 'fig' in locals():
+            if fig is not None:
                 plt.close(fig)
                 
     @staticmethod
@@ -3935,12 +3967,12 @@ class Visualizer:
         summer_hist_counts = hist_data[low_key_summer].get('summer_counts', [])
         summer_hist_years = hist_data[low_key_summer].get('summer_years', [])
         summer_hist_keys = hist_data[low_key_summer].get('historical_keys', [])
-        summer_hist_map = {k: c * 30.0 / y for k, c, y in zip(summer_hist_keys, summer_hist_counts, summer_hist_years) if y > 0}
+        summer_hist_map = {k: c * float(config.GWL_YEARS_WINDOW) / y for k, c, y in zip(summer_hist_keys, summer_hist_counts, summer_hist_years) if y > 0}
 
         winter_hist_counts = hist_data[low_key_winter].get('winter_counts', [])
         winter_hist_years = hist_data[low_key_winter].get('winter_years', [])
         winter_hist_keys = hist_data[low_key_winter].get('historical_keys', [])
-        winter_hist_map = {k: c * 30.0 / y for k, c, y in zip(winter_hist_keys, winter_hist_counts, winter_hist_years) if y > 0}
+        winter_hist_map = {k: c * float(config.GWL_YEARS_WINDOW) / y for k, c, y in zip(winter_hist_keys, winter_hist_counts, winter_hist_years) if y > 0}
 
         # --- SETUP SUBPLOTS GRID (1x2, side-by-side) ---
         fig, axs = plt.subplots(1, 2, figsize=(10.0, 5.5))
@@ -4120,7 +4152,7 @@ class Visualizer:
             ax.set_title(f"({panel_letter}) {season_names[season]}", weight='bold', loc='left', fontsize=12)
             ax.set_xlabel("")
             if col == 0:
-                ax.set_ylabel("Event Counts (30y eq.)", fontsize=11)
+                ax.set_ylabel("Event Counts per 31 years", fontsize=11)
             else:
                 ax.set_ylabel("")
             ax.set_ylim(-0.5, 14)
@@ -4144,7 +4176,7 @@ class Visualizer:
         legend_handles = [
             Line2D([0], [0], marker='^', color='w', markerfacecolor='#b2182b', label=f'High-Freq. (Top {n_extreme})', markersize=8),
             Line2D([0], [0], color='#b2182b', lw=2.0, label='Median (High-Freq.)'),
-            Line2D([0], [0], marker='o', color='w', markerfacecolor='black', alpha=0.6, label='Historical Models', markersize=6.5),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='black', alpha=0.6, label='Historical Models (31y eq.)', markersize=6.5),
             Line2D([0], [0], marker='o', color='w', markerfacecolor='gray', alpha=0.4, label='Other Future Models', markersize=5),
             Line2D([0], [0], marker='v', color='w', markerfacecolor='#2166ac', label=f'Low-Freq. (Bottom {n_extreme})', markersize=8),
             Line2D([0], [0], color='#2166ac', lw=2.0, label='Median (Low-Freq.)'),
@@ -4479,7 +4511,7 @@ class Visualizer:
 
         # Second Pass: Plotting
         for i, p_conf in enumerate(plot_configs):
-            ax = p_conf['ax']
+            ax: Any = p_conf['ax']
             df = plot_data_storage[i]
             
             if df.empty:
@@ -4553,7 +4585,7 @@ class Visualizer:
         fig.legend(final_handles, final_labels, loc='lower center', bbox_to_anchor=(0.5, 0.02), 
                    ncol=4, fontsize=12, frameon=False)
 
-        plt.tight_layout(rect=[0, 0.08, 1, 0.95]) # Angepasstes Layout ohne die schematische Legende
+        plt.tight_layout(rect=(0, 0.08, 1, 0.95)) # Angepasstes Layout ohne die schematische Legende
         
         # --- CHANGED FILENAME TO FIGURE 5 ---
         filename = os.path.join(config.PLOT_DIR, f"Figure5_mechanism_drivers_summary_{scenario}.png")
@@ -4751,6 +4783,9 @@ class Visualizer:
                     winter_counts = [] # tuples (X, Y)
                     summer_counts = []
                     
+                    w_color = Visualizer.GWL_COLORS[2.0] # Reuse blue
+                    s_color = '#ff7f0e'
+
                     for k in keys:
                         # Target is always the definition (e.g. 10yr) which comes from historical analysis
                         target_T = hist_data[k]['target_T']
@@ -4768,9 +4803,6 @@ class Visualizer:
                             
                             winter_counts.append((len([x for x in w_vals if np.isfinite(x)]), len(w_vals)))
                             summer_counts.append((len([x for x in s_vals if np.isfinite(x)]), len(s_vals)))
-                            
-                            w_color = Visualizer.GWL_COLORS[2.0] # Reuse blue
-                            s_color = '#ff7f0e'
                             
                         else:
                             # FUTURE DATA (MMM)
@@ -5173,7 +5205,7 @@ class Visualizer:
         # Colorbar for difference maps
         ref_cf = cf_r0 or cf_r1 or cf_r2a or cf_r2b
         if ref_cf:
-            cax = fig.add_axes([0.25, 0.04, 0.50, 0.015])
+            cax = fig.add_axes((0.25, 0.04, 0.50, 0.015))
             fig.colorbar(ref_cf, cax=cax, orientation='horizontal', label=f'Difference ({diff_unit})', extend='both')
         
         plt.subplots_adjust(bottom=0.10, left=0.06)
@@ -5540,7 +5572,7 @@ class Visualizer:
 
         # --- Shared colorbar ---
         if ref_cf:
-            cax = fig.add_axes([0.15, 0.06, 0.70, 0.015])
+            cax = fig.add_axes((0.15, 0.06, 0.70, 0.015))
             fig.colorbar(ref_cf, cax=cax, orientation='horizontal',
                          label=f'Difference ({diff_unit})', extend='both')
 
@@ -5653,36 +5685,99 @@ class Visualizer:
                                  df.columns = ['discharge']
                          if 'year' in df.index.names:
                              df = df.reset_index()
+                         df['model_key'] = key
                          df['model'] = key.split('_')[0]
                          scen_models_data.append(df)
             
             if not scen_models_data:
-                return None, 0
+                return None, 0, [], [], []
             
             df_all = pd.concat(scen_models_data, ignore_index=True)
-            df_stats = df_all.groupby('year')['discharge'].agg(['mean', lambda x: np.percentile(x, 2.5), lambda x: np.percentile(x, 97.5)]).reset_index()
-            df_stats.columns = ['year', 'mmm', 'p2_5', 'p97_5']
+            df_stats = df_all.groupby('year')['discharge'].agg(['mean', 'min', 'max']).reset_index()
+            df_stats.columns = ['year', 'mmm_raw', 'p2_5', 'p97_5']
 
-            df_stats['mmm'] = df_stats['mmm'].rolling(window=5, center=True).mean()
+            df_stats['mmm'] = df_stats['mmm_raw'].rolling(window=5, center=True).mean()
             df_stats['p2_5'] = df_stats['p2_5'].rolling(window=5, center=True).mean()
             df_stats['p97_5'] = df_stats['p97_5'].rolling(window=5, center=True).mean()
-            return df_stats, len(scen_models_data)
 
-        df_stats_ssp585, n_ssp585 = get_scenario_data('ssp585')
-        df_stats_ssp245, n_ssp245 = get_scenario_data('ssp245')
+            # Calculate individual member trends over 2015-2100 (m3/s per decade)
+            ind_trends = []
+            ind_pvals = []
+            ind_models = []
+            for df_m in scen_models_data:
+                m_key = df_m['model_key'].iloc[0] if 'model_key' in df_m.columns else df_m['model'].iloc[0]
+                sub = df_m[(df_m['year'] >= 2015) & (df_m['year'] <= 2100)].dropna(subset=['discharge'])
+                if len(sub) > 1:
+                    slope, _, _, p_val, _ = linregress(sub['year'], sub['discharge'])
+                    ind_trends.append(slope * 10.0)
+                    ind_pvals.append(p_val)
+                    ind_models.append(m_key)
+
+            return df_stats, len(scen_models_data), ind_trends, ind_pvals, ind_models
+
+        df_stats_ssp585, n_ssp585, trends_ssp585, pvals_ssp585, models_ssp585 = get_scenario_data('ssp585')
+        df_stats_ssp245, n_ssp245, trends_ssp245, pvals_ssp245, models_ssp245 = get_scenario_data('ssp245')
         
         if df_stats_ssp585 is None and df_stats_ssp245 is None:
             logging.warning("No 30Q_low_full_year data found for either scenario.")
             return
+
+        # Calculate MMM trends for 2015-2100
+        mmm_trend_245, p_mmm_245 = 0.0, 1.0
+        if df_stats_ssp245 is not None and not df_stats_ssp245.empty:
+            sub_245 = df_stats_ssp245[(df_stats_ssp245['year'] >= 2015) & (df_stats_ssp245['year'] <= 2100)]
+            if len(sub_245) > 1:
+                sl245, _, _, p_mmm_245, _ = linregress(sub_245['year'], sub_245['mmm_raw'])
+                mmm_trend_245 = sl245 * 10.0
+
+        mmm_trend_585, p_mmm_585 = 0.0, 1.0
+        if df_stats_ssp585 is not None and not df_stats_ssp585.empty:
+            sub_585 = df_stats_ssp585[(df_stats_ssp585['year'] >= 2015) & (df_stats_ssp585['year'] <= 2100)]
+            if len(sub_585) > 1:
+                sl585, _, _, p_mmm_585, _ = linregress(sub_585['year'], sub_585['mmm_raw'])
+                mmm_trend_585 = sl585 * 10.0
+
+        # Print summary statistics clearly to stdout and log
+        summary_lines = [
+            "\n" + "=" * 80,
+            "CMIP6 INDIVIDUAL MODEL TREND SUMMARY STATISTICS (2015–2100)",
+            "Metric: 30-day Minimum Discharge Trend (m³/s per decade)",
+            "=" * 80
+        ]
+        for scen_label, n_mod, tr_list, pv_list, m_tr, p_m in [
+            ("SSP2-4.5", n_ssp245, trends_ssp245, pvals_ssp245, mmm_trend_245, p_mmm_245),
+            ("SSP5-8.5", n_ssp585, trends_ssp585, pvals_ssp585, mmm_trend_585, p_mmm_585)
+        ]:
+            if n_mod > 0 and len(tr_list) > 0:
+                arr_tr = np.array(tr_list)
+                arr_pv = np.array(pv_list)
+                min_t, max_t = np.min(arr_tr), np.max(arr_tr)
+                n_neg = np.sum(arr_tr < 0)
+                pct_neg = (n_neg / len(arr_tr)) * 100.0
+                n_sig_neg = np.sum((arr_tr < 0) & (arr_pv < 0.05))
+                pct_sig_neg = (n_sig_neg / len(arr_tr)) * 100.0
+                p_m_str = "p < 0.001" if p_m < 0.001 else f"p = {p_m:.4f}"
+
+                summary_lines.append(f"\n--- {scen_label} (n = {len(arr_tr)}) ---")
+                summary_lines.append(f"  * Range of individual model trends (min, max): {min_t:+.2f} to {max_t:+.2f} m³/s per decade")
+                summary_lines.append(f"  * Percentage of models with negative trend (< 0 m³/s/dec): {pct_neg:.1f}% ({n_neg}/{len(arr_tr)})")
+                summary_lines.append(f"  * Percentage of models with sig. negative trend (p < 0.05): {pct_sig_neg:.1f}% ({n_sig_neg}/{len(arr_tr)})")
+                summary_lines.append(f"  * Multi-model mean (MMM) trend: {m_tr:+.2f} m³/s per decade ({p_m_str})")
+        summary_lines.append("=" * 80 + "\n")
+
+        summary_output = "\n".join(summary_lines)
+        print(summary_output)
+        sys.stdout.flush()
+        logging.info(summary_output)
 
         # 2. Get lowflow Threshold (LNWL 970 m3/s)
         threshold_lowflow = 970.0
         if discharge_data_loaded:
             threshold_lowflow = discharge_data_loaded.get('winter_lowflow_lnwl', 970.0)
 
-        # Create figure with 2 subplots (map on left, timeseries on right)
-        fig = plt.figure(figsize=(12.0, 5.5))
-        gs = gridspec.GridSpec(1, 2, width_ratios=[1, 1], wspace=0.15)
+        # Create figure with 3 subplots (map on left, timeseries in middle, trend distribution on right)
+        fig = plt.figure(figsize=(15.5, 5.2))
+        gs = gridspec.GridSpec(1, 3, width_ratios=[1.0, 1.25, 0.55], wspace=0.25)
         
         # Define shape CRS: Lambert Azimuthal Equal Area based on zones.prj
         shape_crs = ccrs.LambertAzimuthalEqualArea(
@@ -5699,7 +5794,7 @@ class Visualizer:
         # Add high-resolution satellite background 
         import cartopy.io.img_tiles as cimgt
         request = cimgt.GoogleTiles(style='satellite')
-        ax_map.add_image(request, 6) # zoom level 6 is usually good for a region like a large river basin
+        ax_map.add_image(request, 6)  # type: ignore # zoom level 6 is usually good for a region like a large river basin
         
         ax_map.add_feature(cfeature.COASTLINE, linewidth=0.8, edgecolor='white', zorder=5)
         ax_map.add_feature(cfeature.BORDERS, linestyle='-', linewidth=0.8, edgecolor='white', zorder=5)
@@ -5809,15 +5904,60 @@ class Visualizer:
         # We use standard color for SSP5-8.5 since it was midnightblue previously.
         if df_stats_ssp585 is not None:
             ax.fill_between(df_stats_ssp585['year'], df_stats_ssp585['p2_5'], df_stats_ssp585['p97_5'], 
-                            color='royalblue', alpha=0.3, label='SSP5-8.5 95% Spread')
+                            color='royalblue', alpha=0.3, label='SSP5-8.5 100% Model Spread')
             ax.plot(df_stats_ssp585['year'], df_stats_ssp585['mmm'], 
                     color='midnightblue', linewidth=2, linestyle='-', label=f'SSP5-8.5 MMM (n={n_ssp585})')
 
         if df_stats_ssp245 is not None:
             ax.fill_between(df_stats_ssp245['year'], df_stats_ssp245['p2_5'], df_stats_ssp245['p97_5'], 
-                            color='darkorange', alpha=0.3, label='SSP2-4.5 95% Spread')
+                            color='darkorange', alpha=0.3, label='SSP2-4.5 100% Model Spread')
             ax.plot(df_stats_ssp245['year'], df_stats_ssp245['mmm'], 
                     color='darkorange', linewidth=2, linestyle='-.', label=f'SSP2-4.5 MMM (n={n_ssp245})')
+
+        # Linear trend calculation and plotting for historical (1960-2014) & projected (2015-2100)
+        def _compute_and_plot_trend(df_stats, start_yr, end_yr, color, linestyle=':'):
+            if df_stats is None or df_stats.empty:
+                return None
+            col = 'mmm_raw' if 'mmm_raw' in df_stats.columns else 'mmm'
+            mask = (df_stats['year'] >= start_yr) & (df_stats['year'] <= end_yr) & (~df_stats[col].isna())
+            sub = df_stats[mask]
+            if len(sub) < 2:
+                return None
+            slope, intercept, r_val, p_val, std_err = linregress(sub['year'], sub[col])
+            x_vals = sub['year'].values
+            y_vals = slope * x_vals + intercept
+            ax.plot(x_vals, y_vals, color=color, linestyle=linestyle, linewidth=1.8, alpha=0.9, label='_nolegend_')
+            
+            trend_dec = slope * 10.0
+            p_str = "p < 0.01" if p_val < 0.01 else f"p = {p_val:.2f}"
+            return f"{trend_dec:+.1f} m³/s/dec ({p_str})"
+
+        t_hist_245 = _compute_and_plot_trend(df_stats_ssp245, 1960, 2014, 'darkorange', ':')
+        t_proj_245 = _compute_and_plot_trend(df_stats_ssp245, 2015, 2100, 'darkorange', ':')
+        t_hist_585 = _compute_and_plot_trend(df_stats_ssp585, 1960, 2014, 'midnightblue', ':')
+        t_proj_585 = _compute_and_plot_trend(df_stats_ssp585, 2015, 2100, 'midnightblue', ':')
+
+        trend_lines_text = []
+        if t_hist_245 or t_proj_245 or t_hist_585 or t_proj_585:
+            trend_lines_text.append("Linear Trends (dotted):")
+            if t_hist_245 or t_hist_585:
+                hist_parts = []
+                if t_hist_245:
+                    hist_parts.append(f"SSP2-4.5: {t_hist_245}")
+                if t_hist_585:
+                    hist_parts.append(f"SSP5-8.5: {t_hist_585}")
+                trend_lines_text.append("Hist. (1960–2014):  " + " | ".join(hist_parts))
+            if t_proj_245 or t_proj_585:
+                proj_parts = []
+                if t_proj_245:
+                    proj_parts.append(f"SSP2-4.5: {t_proj_245}")
+                if t_proj_585:
+                    proj_parts.append(f"SSP5-8.5: {t_proj_585}")
+                trend_lines_text.append("Proj. (2015–2100):  " + " | ".join(proj_parts))
+            
+            ax.text(0.03, 0.05, "\n".join(trend_lines_text), transform=ax.transAxes,
+                    fontsize=7.5, verticalalignment='bottom', horizontalalignment='left',
+                    bbox=dict(boxstyle='round,pad=0.35', facecolor='white', alpha=0.9, edgecolor='lightgray'))
 
         ax.set_title('(b) Annual Min. 30-Day Discharge', weight='bold', loc='left')
         ax.set_ylabel('Discharge (m³/s)')
@@ -5828,14 +5968,54 @@ class Visualizer:
         min_year = 1960
         max_year = 2100
         ax.set_xlim(min_year, max_year)
-        ax.set_box_aspect(map_aspect)
         
-        plt.suptitle("Study Region and Projected 30-Day Minimum Discharge", weight='bold', y=0.98, fontsize=16)
-        fig.tight_layout(rect=[0, 0.12, 1, 0.93], h_pad=2.0, w_pad=3.0)
+        # --- Right Subplot: 2015–2100 Discharge Trends Distribution (Panel c) ---
+        ax_c = fig.add_subplot(gs[2])
+        
+        ax_c.axhline(0, color='gray', linestyle='--', linewidth=1.0, alpha=0.7, zorder=1)
+
+        if len(trends_ssp245) > 0:
+            bp245 = ax_c.boxplot([trends_ssp245], positions=[1], widths=0.4, patch_artist=True,
+                                 boxprops=dict(facecolor='darkorange', alpha=0.25, edgecolor='darkorange', linewidth=1.2),
+                                 medianprops=dict(color='darkorange', linewidth=2.0),
+                                 whiskerprops=dict(color='darkorange', linewidth=1.2),
+                                 capprops=dict(color='darkorange', linewidth=1.2),
+                                 flierprops=dict(marker='', color='none'))
+            np.random.seed(42)
+            jitter245 = 1 + np.random.uniform(-0.08, 0.08, size=len(trends_ssp245))
+            ax_c.scatter(jitter245, trends_ssp245, color='darkorange', alpha=0.7, s=30, zorder=3, edgecolors='none')
+            ax_c.scatter([1], [mmm_trend_245], color='crimson', marker='D', s=60, zorder=4, edgecolor='black', linewidth=0.8)
+
+        if len(trends_ssp585) > 0:
+            bp585 = ax_c.boxplot([trends_ssp585], positions=[2], widths=0.4, patch_artist=True,
+                                 boxprops=dict(facecolor='royalblue', alpha=0.25, edgecolor='midnightblue', linewidth=1.2),
+                                 medianprops=dict(color='midnightblue', linewidth=2.0),
+                                 whiskerprops=dict(color='midnightblue', linewidth=1.2),
+                                 capprops=dict(color='midnightblue', linewidth=1.2),
+                                 flierprops=dict(marker='', color='none'))
+            np.random.seed(43)
+            jitter585 = 2 + np.random.uniform(-0.08, 0.08, size=len(trends_ssp585))
+            ax_c.scatter(jitter585, trends_ssp585, color='midnightblue', alpha=0.7, s=30, zorder=3, edgecolors='none')
+            ax_c.scatter([2], [mmm_trend_585], color='crimson', marker='D', s=60, zorder=4, edgecolor='black', linewidth=0.8)
+
+        # Legend items for Panel c
+        ax_c.scatter([], [], color='gray', marker='o', s=30, label='Model Member')
+        ax_c.scatter([], [], color='crimson', marker='D', s=50, edgecolor='black', linewidth=0.8, label='MMM Trend')
+
+        ax_c.set_xticks([1, 2])
+        ax_c.set_xticklabels(['SSP2-4.5', 'SSP5-8.5'], weight='bold')
+        ax_c.set_xlim(0.4, 2.6)
+        ax_c.set_ylabel('30-Day Min. Discharge Trend\n(m³/s per decade)')
+        ax_c.set_title('(c) 2015–2100 Trends', weight='bold', loc='left')
+        ax_c.grid(True, linestyle=':', alpha=0.7)
+        ax_c.legend(loc='upper right', frameon=True, fontsize=7.5, facecolor='white', framealpha=0.9)
+
+        plt.suptitle("Study Region and Projected 30-Day Minimum Discharge", weight='bold', y=0.97, fontsize=15)
+        fig.subplots_adjust(left=0.06, right=0.98, top=0.88, bottom=0.18, wspace=0.28)
         
         # Center the figure legend at the bottom of the entire figure
         handles, labels = ax.get_legend_handles_labels()
-        fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.02), ncol=4, frameon=False)
+        fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=4, frameon=False, fontsize=9.0)
         filename = f"final_figure_1_storyline_discharge_events_{scenario}.png"
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=600, bbox_inches='tight')
@@ -5919,7 +6099,7 @@ class Visualizer:
                 df_target = df_all[df_all['model'].isin(target_names)]
 
                 if not df_target.empty:
-                    df_target_stats = df_target.groupby('year')['discharge'].agg(['mean', lambda x: np.percentile(x, 10), lambda x: np.percentile(x, 90)]).reset_index()
+                    df_target_stats = df_target.groupby('year')['discharge'].agg(['mean', 'min', 'max']).reset_index()
                     df_target_stats.columns = ['year', 'mmm', 'p10', 'p90']
 
                     # Apply 5-year moving average
@@ -5927,7 +6107,7 @@ class Visualizer:
                     df_target_stats['p10'] = df_target_stats['p10'].rolling(window=5, center=True).mean()
                     df_target_stats['p90'] = df_target_stats['p90'].rolling(window=5, center=True).mean()
 
-                    ax.fill_between(df_target_stats['year'], df_target_stats['p10'], df_target_stats['p90'], color=color_line, alpha=0.3, label=f'{label_prefix} Spread (5-yr MA)')
+                    ax.fill_between(df_target_stats['year'], df_target_stats['p10'], df_target_stats['p90'], color=color_line, alpha=0.3, label=f'{label_prefix} 100% Model Spread')
                     ax.plot(df_target_stats['year'], df_target_stats['mmm'], color=color_line, linewidth=2, label=f'{label_prefix} MMM (5-yr MA, n={len(target_names)})')
 
             _plot_group(ext_list, 'Increasing Freq.', '#b2182b')
@@ -5972,13 +6152,14 @@ class Visualizer:
     def plot_final_figure_4_combined(cmip6_results, discharge_data_loaded, pr_stored_composites, config, scenario, target_gwl):
         """
         Creates a combined Figure 4:
-        Top: Extreme vs Non-Extreme discharge timeseries (Summer, Winter)
-        Bottom: Future Precipitation Difference maps (Summer, Winter)
+        Row 0: Extreme vs Non-Extreme discharge timeseries (Summer, Winter)
+        Row 1: Extreme vs Non-Extreme Danube Basin precipitation timeseries (Summer, Winter)
+        Row 2: Future Precipitation Difference maps (Summer, Winter)
         """
         logging.info(f"Plotting combined final figure 4 for GWL {target_gwl}°C, {scenario}...")
         Visualizer.ensure_plot_dir_exists()
         
-        # --- 1. PREPARE DISCHARGE DATA ---
+        # --- 1. PREPARE DISCHARGE & PR TIME SERIES DATA ---
         metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
         storyline_classification_2d = cmip6_results.get('storyline_classification_2d', {})
         extreme_models = {'Summer': [], 'Winter': []}
@@ -6009,28 +6190,57 @@ class Visualizer:
                         df['model'] = model_name
                         data_by_season[sn].append(df)
 
+        pr_ts_by_season = {'Summer': [], 'Winter': []}
+        pr_season_keys = {'Summer': 'JJA_pr', 'Winter': 'DJF_pr'}
+
+        for sn, mk in pr_season_keys.items():
+            for key, ts_dict in metric_timeseries.items():
+                if not key.endswith(scenario): continue
+                if mk in ts_dict:
+                    da = ts_dict[mk]
+                    if da is not None:
+                        try:
+                            df = da.to_dataframe(name='precip')
+                        except:
+                            df = da.to_dataframe()
+                            if len(df.columns) == 1: df.columns = ['precip']
+                        if 'season_year' in df.index.names:
+                            df = df.reset_index()
+                            df = df.rename(columns={'season_year': 'year'})
+                        elif 'year' in df.index.names:
+                            df = df.reset_index()
+                        elif 'time' in df.index.names:
+                            df = df.reset_index()
+                            if 'time' in df.columns:
+                                try:
+                                    df['year'] = df['time'].dt.year
+                                except:
+                                    pass
+                        model_name = key.split('_')[0]
+                        df['model'] = model_name
+                        pr_ts_by_season[sn].append(df)
+
         # --- 2. PREPARE PR COMPOSITE DATA ---
         w_data = pr_stored_composites.get((target_gwl, 'Winter'))
         s_data = pr_stored_composites.get((target_gwl, 'Summer'))
         
         # --- 3. SET UP FIGURE ---
-        fig = plt.figure(figsize=(8.0, 8.0))
-        gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1], hspace=0.8, wspace=0.15)
+        fig = plt.figure(figsize=(8.5, 11.5))
+        gs = gridspec.GridSpec(3, 2, height_ratios=[1, 1, 1.15], hspace=0.55, wspace=0.15)
         
-        # --- 4. PLOT DISCHARGE (Top Row) ---
-        def _p_ds(ax, df_all, ext_list, non_ext_list, title):
-            if df_all.empty: return
+        # Helper for plotting time series (Discharge and Precipitation)
+        def _p_ts(ax, df_all, ext_list, non_ext_list, title, val_col='discharge', text_y_ext=0.12, text_y_non=0.04, y_lim=None):
+            if df_all.empty: return ([], [])
             def _p_grp(ml, lbl, clr, l_style='-', text_y=0.04):
                 tn = [m.split('_')[0] for m in ml]
                 df_t = df_all[df_all['model'].isin(tn)]
                 if not df_t.empty:
-                    stats = df_t.groupby('year')['discharge'].agg(['mean', lambda x: np.percentile(x, 2.5), lambda x: np.percentile(x, 97.5)]).reset_index()
+                    stats = df_t.groupby('year')[val_col].agg(['mean', 'min', 'max']).reset_index()
                     stats.columns = ['year', 'mmm', 'p2_5', 'p97_5']
                     stats['mmm'] = stats['mmm'].rolling(window=5, center=True).mean()
                     stats['p2_5'] = stats['p2_5'].rolling(window=5, center=True).mean()
                     stats['p97_5'] = stats['p97_5'].rolling(window=5, center=True).mean()
                     
-                    # Calculate trend and p-value on 2015-2100 values to match the subplot extent
                     period_mask = (stats['year'] >= 2015) & (stats['year'] <= 2100)
                     valid = (~np.isnan(stats['mmm'])) & period_mask
                     x_vals = stats['year'][valid]
@@ -6050,7 +6260,7 @@ class Visualizer:
                     else:
                         label_suffix = ""
 
-                    ax.fill_between(stats['year'], stats['p2_5'], stats['p97_5'], color=clr, alpha=0.3, label=f'{lbl} 95% Spread')
+                    ax.fill_between(stats['year'], stats['p2_5'], stats['p97_5'], color=clr, alpha=0.3, label=f'{lbl} 100% Model Spread')
                     ax.plot(stats['year'], stats['mmm'], color=clr, linewidth=2.5, linestyle=l_style, label=f'{lbl} MMM (n={len(tn)}){label_suffix}')
                     
                     if label_suffix:
@@ -6058,33 +6268,49 @@ class Visualizer:
                         ax.text(0.04, text_y, clean_suffix, transform=ax.transAxes, ha='left', va='bottom', color=clr,
                                 bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.3))
 
-            _p_grp(ext_list, 'High-Freq.', '#b2182b', '--', text_y=0.12)
-            _p_grp(non_ext_list, 'Low-Freq.', '#2166ac', '-.', text_y=0.04)
+            _p_grp(ext_list, 'High-Freq.', '#b2182b', '--', text_y=text_y_ext)
+            _p_grp(non_ext_list, 'Low-Freq.', '#2166ac', '-.', text_y=text_y_non)
             ax.set_title(title, weight='bold', loc='left', fontsize=12)
             ax.grid(True, linestyle=':', alpha=0.7)
             ax.set_xlim(2015, 2100)
-            ax.set_ylim(300, 1850)
+            if y_lim is not None:
+                ax.set_ylim(y_lim)
             
             return ax.get_legend_handles_labels()
 
+        # --- 4. PLOT DISCHARGE (Row 0) ---
         ax_ds_s = fig.add_subplot(gs[0, 0])
         df_s = pd.concat(data_by_season['Summer'], ignore_index=True) if data_by_season['Summer'] else pd.DataFrame()
-        _p_ds(ax_ds_s, df_s, extreme_models['Summer'], non_extreme_models['Summer'], f'(a) Summer Half Year')
-        # Title is now handled at row level
+        _p_ts(ax_ds_s, df_s, extreme_models['Summer'], non_extreme_models['Summer'], f'(a) Summer Half Year', val_col='discharge', y_lim=(300, 1850))
         ax_ds_s.set_ylabel('Discharge (m³/s)')
 
         ax_ds_w = fig.add_subplot(gs[0, 1])
         df_w = pd.concat(data_by_season['Winter'], ignore_index=True) if data_by_season['Winter'] else pd.DataFrame()
-        handles, labels = _p_ds(ax_ds_w, df_w, extreme_models['Winter'], non_extreme_models['Winter'], f'(b) Winter Half Year')
-        # Title is now handled at row level
+        handles, labels = _p_ts(ax_ds_w, df_w, extreme_models['Winter'], non_extreme_models['Winter'], f'(b) Winter Half Year', val_col='discharge', y_lim=(300, 1850))
         ax_ds_w.tick_params(labelleft=False)
-        
+
+        # --- 5. PLOT DANUBE BASIN PRECIPITATION TIME SERIES (Row 1) ---
+        ax_prts_s = fig.add_subplot(gs[1, 0])
+        df_pr_s = pd.concat(pr_ts_by_season['Summer'], ignore_index=True) if pr_ts_by_season['Summer'] else pd.DataFrame()
+        _p_ts(ax_prts_s, df_pr_s, extreme_models['Summer'], non_extreme_models['Summer'], f'(c) Summer Half Year', val_col='precip')
+        ax_prts_s.set_ylabel('Precipitation (mm/day)')
+
+        ax_prts_w = fig.add_subplot(gs[1, 1])
+        df_pr_w = pd.concat(pr_ts_by_season['Winter'], ignore_index=True) if pr_ts_by_season['Winter'] else pd.DataFrame()
+        _p_ts(ax_prts_w, df_pr_w, extreme_models['Winter'], non_extreme_models['Winter'], f'(d) Winter Half Year', val_col='precip')
+        ax_prts_w.tick_params(labelleft=False)
+
+        # Align y-axis limits for precipitation subplots
+        pr_ymin = min(ax_prts_s.get_ylim()[0], ax_prts_w.get_ylim()[0])
+        pr_ymax = max(ax_prts_s.get_ylim()[1], ax_prts_w.get_ylim()[1])
+        ax_prts_s.set_ylim(pr_ymin, pr_ymax)
+        ax_prts_w.set_ylim(pr_ymin, pr_ymax)
+
         if handles:
             clean_labels = [l.split(' (trend:')[0] if 'MMM' in l else l for l in labels]
-            fig.legend(handles, clean_labels, loc='lower center', bbox_to_anchor=(0.5, 0.42), ncol=2, frameon=False, fontsize=9)
+            fig.legend(handles, clean_labels, loc='lower center', bbox_to_anchor=(0.5, 0.355), ncol=2, frameon=False, fontsize=9)
 
-
-        # --- 5. PLOT PR COMPOSITES (Bottom Row) ---
+        # --- 6. PLOT PR COMPOSITES (Row 2) ---
         buf = 5.0
         ex = [config.BOX_LON_MIN - buf, config.BOX_LON_MAX + buf, config.BOX_LAT_MIN - buf, config.BOX_LAT_MAX + buf]
         
@@ -6112,7 +6338,6 @@ class Visualizer:
                 dm = comp['diff_ext_non_future']
                 sig = comp.get('sig_mask_ext_non_future')
                 
-                # Removed the `.where(dm.lat < 85)` since it is unnecessary for Central Europe extent, just plot raw data
                 cf = ax.pcolormesh(dm.lon, dm.lat, dm, cmap=cmap, norm=norm, transform=ccrs.PlateCarree())
                 if sig is not None:
                     sk = 2
@@ -6123,35 +6348,38 @@ class Visualizer:
                 return cf
             return None
 
-        ax_pr_s = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
+        ax_pr_s = fig.add_subplot(gs[2, 0], projection=ccrs.PlateCarree())
         cf_s = _p_map(ax_pr_s, s_data[0] if s_data else None, "")
-        ax_pr_s.set_title("(c) Summer Half Year", weight='bold', loc='left', fontsize=12)
-        # Title is now handled at row level
+        ax_pr_s.set_title("(e) Summer Half Year", weight='bold', loc='left', fontsize=12)
 
-        ax_pr_w = fig.add_subplot(gs[1, 1], projection=ccrs.PlateCarree())
+        ax_pr_w = fig.add_subplot(gs[2, 1], projection=ccrs.PlateCarree())
         cf_w = _p_map(ax_pr_w, w_data[0] if w_data else None, "")
-        ax_pr_w.set_title("(d) Winter Half Year", weight='bold', loc='left', fontsize=12)
-        # Title is now handled at row level
+        ax_pr_w.set_title("(f) Winter Half Year", weight='bold', loc='left', fontsize=12)
 
         if cf_s or cf_w:
-            cb_ax = fig.add_axes([0.15, 0.06, 0.7, 0.02])
+            cb_ax = fig.add_axes((0.15, 0.05, 0.7, 0.015))
             fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cb_ax, orientation='horizontal', label='Precip. Diff. (mm/day)', extend='both')
 
         s_t = Visualizer._format_scenario_title(scenario)
-        plt.suptitle(f'Minimum 30-Day Discharge Trend & Precipitation Composites\n{s_t} | GWL {target_gwl}°C', weight='bold', y=0.98, fontsize=16)
-        fig.tight_layout(rect=[0, 0.08, 1, 0.80], h_pad=1.0, w_pad=1.0)
+        plt.suptitle(f'Minimum 30-Day Discharge Trend & Precipitation Composites\n{s_t} | GWL {target_gwl}°C', weight='bold', y=0.98, fontsize=15)
+        fig.tight_layout(rect=(0, 0.07, 1, 0.94), h_pad=1.2, w_pad=1.0)
         
-        # Add left-aligned subtitles for both rows after tight_layout (matching Figure 2 style)
+        # Add left-aligned subtitles for all three rows after tight_layout
         left_x_row0 = ax_ds_s.get_position().x0
         top_y_row0  = ax_ds_s.get_position().y1
         
-        left_x_row1 = ax_pr_s.get_position().x0
-        top_y_row1  = ax_pr_s.get_position().y1
+        left_x_row1 = ax_prts_s.get_position().x0
+        top_y_row1  = ax_prts_s.get_position().y1
         
-        nudge = 0.04
+        left_x_row2 = ax_pr_s.get_position().x0
+        top_y_row2  = ax_pr_s.get_position().y1
+        
+        nudge = 0.02
         fig.text(left_x_row0, top_y_row0 + nudge, "30-day Minimum Discharge Trend", 
                  ha='left', va='bottom', fontsize=12, weight='bold')
-        fig.text(left_x_row1, top_y_row1 + nudge, "Precipitation Difference (High-Freq. - Low-Freq.)", 
+        fig.text(left_x_row1, top_y_row1 + nudge, "Danube Basin Precipitation Trend", 
+                 ha='left', va='bottom', fontsize=12, weight='bold')
+        fig.text(left_x_row2, top_y_row2 + nudge, "Precipitation Difference (High-Freq. - Low-Freq.)", 
                  ha='left', va='bottom', fontsize=12, weight='bold')
         
         path = os.path.join(config.PLOT_DIR, f"final_figure_4_combined_{scenario}_gwl{target_gwl}.png")
@@ -6361,9 +6589,13 @@ class Visualizer:
             {'key': 'Hydro_Winter_JetSpeed', 'ax': fig.add_subplot(gs_bottom[1, 1]), 'title': '(f) Winter Half-Year\n    Jet Speed (m/s)',    'ylabel': '', 'ylim': speed_ylim, 'yticks': [2, 4, 6, 8]},
         ]
 
+        label_suffix = ""
+        global_legend_handles = []
+        global_legend_labels = []
+
         for p_config in plot_configs:
-            key = p_config['key']
-            ax = p_config['ax']
+            key = str(p_config['key'])
+            ax: Any = p_config['ax']
             if cmip6_plot_data.get(key) and reanalysis_plot_data:
                 current_handles = []
                 current_labels = []
@@ -6399,24 +6631,24 @@ class Visualizer:
                         elif model_name in non_extreme_models_set:
                             non_extreme_members.append(member_jet)
 
-                    # Plot 95% Model Spread for ALL CMIP6 Models
+                    # Plot 100% Model Spread for ALL CMIP6 Models
                     all_members = cmip6_plot_data[key]['members']
                     if all_members:
                         try:
                             aligned_all = xr.align(*all_members, join='outer')
                             stacked_all = xr.concat(aligned_all, dim='model')
                             
-                            p2_5 = stacked_all.quantile(0.025, dim='model', skipna=True)
-                            p97_5 = stacked_all.quantile(0.975, dim='model', skipna=True)
+                            p2_5 = stacked_all.min(dim='model', skipna=True)
+                            p97_5 = stacked_all.max(dim='model', skipna=True)
                             
                             ax.fill_between(p2_5.season_year, p2_5, p97_5, color='grey', alpha=0.2, zorder=1)
                             
-                            label = 'CMIP6 95% Spread'
+                            label = 'CMIP6 100% Model Spread'
                             patch = mpatches.Patch(color='grey', alpha=0.3)
                             current_handles.append(patch)
                             current_labels.append(label)
                         except Exception as e:
-                            logging.warning(f"Could not compute 95% range for {key}: {e}")
+                            logging.warning(f"Could not compute 100% model range for {key}: {e}")
 
                     # Plot Extreme Models Mean
                     # Calculate storyline group mean anomalies directly from individual model anomalies
@@ -6424,7 +6656,7 @@ class Visualizer:
                     ext_vals = []
                     for member_jet in extreme_members:
                         model_name = member_jet.attrs.get('model_key', '')
-                        gwl_yr = gwl_years.get(model_name, {}).get(gwl)
+                        gwl_yr = gwl_years.get(model_name, {}).get(gwl) if gwl_years is not None else None
                         if gwl_yr is not None and gwl_yr in member_jet.season_year.values:
                             val = float(member_jet.sel(season_year=gwl_yr).values)
                             ext_vals.append(val)
@@ -6433,7 +6665,7 @@ class Visualizer:
                     non_ext_vals = []
                     for member_jet in non_extreme_members:
                         model_name = member_jet.attrs.get('model_key', '')
-                        gwl_yr = gwl_years.get(model_name, {}).get(gwl)
+                        gwl_yr = gwl_years.get(model_name, {}).get(gwl) if gwl_years is not None else None
                         if gwl_yr is not None and gwl_yr in member_jet.season_year.values:
                             val = float(member_jet.sel(season_year=gwl_yr).values)
                             non_ext_vals.append(val)
@@ -6444,7 +6676,7 @@ class Visualizer:
                         try:
                             label = 'High-Freq.' if 'low' in event_key else 'Low-Freq.'
                             # Get crossing range
-                            ext_crossing_years = [gwl_years[m][gwl] for m in extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
+                            ext_crossing_years = [gwl_years[m][gwl] for m in extreme_models_set if gwl_years is not None and m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
                             if ext_crossing_years:
                                 t_min, t_max = min(ext_crossing_years), max(ext_crossing_years)
                                 ax.hlines(y=ext_val, xmin=t_min, xmax=t_max, color='#b2182b', alpha=0.9, linewidth=4, linestyles='dashed', zorder=6)
@@ -6460,7 +6692,7 @@ class Visualizer:
                         try:
                             label = 'Low-Freq.' if 'low' in event_key else 'High-Freq.'
                             # Get crossing range
-                            non_ext_crossing_years = [gwl_years[m][gwl] for m in non_extreme_models_set if m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
+                            non_ext_crossing_years = [gwl_years[m][gwl] for m in non_extreme_models_set if gwl_years is not None and m in gwl_years and gwl in gwl_years[m] and gwl_years[m][gwl]]
                             if non_ext_crossing_years:
                                 t_min, t_max = min(non_ext_crossing_years), max(non_ext_crossing_years)
                                 ax.hlines(y=non_ext_val, xmin=t_min, xmax=t_max, color='#2166ac', alpha=0.9, linewidth=4, linestyles='dashdot', zorder=6)
@@ -6480,6 +6712,7 @@ class Visualizer:
                     x_vals = mmm_ts.season_year.values[valid]
                     y_vals = mmm_ts.values[valid]
 
+                    label_suffix = ""
                     if len(x_vals) > 1:
                         slope, intercept, _, p_val, _ = linregress(x_vals, y_vals)
                         trend_line = slope * x_vals + intercept
@@ -6492,8 +6725,6 @@ class Visualizer:
                         else:
                             p_str = f"p={p_val:.2f}"
                         label_suffix = f" (trend: {trend_per_decade:+.2f}{unit}/dec, {p_str})"
-                    else:
-                        label_suffix = ""
 
                     line, = ax.plot(mmm_ts.season_year, mmm_ts, color='black', linewidth=2.5, label=f'CMIP6 MMM{label_suffix}', zorder=6)
                     current_handles.append(line)
@@ -6545,7 +6776,7 @@ class Visualizer:
         fig.text(0.12, 0.93, 'Zonal Wind (u850) Differences (High-Freq. \u2212 Low-Freq.)', ha='left', va='center', fontsize=12, weight='bold')
         fig.text(0.12, 0.61, 'Jet Stream Indices', ha='left', va='center', fontsize=12, weight='bold')
 
-        if 'global_legend_handles' in locals():
+        if global_legend_handles:
             clean_labels = [l.split(' (trend:')[0] if 'MMM' in l else l for l in global_legend_labels]
             fig.legend(global_legend_handles, clean_labels, loc='lower center', bbox_to_anchor=(0.5, -0.02), ncol=2, frameon=False)
 

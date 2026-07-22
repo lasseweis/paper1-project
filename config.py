@@ -112,9 +112,9 @@ class Config:
     # Global Warming Level (GWL) parameters
     GLOBAL_WARMING_LEVELS = [2.0, 3.0]
     GWL_FINE_STEPS_FOR_PLOT = np.arange(1.5, 3.51, 0.5).tolist() # Yields [1.5, 2.0, ..., 4.5]
-    GWL_YEARS_WINDOW = 30
+    GWL_YEARS_WINDOW = 31
     GWL_TEMP_SMOOTHING_WINDOW = 31
-    ROLLING_WINDOW_JET = 30
+    ROLLING_WINDOW_JET = 31
     
     REQUIRED_MODEL_SCENARIOS = {
         "ACCESS-CM2": ["ssp245", "ssp585"],

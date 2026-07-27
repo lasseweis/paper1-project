@@ -7471,7 +7471,6 @@ class Visualizer:
             for ry, cy in zip(rel_years, cal_years):
                 is_s = False
                 is_w = False
-                is_s_prev = False
 
                 if cy in ts_summer.year.values:
                     v_s = ts_summer.sel(year=cy).item()
@@ -7483,18 +7482,12 @@ class Visualizer:
                     if np.isfinite(v_w) and v_w < thresh_30q10:
                         is_w = True
 
-                if (cy - 1) in ts_summer.year.values:
-                    v_sp = ts_summer.sel(year=cy-1).item()
-                    if np.isfinite(v_sp) and v_sp < thresh_30q10:
-                        is_s_prev = True
-
                 if is_s:
                     summer_rel.append(ry)
                 if is_w:
                     winter_rel.append(ry)
                 if is_s and is_w:
                     same_year_cooccur_rel.append(ry)
-                if is_w and (is_s or is_s_prev):
                     preceded_winter_rel.append(ry)
 
             # Classifications

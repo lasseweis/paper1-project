@@ -246,7 +246,7 @@ class ClimateAnalysis:
             amo_long["Month"] = amo_long["Month"].map(month_mapping)
             
             # Use a datetime index to leverage the robust DataProcessor methods
-            amo_long['time'] = pd.to_datetime(dict(year=amo_long['Year'], month=amo_long['Month'], day=15))
+            amo_long['time'] = pd.to_datetime(pd.DataFrame({'year': amo_long['Year'], 'month': amo_long['Month'], 'day': 15}))
             da = amo_long.set_index('time')[['AMO']].to_xarray()['AMO'].dropna(dim='time')
 
             da_with_seasons = DataProcessor.assign_season_to_dataarray(da)
@@ -362,7 +362,7 @@ class ClimateAnalysis:
             df_subset.columns = ['month', 'year', 'discharge']
             
             # Create datetime index (setting day to 15 to represent the month)
-            df_subset['time'] = pd.to_datetime(dict(year=df_subset['year'], month=df_subset['month'], day=15))
+            df_subset['time'] = pd.to_datetime(pd.DataFrame({'year': df_subset['year'], 'month': df_subset['month'], 'day': 15}))
             df_subset = df_subset.set_index('time').sort_index()
             
             # Create xarray DataArray
@@ -397,7 +397,7 @@ class ClimateAnalysis:
         regression_results = {}
 
         # Create an instance of the central analysis class
-        storyline_analyzer = StorylineAnalyzer(config=Config)
+        storyline_analyzer = StorylineAnalyzer(config=Config())
 
         # --- PART 1: BASIC REANALYSIS CALCULATIONS (Done once) ---
         logging.info("\n--- Processing Reanalysis Datasets ---")
@@ -959,9 +959,9 @@ class ClimateAnalysis:
                         else:
                             logging.info(f"PSL composite plot for GWL {gwl}, {composite_season} already exists.")
 
-                # --- PLOT: PR Composite Analysis (Extreme vs Non-Extreme) ---
-                # Added Feb 2026 - Mirrors Z500 composite but for precipitation
-                pr_stored_composites = {}  # Store results for combined plot
+                # --- PLOT: PR & TAS Composite Analysis (Extreme vs Non-Extreme) ---
+                pr_stored_composites = {}  # Store PR results for combined plot
+                tas_stored_composites = {} # Store TAS results for combined plot
                 for gwl in Config.GLOBAL_WARMING_LEVELS:
                     # Check if Final Figure 4 is missing for this GWL
                     is_final_fig4_gwl = gwl in [2.0, 3.0]
@@ -973,11 +973,11 @@ class ClimateAnalysis:
                         pr_combined_plot_filename = os.path.join(Config.PLOT_DIR, f"combined_diff_pr_{composite_event_key}_{scenario}_gwl{gwl}.png")
                         
                         # Data is needed if any individual plot is missing OR if the combined Fig 4 is missing
-                        need_compute = (not os.path.exists(pr_composite_plot_filename) or 
-                                        not os.path.exists(pr_combined_plot_filename) or
-                                        fig4_missing)
+                        need_compute_pr = (not os.path.exists(pr_composite_plot_filename) or 
+                                           not os.path.exists(pr_combined_plot_filename) or
+                                           fig4_missing)
                         
-                        if need_compute:
+                        if need_compute_pr:
                             if not os.path.exists(pr_composite_plot_filename) or not os.path.exists(pr_combined_plot_filename):
                                 logging.info(f"Running PR composite analysis for GWL +{gwl}°C, Season {composite_season}, Event {composite_event_key}...")
                             else:
@@ -1003,6 +1003,27 @@ class ClimateAnalysis:
                                 logging.warning(f"PR composite analysis returned no results for GWL {gwl}, {composite_season}.")
                         else:
                             logging.info(f"PR composite plot for GWL {gwl}, {composite_season} already exists and data not needed for Final Figure 4.")
+
+                        # TAS composites for Final Figure 4
+                        tas_composite_plot_filename = os.path.join(Config.PLOT_DIR, f"composite_analysis_tas_{composite_season.lower()}_{composite_event_key}_{scenario}_gwl{gwl}.png")
+                        need_compute_tas = not os.path.exists(tas_composite_plot_filename) or fig4_missing
+                        if need_compute_tas:
+                            if not os.path.exists(tas_composite_plot_filename):
+                                logging.info(f"Running TAS composite analysis for GWL +{gwl}°C, Season {composite_season}, Event {composite_event_key}...")
+                            else:
+                                logging.info(f"TAS composite plot already exists, but calculating data for missing Final Figure 4...")
+                            tas_result_tuple = storyline_analyzer.calculate_tas_composites_for_extremes(
+                                cmip6_results, gwl=gwl, event_key=composite_event_key, season=composite_season
+                            )
+                            if tas_result_tuple:
+                                tas_composite_results, tas_model_lists, tas_model_rps, tas_n_total_models = tas_result_tuple
+                                if tas_composite_results:
+                                    tas_stored_composites[(gwl, composite_season)] = (tas_composite_results, tas_model_rps, tas_n_total_models)
+                                    if not os.path.exists(tas_composite_plot_filename):
+                                        Visualizer.plot_tas_composite_analysis_panel(
+                                            tas_composite_results, gwl, composite_event_key, scenario, composite_season,
+                                            tas_model_rps, tas_model_lists, tas_n_total_models
+                                        )
 
                 # --- Combined PR Difference Plots (Winter + Summer) ---
                 pr_shared_diff_limit = None
@@ -1042,12 +1063,12 @@ class ClimateAnalysis:
                     else:
                         logging.info(f"Combined PR diff plot for GWL {gwl} already exists.")
 
-                    # --- NEW: Final Figure 4 Combined Plot (Discharge + PR Diff) ---
+                    # --- NEW: Final Figure 4 Combined Plot (Discharge + PR Diff + TAS Diff) ---
                     is_final_fig4_gwl = gwl in [2.0, 3.0]
                     final_fig4_fn_check = os.path.join(Config.PLOT_DIR, f"final_figure_4_combined_{scenario}_gwl{gwl}.png")
                     if is_final_fig4_gwl and (not os.path.exists(final_fig4_fn_check) or not os.path.exists(final_fig4_fn_check.replace('.png', '.pdf'))):
                         Visualizer.plot_final_figure_4_combined(
-                            cmip6_results, discharge_data_loaded, pr_stored_composites, 
+                            cmip6_results, discharge_data_loaded, pr_stored_composites, tas_stored_composites,
                             Config(), scenario, gwl
                         )
 
@@ -1371,8 +1392,32 @@ class ClimateAnalysis:
                             Visualizer.plot_cmip6_scatter_comparison(cmip6_results=cmip6_results, beta_obs_slopes=beta_obs_slopes, gwl_to_plot=gwl, scenario=scenario)
                         else:
                              logging.info(f"Plot '{scatter_plot_filename}' already exists.")
-                else:
-                    logging.warning(f"Skipping fidelity and scatter plots for {scenario} because beta_obs_slopes are missing.")
+                # --- PLOT: Final Figure 6 (Sub-seasonal Metrics: CDD & Wet-Day Temp) ---
+                if scenario == 'ssp585':
+                    fig6_filename = os.path.join(Config.PLOT_DIR, "final_figure_6_subseasonal_metrics.png")
+                    if True or not os.path.exists(fig6_filename) or not os.path.exists(fig6_filename.replace('.png', '.pdf')):
+                        logging.info(f"Calculating subseasonal metrics and plotting Final Figure 6 for {scenario}...")
+                        subseasonal_panels = storyline_analyzer.calculate_subseasonal_metrics(
+                            cmip6_results, scenario=scenario, target_gwl=3.0,
+                            event_key=Config.COMPOSITE_EVENT_KEY, start_year=2015, end_year=2099
+                        )
+                        if subseasonal_panels:
+                            Visualizer.plot_final_figure_6_subseasonal_metrics(
+                                subseasonal_panels, Config(), scenario=scenario, target_gwl=3.0
+                            )
+                        else:
+                            logging.warning("Skipping Final Figure 6: Subseasonal metrics calculation failed.")
+                    else:
+                        logging.info(f"Final Figure 6 '{fig6_filename}' already exists.")
+
+                # --- PLOT: Final Figure 7 (Co-occurrence / Clustering of Summer & Winter 30Q10 Low-Flow Events) ---
+                if scenario == 'ssp585':
+                    fig7_filename = os.path.join(Config.PLOT_DIR, "final_figure_7_summer_winter_lowflow_clustering.png")
+                    logging.info(f"Plotting Final Figure 7 for {scenario}...")
+                    Visualizer.plot_final_figure_7_summer_winter_lowflow_clustering(
+                        cmip6_results, Config(), scenario=scenario, target_gwl=3.0,
+                        return_period_results=return_period_results_for_plot
+                    )
 
                 # --- Log summary for the scenario ---
                 storyline_classification_2d = cmip6_results.get('storyline_classification_2d')

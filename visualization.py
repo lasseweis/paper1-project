@@ -8,6 +8,7 @@ matrices. It separates the analysis logic from the presentation.
 """
 import os
 import sys
+import glob
 import logging
 import numpy as np
 import pandas as pd
@@ -346,7 +347,7 @@ class Visualizer:
 
             # --- Data for 20CRv3 ---
             data_20crv3 = correlation_data_20crv3.get(key)
-            ax1 = fig.add_subplot(gs[row_idx, 0], projection=ccrs.PlateCarree())
+            ax1 = cast(Any, fig.add_subplot(gs[row_idx, 0], projection=ccrs.PlateCarree()))
             ax1.set_title(f"20CRv3: {config['title']}", fontsize=10)
             
             if data_20crv3 and data_20crv3.get('slopes') is not None:
@@ -388,7 +389,7 @@ class Visualizer:
 
             # --- Data for ERA5 ---
             data_era5 = correlation_data_era5.get(key)
-            ax2 = fig.add_subplot(gs[row_idx, 1], projection=ccrs.PlateCarree())
+            ax2 = cast(Any, fig.add_subplot(gs[row_idx, 1], projection=ccrs.PlateCarree()))
             ax2.set_title(f"ERA5: {config['title']}", fontsize=10)
 
             if data_era5 and data_era5.get('slopes') is not None:
@@ -654,7 +655,7 @@ class Visualizer:
 
             # --- Subplot for 20CRv3 ---
             data_20crv3 = impact_data_20crv3.get(key)
-            ax1 = fig.add_subplot(gs[row_idx, 0], projection=ccrs.PlateCarree())
+            ax1 = cast(Any, fig.add_subplot(gs[row_idx, 0], projection=ccrs.PlateCarree()))
             ax1.set_title(f"20CRv3: {config['title']}", fontsize=10)
             
             cf = None # Initialize cf to handle cases where data is missing
@@ -699,7 +700,7 @@ class Visualizer:
 
             # --- Subplot for ERA5 ---
             data_era5 = impact_data_era5.get(key)
-            ax2 = fig.add_subplot(gs[row_idx, 1], projection=ccrs.PlateCarree())
+            ax2 = cast(Any, fig.add_subplot(gs[row_idx, 1], projection=ccrs.PlateCarree()))
             ax2.set_title(f"ERA5: {config['title']}", fontsize=10)
 
             if data_era5 and data_era5.get('slopes') is not None:
@@ -1483,7 +1484,7 @@ class Visualizer:
         fig.suptitle(f'{main_title}\n{ref_text}', fontsize=15, weight='bold', y=0.98)
         
         # Layout angepasst für engere Legende und mehr Platz am unteren Rand (rect[1] erhöht)
-        fig.tight_layout(rect=[0, 0.08, 1, 0.93], h_pad=3.0, w_pad=2.5)
+        fig.tight_layout(rect=(0, 0.08, 1, 0.93), h_pad=3.0, w_pad=2.5)
         
         filepath = os.path.join(config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=600, bbox_inches='tight')
@@ -1609,7 +1610,7 @@ class Visualizer:
                      f"(Changes relative to {ref_period_changes}; GWL defined relative to {ref_period_gwl})",
                      fontsize=16, weight='bold') 
         
-        fig.tight_layout(rect=[0, 0, 1, 0.94])
+        fig.tight_layout(rect=(0, 0, 1, 0.94))
         # MODIFIED: Add scenario to the filename to make it unique
         filename = os.path.join(Config.PLOT_DIR, f"cmip6_scatter_comparison_gwl_{gwl_to_plot:.1f}_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -1777,7 +1778,7 @@ class Visualizer:
                      f"(Changes relative to {ref_period})",
                      fontsize=16, weight='bold')
 
-        fig.tight_layout(rect=[0, 0, 1, 0.95], h_pad=5.0)
+        fig.tight_layout(rect=(0, 0, 1, 0.95), h_pad=5.0)
         
         filename = os.path.join(Config.PLOT_DIR, f"cmip6_jet_inter_relationship_scatter_quadrants_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -1846,7 +1847,7 @@ class Visualizer:
         cf_ref = None
 
         # DJF Plot
-        ax_djf = fig.add_subplot(gs[0, 0], projection=ccrs.PlateCarree())
+        ax_djf = cast(Any, fig.add_subplot(gs[0, 0], projection=ccrs.PlateCarree()))
         djf_data = u850_change_results['DJF']
         if djf_data and djf_data.get('u850_change_mmm') is not None:
             res_djf = Visualizer.plot_u850_change_map(
@@ -1865,7 +1866,7 @@ class Visualizer:
             ax_djf.set_title("CMIP6 MMM U850 Change\nDJF\n(Data Missing)")
 
         # JJA Plot
-        ax_jja = fig.add_subplot(gs[0, 1], projection=ccrs.PlateCarree())
+        ax_jja = cast(Any, fig.add_subplot(gs[0, 1], projection=ccrs.PlateCarree()))
         jja_data = u850_change_results['JJA']
         if jja_data and jja_data.get('u850_change_mmm') is not None:
             res_jja = Visualizer.plot_u850_change_map(
@@ -2083,7 +2084,7 @@ class Visualizer:
             ax.set_xlabel("Year")
             
         fig.suptitle(f'Seasonal Drought Analysis Comparison (SPEI-{scale})', fontsize=16, weight='bold')
-        fig.tight_layout(rect=[0, 0, 1, 0.96])
+        fig.tight_layout(rect=(0, 0, 1, 0.96))
         filename = os.path.join(Config.PLOT_DIR, 'spei_drought_analysis_seasonal_comparison.png')
         plt.savefig(filename, dpi=300)
         plt.close(fig)
@@ -2190,7 +2191,7 @@ class Visualizer:
             ax3.text(0.5, 0.5, "Regression Data Error", transform=ax3.transAxes, ha='center', va='center')
         
         fig.suptitle(f"{title_prefix}: Spatial Drought Analysis and Hydrological Link ({season})", fontsize=16, weight='bold')
-        fig.tight_layout(rect=[0, 0, 1, 0.94])
+        fig.tight_layout(rect=(0, 0, 1, 0.94))
         
         filepath = os.path.join(Config.PLOT_DIR, filename)
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
@@ -2280,7 +2281,7 @@ class Visualizer:
             fig.colorbar(cf_tas_ref, cax=cax_tas, extend='both', label=label_tas_ref)
 
         plt.suptitle("CMIP6 Single Model U850 Regression onto Box Climate Indices (1995-2014)", fontsize=18, weight='bold')
-        fig.tight_layout(rect=[0, 0, 0.95, 0.96])
+        fig.tight_layout(rect=(0, 0, 0.95, 0.96))
         filename = os.path.join(Config.PLOT_DIR, f'regression_maps_norm_{dataset_key_prefix}_single_models.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -2404,7 +2405,7 @@ class Visualizer:
         
         fig.suptitle(f"{main_title}\n{subtitle}", fontsize=16, weight='bold', y=0.99)
         
-        fig.tight_layout(rect=[0, 0.02, 1, 0.93])
+        fig.tight_layout(rect=(0, 0.02, 1, 0.93))
         
         filename = os.path.join(config.PLOT_DIR, "storyline_impacts_summary_vertical.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -2978,7 +2979,7 @@ class Visualizer:
         
         # Adjust layout
         bottom_margin = 0.12 if num_cols > 4 else 0.15
-        fig.tight_layout(rect=[0.05, bottom_margin, 0.98, 0.95], h_pad=2.5, w_pad=2.0)
+        fig.tight_layout(rect=(0.05, bottom_margin, 0.98, 0.95), h_pad=2.5, w_pad=2.0)
         
         # Use a new filename to avoid overwriting the old plot
         filename = os.path.join(config.PLOT_DIR, f"storyline_discharge_return_period_BY_EVENT_{scenario}.png")
@@ -3369,7 +3370,7 @@ class Visualizer:
              fig.text(0.5, 0.96, 'Low-Flow Events (Rows 1-3)', ha='center', va='center', fontsize=14, weight='bold')
              fig.text(0.5, 0.51, 'High-Flow Events (Rows 4-6)', ha='center', va='center', fontsize=14, weight='bold')
         
-        fig.tight_layout(rect=[0.05, 0.05, 0.98, 0.94], h_pad=3.0, w_pad=2.0)
+        fig.tight_layout(rect=(0.05, 0.05, 0.98, 0.94), h_pad=3.0, w_pad=2.0)
         
         filename = os.path.join(config.PLOT_DIR, f"storyline_discharge_return_period_BY_EVENT_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -3419,7 +3420,7 @@ class Visualizer:
             for season in seasons:
                 season_full = "Winter" if season == "DJF" else "Summer"
                 for col_idx, storyline_name in enumerate(storyline_order):
-                    ax = fig.add_subplot(gs[row_idx, col_idx], projection=ccrs.PlateCarree())
+                    ax = cast(Any, fig.add_subplot(gs[row_idx, col_idx], projection=ccrs.PlateCarree()))
                     
                     storyline_title_formatted = storyline_name.replace(" & ", " &\n")
                     main_title_part = f'GWL {gwl}°C, {season_full} ({season})'
@@ -3461,7 +3462,7 @@ class Visualizer:
         hist_period_text = f"Historical Reference: {config.CMIP6_ANOMALY_REF_START}-{config.CMIP6_ANOMALY_REF_END}"
         fig.suptitle(f'Storyline-Based U850 Zonal Wind Change for {scenario.upper()}\n({hist_period_text})', fontsize=18, weight='bold')
                 
-        fig.tight_layout(rect=[0.01, 0.04, 0.95, 0.96])
+        fig.tight_layout(rect=(0.01, 0.04, 0.95, 0.96))
         
         # MODIFIED: Filename now includes scenario
         filename_out = os.path.join(config.PLOT_DIR, f"storyline_u850_change_maps_{scenario}.png")
@@ -3545,7 +3546,7 @@ class Visualizer:
         fig.suptitle(f"Cross-Season Jet Relationship for {scenario.upper()}\n(Changes relative to {ref_period_changes})",
                      fontsize=16, weight='bold')
         
-        fig.tight_layout(rect=[0.02, 0.02, 1, 0.93])
+        fig.tight_layout(rect=(0.02, 0.02, 1, 0.93))
         
         filename = os.path.join(Config.PLOT_DIR, f"cmip6_jet_cross_season_relationship_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -3561,6 +3562,7 @@ class Visualizer:
         logging.info(f"Zeichne monatliches LNWL-Verteilungs-Grid für {scenario}...")
         Visualizer.ensure_plot_dir_exists()
 
+        fig = None
         try:
             # --- 1. Daten und Plot-Struktur vorbereiten ---
             qobs_baseline_data = distribution_data.get('qobs_baseline')
@@ -3924,7 +3926,7 @@ class Visualizer:
         fig.suptitle(f"Change in Return Period of Low Navigable Water Level (LNWL < {lnwl_threshold:.0f} m³/s) for {scenario.upper()}",
                     fontsize=16, weight='bold', y=0.99)
         
-        fig.tight_layout(rect=[0.05, 0.05, 0.98, 0.95], h_pad=3.0, w_pad=2.5)
+        fig.tight_layout(rect=(0.05, 0.05, 0.98, 0.95), h_pad=3.0, w_pad=2.5)
         
         filename = os.path.join(config.PLOT_DIR, f"storyline_lnwl_aggregation_comparison_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -4169,7 +4171,7 @@ class Visualizer:
         fig.suptitle(f"Historical and Future Counts of 30Q10 Low-Flow Events - {scenario_title}",
                      fontsize=16, weight='bold', y=0.97)
         
-        plt.tight_layout(rect=[0.02, 0.08, 0.98, 0.92], h_pad=2.0, w_pad=2.0)
+        plt.tight_layout(rect=(0.02, 0.08, 0.98, 0.92), h_pad=2.0, w_pad=2.0)
         
         # Legend at the bottom (ordered for Column-Major legend layout with ncol=4)
         from matplotlib.lines import Line2D
@@ -4376,7 +4378,7 @@ class Visualizer:
             
         fig.legend(handles=handles, loc='lower center', ncol=5, bbox_to_anchor=(0.5, 0.02), frameon=False)
 
-        plt.tight_layout(rect=[0, 0.05, 1, 0.96]) 
+        plt.tight_layout(rect=(0, 0.05, 1, 0.96)) 
         
         filename = os.path.join(config.PLOT_DIR, f"Figure3_core_finding_regime_shift_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -4703,7 +4705,7 @@ class Visualizer:
         fig.suptitle(f"Projected impact on inland navigation reliability (LNWL < {lnwl_threshold:.0f} m³/s) - {scenario_title}", 
                      fontsize=16, weight='bold', y=0.98)
         
-        plt.tight_layout(rect=[0.02, 0.08, 0.98, 0.94])
+        plt.tight_layout(rect=(0.02, 0.08, 0.98, 0.94))
         
         filename = os.path.join(config.PLOT_DIR, f"Figure4_impact_navigation_lnwl_{scenario}.png")
         plt.savefig(filename, dpi=300, bbox_inches='tight')
@@ -5043,7 +5045,7 @@ class Visualizer:
                 
                 else:
                     try:
-                        custom_cmap = matplotlib.pyplot.get_cmap(cmap_diff)
+                        custom_cmap = plt.get_cmap(cmap_diff)
                     except:
                         custom_cmap = matplotlib.cm.get_cmap(cmap_diff)
 
@@ -5403,7 +5405,7 @@ class Visualizer:
             custom_cmap = mcolors.LinearSegmentedColormap.from_list('GnWhRd', colors)
         else:
             try:
-                custom_cmap = matplotlib.pyplot.get_cmap(cmap_diff)
+                custom_cmap = plt.get_cmap(cmap_diff)
             except:
                 custom_cmap = matplotlib.cm.get_cmap(cmap_diff)
 
@@ -5789,7 +5791,7 @@ class Visualizer:
         map_aspect = 0.5216  # Fallback aspect ratio if shapefile loading fails
         
         # --- Top Subplot: Map ---
-        ax_map = fig.add_subplot(gs[0], projection=ccrs.PlateCarree())
+        ax_map = cast(Any, fig.add_subplot(gs[0], projection=ccrs.PlateCarree()))
         
         # Add high-resolution satellite background 
         import cartopy.io.img_tiles as cimgt
@@ -6149,17 +6151,19 @@ class Visualizer:
 
 
     @staticmethod
-    def plot_final_figure_4_combined(cmip6_results, discharge_data_loaded, pr_stored_composites, config, scenario, target_gwl):
+    def plot_final_figure_4_combined(cmip6_results, discharge_data_loaded, pr_stored_composites, tas_stored_composites, config, scenario, target_gwl):
         """
         Creates a combined Figure 4:
-        Row 0: Extreme vs Non-Extreme discharge timeseries (Summer, Winter)
-        Row 1: Extreme vs Non-Extreme Danube Basin precipitation timeseries (Summer, Winter)
-        Row 2: Future Precipitation Difference maps (Summer, Winter)
+        Row 0: Extreme vs Non-Extreme Danube Basin precipitation timeseries (Summer, Winter)
+        Row 1: Future Precipitation Difference maps (Summer, Winter)
+        Row 2: Extreme vs Non-Extreme Danube Basin temperature timeseries (Summer, Winter)
+        Row 3: Future Temperature Difference maps (Summer, Winter)
+        Row 4: Extreme vs Non-Extreme discharge timeseries (Summer, Winter)
         """
         logging.info(f"Plotting combined final figure 4 for GWL {target_gwl}°C, {scenario}...")
         Visualizer.ensure_plot_dir_exists()
         
-        # --- 1. PREPARE DISCHARGE & PR TIME SERIES DATA ---
+        # --- 1. PREPARE TIME SERIES DATA (DISCHARGE, PR, TAS) ---
         metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
         storyline_classification_2d = cmip6_results.get('storyline_classification_2d', {})
         extreme_models = {'Summer': [], 'Winter': []}
@@ -6171,6 +6175,7 @@ class Visualizer:
             extreme_models['Winter'] = storyline_classification_2d[target_gwl].get('DJF_Extreme Models', [])
             non_extreme_models['Winter'] = storyline_classification_2d[target_gwl].get('DJF_Non-Extreme Models', [])
 
+        # Discharge timeseries
         data_by_season = {'Summer': [], 'Winter': []}
         season_keys = {'Summer': '30Q_low_summer', 'Winter': '30Q_low_winter'}
 
@@ -6190,47 +6195,195 @@ class Visualizer:
                         df['model'] = model_name
                         data_by_season[sn].append(df)
 
+        # PR and TAS timeseries and spatial catchment maps loaded from bias-adjusted daily data
+        catchment_dirs = [
+            '/nas/home/vlw/Desktop/STREAM/final-bias-adjusted-data',
+            '/nas/home/vlw/Desktop/STREAM/copernicus-final-adjusted-data',
+            '/nas/home/vlw/Desktop/STREAM/in-catchment-data',
+            '/nas/home/vlw/Desktop/STREAM/copernicus-in-catchment'
+        ]
+
+        def find_catchment_files(model, scn):
+            for c_dir in catchment_dirs:
+                ba_pr1 = os.path.join(c_dir, f"MONTHLY_*_{model}_*pr_{scn}_count-*.csv")
+                ba_pr2 = os.path.join(c_dir, f"MONTHLY_*_{model}_pr_{scn}_count-*.csv")
+                f_pr_ba = sorted(glob.glob(ba_pr1) + glob.glob(ba_pr2))
+                
+                ba_tas1 = os.path.join(c_dir, f"MONTHLY_*_{model}_*tas_{scn}_count-*.csv")
+                ba_tas2 = os.path.join(c_dir, f"MONTHLY_*_{model}_tas_{scn}_count-*.csv")
+                f_tas_ba = sorted(glob.glob(ba_tas1) + glob.glob(ba_tas2))
+                
+                if f_pr_ba and f_tas_ba:
+                    return f_pr_ba[0], f_tas_ba[0]
+                
+                p1_pr = os.path.join(c_dir, f"{model}_pr_{scn}_*_in-catchment-units.csv")
+                p2_pr = os.path.join(c_dir, f"{model}_*_pr_{scn}_*_in-catchment-units.csv")
+                f_pr = sorted(glob.glob(p1_pr) + glob.glob(p2_pr))
+                
+                p1_tas = os.path.join(c_dir, f"{model}_tas_{scn}_*_in-catchment-units.csv")
+                p2_tas = os.path.join(c_dir, f"{model}_*_tas_{scn}_*_in-catchment-units.csv")
+                f_tas = sorted(glob.glob(p1_tas) + glob.glob(p2_tas))
+                
+                if f_pr and f_tas:
+                    return f_pr[0], f_tas[0]
+            return None, None
+
+        all_model_keys = set()
+        if extreme_models['Summer']: all_model_keys.update(extreme_models['Summer'])
+        if non_extreme_models['Summer']: all_model_keys.update(non_extreme_models['Summer'])
+        if extreme_models['Winter']: all_model_keys.update(extreme_models['Winter'])
+        if non_extreme_models['Winter']: all_model_keys.update(non_extreme_models['Winter'])
+        all_models = list(set([m.split('_')[0] for m in all_model_keys]))
+        if not all_models:
+            all_models = list(set([k.split('_')[0] for k in metric_timeseries.keys() if k.endswith(scenario)]))
+
+        gwl_thresh = cmip6_results.get('gwl_threshold_years', cmip6_results.get('gwl_years', {}))
+
         pr_ts_by_season = {'Summer': [], 'Winter': []}
-        pr_season_keys = {'Summer': 'JJA_pr', 'Winter': 'DJF_pr'}
+        tas_ts_by_season = {'Summer': [], 'Winter': []}
+        pr_catchment_gwl = {'Summer': {}, 'Winter': {}}
+        tas_catchment_gwl = {'Summer': {}, 'Winter': {}}
 
-        for sn, mk in pr_season_keys.items():
-            for key, ts_dict in metric_timeseries.items():
-                if not key.endswith(scenario): continue
-                if mk in ts_dict:
-                    da = ts_dict[mk]
-                    if da is not None:
-                        try:
-                            df = da.to_dataframe(name='precip')
-                        except:
-                            df = da.to_dataframe()
-                            if len(df.columns) == 1: df.columns = ['precip']
-                        if 'season_year' in df.index.names:
-                            df = df.reset_index()
-                            df = df.rename(columns={'season_year': 'year'})
-                        elif 'year' in df.index.names:
-                            df = df.reset_index()
-                        elif 'time' in df.index.names:
-                            df = df.reset_index()
-                            if 'time' in df.columns:
-                                try:
-                                    df['year'] = df['time'].dt.year
-                                except:
-                                    pass
-                        model_name = key.split('_')[0]
-                        df['model'] = model_name
-                        pr_ts_by_season[sn].append(df)
+        for model in all_models:
+            pr_file, tas_file = find_catchment_files(model, scenario)
+            if not pr_file or not tas_file:
+                continue
+            try:
+                df_pr = pd.read_csv(pr_file, sep='\t', skiprows=1)
+                df_tas = pd.read_csv(tas_file, sep='\t', skiprows=1)
+                
+                p_cols = [c for c in df_pr.columns if c.startswith('P_')]
+                t_cols = [c for c in df_tas.columns if c.startswith('T_')]
+                
+                df_pr['pr_mean'] = df_pr[p_cols].mean(axis=1)
+                df_tas['tas_mean'] = df_tas[t_cols].mean(axis=1)
+                
+                df = pd.merge(df_pr[['year', 'month', 'day', 'pr_mean'] + p_cols],
+                              df_tas[['year', 'month', 'day', 'tas_mean'] + t_cols],
+                              on=['year', 'month', 'day'])
+                              
+                if df['tas_mean'].mean() > 100:
+                    df['tas_mean'] -= 273.15
+                    df[t_cols] -= 273.15
+                    
+                pr_s_list, pr_w_list = [], []
+                tas_s_list, tas_w_list = [], []
+                
+                min_yr = int(df['year'].min())
+                max_yr = int(df['year'].max())
+                
+                for y in range(max(1960, min_yr), max_yr + 1):
+                    sub_s = df[(df['year'] == y) & (df['month'].isin([5, 6, 7, 8, 9, 10]))]
+                    if not sub_s.empty:
+                        pr_s_list.append({'year': y, 'precip': sub_s['pr_mean'].mean(), 'model': model})
+                        tas_s_list.append({'year': y, 'tas': sub_s['tas_mean'].mean(), 'model': model})
+                        
+                    sub_w = df[((df['year'] == y - 1) & (df['month'].isin([11, 12]))) | ((df['year'] == y) & (df['month'].isin([1, 2, 3, 4])))]
+                    if not sub_w.empty:
+                        pr_w_list.append({'year': y, 'precip': sub_w['pr_mean'].mean(), 'model': model})
+                        tas_w_list.append({'year': y, 'tas': sub_w['tas_mean'].mean(), 'model': model})
+                        
+                if pr_s_list: pr_ts_by_season['Summer'].append(pd.DataFrame(pr_s_list))
+                if pr_w_list: pr_ts_by_season['Winter'].append(pd.DataFrame(pr_w_list))
+                if tas_s_list: tas_ts_by_season['Summer'].append(pd.DataFrame(tas_s_list))
+                if tas_w_list: tas_ts_by_season['Winter'].append(pd.DataFrame(tas_w_list))
 
-        # --- 2. PREPARE PR COMPOSITE DATA ---
-        w_data = pr_stored_composites.get((target_gwl, 'Winter'))
-        s_data = pr_stored_composites.get((target_gwl, 'Summer'))
+                # Spatial GWL calculations
+                m_gwl_dict = gwl_thresh.get(model) or gwl_thresh.get(f"{model}_{scenario}")
+                gwl_yr = None
+                if isinstance(m_gwl_dict, dict):
+                    gwl_yr = m_gwl_dict.get(target_gwl)
+                elif isinstance(m_gwl_dict, (int, float, np.integer)):
+                    gwl_yr = m_gwl_dict
+                    
+                if gwl_yr is not None and np.isfinite(gwl_yr):
+                    gwl_yr = int(gwl_yr)
+                    w_start, w_end = max(1960, gwl_yr - 15), min(2099, gwl_yr + 15)
+                    
+                    df_gwl_s = df[(df['year'] >= w_start) & (df['year'] <= w_end) & (df['month'].isin([5, 6, 7, 8, 9, 10]))]
+                    if not df_gwl_s.empty:
+                        pr_catchment_gwl['Summer'][model] = df_gwl_s[p_cols].mean(axis=0).values
+                        tas_catchment_gwl['Summer'][model] = df_gwl_s[t_cols].mean(axis=0).values
+                        
+                    df_gwl_w = df[(df['year'] >= w_start) & (df['year'] <= w_end) & (((df['year'] >= w_start - 1) & (df['month'].isin([11, 12]))) | ((df['year'] <= w_end) & (df['month'].isin([1, 2, 3, 4]))))]
+                    if not df_gwl_w.empty:
+                        pr_catchment_gwl['Winter'][model] = df_gwl_w[p_cols].mean(axis=0).values
+                        tas_catchment_gwl['Winter'][model] = df_gwl_w[t_cols].mean(axis=0).values
+                        
+            except Exception as e:
+                logging.error(f"Error loading catchment file for {model} in Fig 4: {e}")
+
+        def compute_catchment_diff(catchment_dict, high_list, low_list):
+            high_models = [m.split('_')[0] for m in high_list]
+            low_models = [m.split('_')[0] for m in low_list]
+            
+            h_arrs = [catchment_dict[m] for m in high_models if m in catchment_dict]
+            l_arrs = [catchment_dict[m] for m in low_models if m in catchment_dict]
+            
+            if h_arrs and l_arrs:
+                mmm_h = np.mean(h_arrs, axis=0)
+                mmm_l = np.mean(l_arrs, axis=0)
+                return mmm_h - mmm_l
+            return None
+
+        diff_pr_s = compute_catchment_diff(pr_catchment_gwl['Summer'], extreme_models['Summer'], non_extreme_models['Summer'])
+        diff_pr_w = compute_catchment_diff(pr_catchment_gwl['Winter'], extreme_models['Winter'], non_extreme_models['Winter'])
+
+        diff_tas_s = compute_catchment_diff(tas_catchment_gwl['Summer'], extreme_models['Summer'], non_extreme_models['Summer'])
+        diff_tas_w = compute_catchment_diff(tas_catchment_gwl['Winter'], extreme_models['Winter'], non_extreme_models['Winter'])
         
         # --- 3. SET UP FIGURE ---
-        fig = plt.figure(figsize=(8.5, 11.5))
-        gs = gridspec.GridSpec(3, 2, height_ratios=[1, 1, 1.15], hspace=0.55, wspace=0.15)
+        fig = plt.figure(figsize=(9, 17.5))
+        gs = gridspec.GridSpec(5, 2, height_ratios=[1, 1.15, 1, 1.15, 1], hspace=0.55, wspace=0.15)
         
-        # Helper for plotting time series (Discharge and Precipitation)
-        def _p_ts(ax, df_all, ext_list, non_ext_list, title, val_col='discharge', text_y_ext=0.12, text_y_non=0.04, y_lim=None):
+        # Helper to convert raw values to percentage change relative to 1985-2014 climatology per model
+        def _convert_to_pct_change(df_all, val_col='discharge', hist_start=1985, hist_end=2014):
+            if df_all.empty: return df_all
+            df_out = []
+            for model_name, df_m in df_all.groupby('model'):
+                hist_mask = (df_m['year'] >= hist_start) & (df_m['year'] <= hist_end)
+                hist_vals = df_m[hist_mask][val_col].dropna()
+                if len(hist_vals) < 3:
+                    hist_vals = df_m[df_m['year'] <= 2014][val_col].dropna()
+                
+                if not hist_vals.empty:
+                    v_hist = hist_vals.mean()
+                    if v_hist != 0 and np.isfinite(v_hist):
+                        df_m_copy = df_m.copy()
+                        df_m_copy[val_col] = ((df_m_copy[val_col] - v_hist) / v_hist) * 100.0
+                        df_out.append(df_m_copy)
+                    else:
+                        df_out.append(df_m)
+                else:
+                    df_out.append(df_m)
+            return pd.concat(df_out, ignore_index=True) if df_out else pd.DataFrame()
+
+        # Helper to convert raw values to absolute change (°C) relative to baseline per model
+        def _convert_to_abs_change(df_all, val_col='tas', hist_start=1850, hist_end=1900):
+            if df_all.empty: return df_all
+            df_out = []
+            for model_name, df_m in df_all.groupby('model'):
+                hist_mask = (df_m['year'] >= hist_start) & (df_m['year'] <= hist_end)
+                hist_vals = df_m[hist_mask][val_col].dropna()
+                if len(hist_vals) < 3:
+                    hist_vals = df_m[df_m['year'] <= 2014][val_col].dropna()
+                
+                if not hist_vals.empty:
+                    v_hist = hist_vals.mean()
+                    if np.isfinite(v_hist):
+                        df_m_copy = df_m.copy()
+                        df_m_copy[val_col] = df_m_copy[val_col] - v_hist
+                        df_out.append(df_m_copy)
+                    else:
+                        df_out.append(df_m)
+                else:
+                    df_out.append(df_m)
+            return pd.concat(df_out, ignore_index=True) if df_out else pd.DataFrame()
+
+        # Helper for plotting time series (% change)
+        def _p_ts(ax, df_all, ext_list, non_ext_list, title, val_col='discharge', unit_str='%', text_y_ext=0.12, text_y_non=0.04, y_lim=None):
             if df_all.empty: return ([], [])
+            ax.axhline(0, color='gray', linestyle='--', alpha=0.6, linewidth=1.0)
             def _p_grp(ml, lbl, clr, l_style='-', text_y=0.04):
                 tn = [m.split('_')[0] for m in ml]
                 df_t = df_all[df_all['model'].isin(tn)]
@@ -6256,7 +6409,7 @@ class Visualizer:
                             p_str = "p<0.01"
                         else:
                             p_str = f"p={p_val:.2f}"
-                        label_suffix = f" (trend: {trend_per_decade:+.2f}/dec, {p_str})"
+                        label_suffix = f" (trend: {trend_per_decade:+.2f}{unit_str}/dec, {p_str})"
                     else:
                         label_suffix = ""
 
@@ -6278,110 +6431,175 @@ class Visualizer:
             
             return ax.get_legend_handles_labels()
 
-        # --- 4. PLOT DISCHARGE (Row 0) ---
-        ax_ds_s = fig.add_subplot(gs[0, 0])
-        df_s = pd.concat(data_by_season['Summer'], ignore_index=True) if data_by_season['Summer'] else pd.DataFrame()
-        _p_ts(ax_ds_s, df_s, extreme_models['Summer'], non_extreme_models['Summer'], f'(a) Summer Half Year', val_col='discharge', y_lim=(300, 1850))
-        ax_ds_s.set_ylabel('Discharge (m³/s)')
+        # Helper for maps (Catchment-specific polygons matching Danube hydro-units, as in Figure 6)
+        shapefile_path = '/nas/home/vlw/Desktop/STREAM/hydro-units-files/zones.shp'
+        shape_crs = ccrs.LambertAzimuthalEqualArea(central_longitude=20.0, central_latitude=55.0, globe=ccrs.Globe(semimajor_axis=6370997.0, semiminor_axis=6370997.0))
+        buf = 5.0
+        ex = [config.BOX_LON_MIN - buf, config.BOX_LON_MAX + buf, config.BOX_LAT_MIN - buf, config.BOX_LAT_MAX + buf]
+        import matplotlib.colors as mcolors
 
-        ax_ds_w = fig.add_subplot(gs[0, 1])
-        df_w = pd.concat(data_by_season['Winter'], ignore_index=True) if data_by_season['Winter'] else pd.DataFrame()
-        handles, labels = _p_ts(ax_ds_w, df_w, extreme_models['Winter'], non_extreme_models['Winter'], f'(b) Winter Half Year', val_col='discharge', y_lim=(300, 1850))
-        ax_ds_w.tick_params(labelleft=False)
+        def _p_map(ax, diff_array, title, cmap, norm):
+            ax.set_extent(ex, crs=ccrs.PlateCarree())
+            ax.add_feature(cfeature.COASTLINE, linewidth=0.5, edgecolor='black', zorder=5)
+            ax.add_feature(cfeature.BORDERS, linewidth=0.5, edgecolor='black', zorder=5)
+            ax.add_patch(mpatches.Rectangle((config.BOX_LON_MIN, config.BOX_LAT_MIN), config.BOX_LON_MAX-config.BOX_LON_MIN, config.BOX_LAT_MAX-config.BOX_LAT_MIN, fill=False, edgecolor='magenta', linewidth=1.5, linestyle='--', transform=ccrs.PlateCarree(), zorder=10))
 
-        # --- 5. PLOT DANUBE BASIN PRECIPITATION TIME SERIES (Row 1) ---
-        ax_prts_s = fig.add_subplot(gs[1, 0])
+            if diff_array is not None and len(diff_array) == 61:
+                try:
+                    import pyproj
+                    from shapely.ops import transform as shapely_transform
+                    import cartopy.io.shapereader as shpreader
+                    import shapely.ops
+                    
+                    reader = shpreader.Reader(shapefile_path)
+                    geometries = list(reader.geometries())
+                    
+                    proj_laea = pyproj.CRS.from_proj4('+proj=laea +lat_0=55 +lon_0=20 +x_0=0 +y_0=0 +a=6370997 +b=6370997 +units=m +no_defs')
+                    proj_wgs84 = pyproj.CRS.from_epsg(4326)
+                    transformer = pyproj.Transformer.from_crs(proj_laea, proj_wgs84, always_xy=True)
+                    
+                    geoms_wgs84 = [shapely_transform(transformer.transform, g) for g in geometries]
+                    
+                    for g_wgs84, val in zip(geoms_wgs84, diff_array):
+                        if np.isfinite(val):
+                            color = cmap(norm(val))
+                            ax.add_geometries([g_wgs84], crs=ccrs.PlateCarree(), facecolor=color, edgecolor='grey', linewidth=0.2, zorder=4)
+                    
+                    merged_geom = shapely.ops.unary_union(geometries)
+                    ax.add_geometries([merged_geom], crs=shape_crs, edgecolor='black', facecolor='none', linewidth=1.2, zorder=6)
+                except Exception as e:
+                    logging.warning(f"Could not plot catchment spatial map in Fig 4: {e}")
+            ax.set_title(title, weight='bold', fontsize=12, loc='left')
+
+        # --- ROW 0: PRECIPITATION TIME SERIES ---
+        ax_prts_s = fig.add_subplot(gs[0, 0])
         df_pr_s = pd.concat(pr_ts_by_season['Summer'], ignore_index=True) if pr_ts_by_season['Summer'] else pd.DataFrame()
-        _p_ts(ax_prts_s, df_pr_s, extreme_models['Summer'], non_extreme_models['Summer'], f'(c) Summer Half Year', val_col='precip')
-        ax_prts_s.set_ylabel('Precipitation (mm/day)')
+        df_pr_s_pct = _convert_to_pct_change(df_pr_s, val_col='precip')
+        _p_ts(ax_prts_s, df_pr_s_pct, extreme_models['Summer'], non_extreme_models['Summer'], f'(a) Summer Half Year', val_col='precip', unit_str='%')
+        ax_prts_s.set_ylabel('Precipitation Change (%)')
 
-        ax_prts_w = fig.add_subplot(gs[1, 1])
+        ax_prts_w = fig.add_subplot(gs[0, 1])
         df_pr_w = pd.concat(pr_ts_by_season['Winter'], ignore_index=True) if pr_ts_by_season['Winter'] else pd.DataFrame()
-        _p_ts(ax_prts_w, df_pr_w, extreme_models['Winter'], non_extreme_models['Winter'], f'(d) Winter Half Year', val_col='precip')
+        df_pr_w_pct = _convert_to_pct_change(df_pr_w, val_col='precip')
+        handles, labels = _p_ts(ax_prts_w, df_pr_w_pct, extreme_models['Winter'], non_extreme_models['Winter'], f'(b) Winter Half Year', val_col='precip', unit_str='%')
         ax_prts_w.tick_params(labelleft=False)
 
-        # Align y-axis limits for precipitation subplots
         pr_ymin = min(ax_prts_s.get_ylim()[0], ax_prts_w.get_ylim()[0])
         pr_ymax = max(ax_prts_s.get_ylim()[1], ax_prts_w.get_ylim()[1])
         ax_prts_s.set_ylim(pr_ymin, pr_ymax)
         ax_prts_w.set_ylim(pr_ymin, pr_ymax)
 
+        # --- ROW 1: PR COMPOSITES (Danube Catchments) ---
+        if diff_pr_s is not None or diff_pr_w is not None:
+            max_pr_val = 0.0
+            if diff_pr_s is not None: max_pr_val = max(max_pr_val, np.nanmax(np.abs(diff_pr_s)))
+            if diff_pr_w is not None: max_pr_val = max(max_pr_val, np.nanmax(np.abs(diff_pr_w)))
+            d_lim_pr = max(0.2, np.ceil(max_pr_val * 10) / 10.0)
+        else:
+            d_lim_pr = 1.0
+
+        try:
+            cmap_pr = plt.get_cmap('BrBG', 10)
+        except:
+            cmap_pr = matplotlib.cm.get_cmap('BrBG', 10)
+            
+        levs_pr = np.linspace(-d_lim_pr, d_lim_pr, 11)
+        norm_pr = mcolors.BoundaryNorm(levs_pr, ncolors=cmap_pr.N, clip=False)
+
+        ax_pr_s = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
+        _p_map(ax_pr_s, diff_pr_s, "", cmap_pr, norm_pr)
+        ax_pr_s.set_title("(c) Summer Half Year", weight='bold', loc='left', fontsize=12)
+
+        ax_pr_w = fig.add_subplot(gs[1, 1], projection=ccrs.PlateCarree())
+        _p_map(ax_pr_w, diff_pr_w, "", cmap_pr, norm_pr)
+        ax_pr_w.set_title("(d) Winter Half Year", weight='bold', loc='left', fontsize=12)
+
+        # --- ROW 2: TEMPERATURE TIME SERIES (°C change vs 1985-2014) ---
+        ax_tasts_s = fig.add_subplot(gs[2, 0])
+        df_tas_s = pd.concat(tas_ts_by_season['Summer'], ignore_index=True) if tas_ts_by_season['Summer'] else pd.DataFrame()
+        df_tas_s_abs = _convert_to_abs_change(df_tas_s, val_col='tas', hist_start=1850, hist_end=1900)
+        _p_ts(ax_tasts_s, df_tas_s_abs, extreme_models['Summer'], non_extreme_models['Summer'], f'(e) Summer Half Year', val_col='tas', unit_str='°C')
+        ax_tasts_s.set_ylabel('Temperature Change (°C)')
+
+        ax_tasts_w = fig.add_subplot(gs[2, 1])
+        df_tas_w = pd.concat(tas_ts_by_season['Winter'], ignore_index=True) if tas_ts_by_season['Winter'] else pd.DataFrame()
+        df_tas_w_abs = _convert_to_abs_change(df_tas_w, val_col='tas', hist_start=1850, hist_end=1900)
+        _p_ts(ax_tasts_w, df_tas_w_abs, extreme_models['Winter'], non_extreme_models['Winter'], f'(f) Winter Half Year', val_col='tas', unit_str='°C')
+        ax_tasts_w.tick_params(labelleft=False)
+
+        tas_ymin = min(ax_tasts_s.get_ylim()[0], ax_tasts_w.get_ylim()[0])
+        tas_ymax = max(ax_tasts_s.get_ylim()[1], ax_tasts_w.get_ylim()[1])
+        ax_tasts_s.set_ylim(tas_ymin, tas_ymax)
+        ax_tasts_w.set_ylim(tas_ymin, tas_ymax)
+
+        # --- ROW 3: TAS COMPOSITES (Danube Catchments) ---
+        if diff_tas_s is not None or diff_tas_w is not None:
+            max_tas_val = 0.0
+            if diff_tas_s is not None: max_tas_val = max(max_tas_val, np.nanmax(np.abs(diff_tas_s)))
+            if diff_tas_w is not None: max_tas_val = max(max_tas_val, np.nanmax(np.abs(diff_tas_w)))
+            d_lim_tas = max(0.5, np.ceil(max_tas_val * 2) / 2.0)
+        else:
+            d_lim_tas = 1.5
+
+        try:
+            cmap_tas = plt.get_cmap('RdBu_r', 10)
+        except:
+            cmap_tas = matplotlib.cm.get_cmap('RdBu_r', 10)
+
+        levs_tas = np.linspace(-d_lim_tas, d_lim_tas, 11)
+        norm_tas = mcolors.BoundaryNorm(levs_tas, ncolors=cmap_tas.N, clip=False)
+
+        ax_tas_s = fig.add_subplot(gs[3, 0], projection=ccrs.PlateCarree())
+        _p_map(ax_tas_s, diff_tas_s, "", cmap_tas, norm_tas)
+        ax_tas_s.set_title("(g) Summer Half Year", weight='bold', loc='left', fontsize=12)
+
+        ax_tas_w = fig.add_subplot(gs[3, 1], projection=ccrs.PlateCarree())
+        _p_map(ax_tas_w, diff_tas_w, "", cmap_tas, norm_tas)
+        ax_tas_w.set_title("(h) Winter Half Year", weight='bold', loc='left', fontsize=12)
+
+        # --- ROW 4: DISCHARGE TIME SERIES (bottom) ---
+        ax_ds_s = fig.add_subplot(gs[4, 0])
+        df_s = pd.concat(data_by_season['Summer'], ignore_index=True) if data_by_season['Summer'] else pd.DataFrame()
+        df_s_pct = _convert_to_pct_change(df_s, val_col='discharge')
+        _p_ts(ax_ds_s, df_s_pct, extreme_models['Summer'], non_extreme_models['Summer'], f'(i) Summer Half Year', val_col='discharge', unit_str='%')
+        ax_ds_s.set_ylabel('Discharge Change (%)')
+
+        ax_ds_w = fig.add_subplot(gs[4, 1])
+        df_w = pd.concat(data_by_season['Winter'], ignore_index=True) if data_by_season['Winter'] else pd.DataFrame()
+        df_w_pct = _convert_to_pct_change(df_w, val_col='discharge')
+        _p_ts(ax_ds_w, df_w_pct, extreme_models['Winter'], non_extreme_models['Winter'], f'(j) Winter Half Year', val_col='discharge', unit_str='%')
+        ax_ds_w.tick_params(labelleft=False)
+
+        ds_ymin = min(ax_ds_s.get_ylim()[0], ax_ds_w.get_ylim()[0])
+        ds_ymax = max(ax_ds_s.get_ylim()[1], ax_ds_w.get_ylim()[1])
+        ax_ds_s.set_ylim(ds_ymin, ds_ymax)
+        ax_ds_w.set_ylim(ds_ymin, ds_ymax)
+
         if handles:
             clean_labels = [l.split(' (trend:')[0] if 'MMM' in l else l for l in labels]
-            fig.legend(handles, clean_labels, loc='lower center', bbox_to_anchor=(0.5, 0.355), ncol=2, frameon=False, fontsize=9)
-
-        # --- 6. PLOT PR COMPOSITES (Row 2) ---
-        buf = 5.0
-        ex = [config.BOX_LON_MIN - buf, config.BOX_LON_MAX + buf, config.BOX_LAT_MIN - buf, config.BOX_LAT_MAX + buf]
-        
-        all_d = []
-        for d in [s_data, w_data]:
-            if d and d[0] and 'diff_ext_non_future' in d[0]: all_d.append(d[0]['diff_ext_non_future'])
-            
-        d_lim = 1.0
-
-        import matplotlib.colors as mcolors
-        try:
-            cmap = matplotlib.pyplot.get_cmap('BrBG', 10)
-        except:
-            cmap = matplotlib.cm.get_cmap('BrBG', 10)
-            
-        levs = np.linspace(-d_lim, d_lim, 11)
-        norm = mcolors.BoundaryNorm(levs, ncolors=cmap.N, clip=False)
-
-        def _p_map(ax, comp, title):
-            ax.set_extent(ex, crs=ccrs.PlateCarree())
-            ax.add_feature(cfeature.COASTLINE, linewidth=0.5)
-            ax.add_feature(cfeature.BORDERS, linewidth=0.5, alpha=0.5)
-            ax.add_patch(mpatches.Rectangle((config.BOX_LON_MIN, config.BOX_LAT_MIN), config.BOX_LON_MAX-config.BOX_LON_MIN, config.BOX_LAT_MAX-config.BOX_LAT_MIN, fill=False, edgecolor='magenta', linewidth=1.5, linestyle='--', transform=ccrs.PlateCarree(), zorder=10))
-            if comp and 'diff_ext_non_future' in comp:
-                dm = comp['diff_ext_non_future']
-                sig = comp.get('sig_mask_ext_non_future')
-                
-                cf = ax.pcolormesh(dm.lon, dm.lat, dm, cmap=cmap, norm=norm, transform=ccrs.PlateCarree())
-                if sig is not None:
-                    sk = 2
-                    lo, la = np.meshgrid(dm.lon, dm.lat)
-                    ax.scatter(lo[::sk, ::sk][sig[::sk, ::sk]], la[::sk, ::sk][sig[::sk, ::sk]], s=4, color='black', alpha=0.8, transform=ccrs.PlateCarree())
-                hc = comp.get('hist_climatology_mean')
-                if hc is not None: ax.contour(hc.lon, hc.lat, hc, levels=10, colors='gray', linewidths=0.5, alpha=0.5, transform=ccrs.PlateCarree())
-                return cf
-            return None
-
-        ax_pr_s = fig.add_subplot(gs[2, 0], projection=ccrs.PlateCarree())
-        cf_s = _p_map(ax_pr_s, s_data[0] if s_data else None, "")
-        ax_pr_s.set_title("(e) Summer Half Year", weight='bold', loc='left', fontsize=12)
-
-        ax_pr_w = fig.add_subplot(gs[2, 1], projection=ccrs.PlateCarree())
-        cf_w = _p_map(ax_pr_w, w_data[0] if w_data else None, "")
-        ax_pr_w.set_title("(f) Winter Half Year", weight='bold', loc='left', fontsize=12)
-
-        if cf_s or cf_w:
-            cb_ax = fig.add_axes((0.15, 0.05, 0.7, 0.015))
-            fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=cb_ax, orientation='horizontal', label='Precip. Diff. (mm/day)', extend='both')
+            fig.legend(handles, clean_labels, loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=2, frameon=False, fontsize=9)
 
         s_t = Visualizer._format_scenario_title(scenario)
-        plt.suptitle(f'Minimum 30-Day Discharge Trend & Precipitation Composites\n{s_t} | GWL {target_gwl}°C', weight='bold', y=0.98, fontsize=15)
-        fig.tight_layout(rect=(0, 0.07, 1, 0.94), h_pad=1.2, w_pad=1.0)
+        plt.suptitle(f'Danube Basin Climate Drivers & Minimum 30-Day Discharge Trend\n{s_t} | GWL {target_gwl}°C', weight='bold', y=0.985, fontsize=15)
+        fig.tight_layout(rect=(0, 0.03, 1, 0.965), h_pad=1.2, w_pad=1.0)
         
-        # Add left-aligned subtitles for all three rows after tight_layout
-        left_x_row0 = ax_ds_s.get_position().x0
-        top_y_row0  = ax_ds_s.get_position().y1
-        
-        left_x_row1 = ax_prts_s.get_position().x0
-        top_y_row1  = ax_prts_s.get_position().y1
-        
-        left_x_row2 = ax_pr_s.get_position().x0
-        top_y_row2  = ax_pr_s.get_position().y1
-        
-        nudge = 0.02
-        fig.text(left_x_row0, top_y_row0 + nudge, "30-day Minimum Discharge Trend", 
-                 ha='left', va='bottom', fontsize=12, weight='bold')
-        fig.text(left_x_row1, top_y_row1 + nudge, "Danube Basin Precipitation Trend", 
-                 ha='left', va='bottom', fontsize=12, weight='bold')
-        fig.text(left_x_row2, top_y_row2 + nudge, "Precipitation Difference (High-Freq. - Low-Freq.)", 
-                 ha='left', va='bottom', fontsize=12, weight='bold')
-        
+        # Dynamically position map colorbars below row 1 (PR maps) and row 3 (TAS maps)
+        pos_pr = ax_pr_s.get_position()
+        cb_ax_pr = fig.add_axes((0.15, pos_pr.y0 - 0.025, 0.7, 0.008))
+        fig.colorbar(ScalarMappable(norm=norm_pr, cmap=cmap_pr), cax=cb_ax_pr, orientation='horizontal', label='Precip. Diff. (mm/day)', extend='both')
+
+        pos_tas = ax_tas_s.get_position()
+        cb_ax_tas = fig.add_axes((0.15, pos_tas.y0 - 0.025, 0.7, 0.008))
+        fig.colorbar(ScalarMappable(norm=norm_tas, cmap=cmap_tas), cax=cb_ax_tas, orientation='horizontal', label='Temp. Diff. (°C)', extend='both')
+
+        # Add left-aligned section titles above each row
+        nudge = 0.015
+        fig.text(ax_prts_s.get_position().x0, ax_prts_s.get_position().y1 + nudge, "Danube Basin Precipitation Trend", ha='left', va='bottom', fontsize=11, weight='bold')
+        fig.text(ax_pr_s.get_position().x0, ax_pr_s.get_position().y1 + nudge, "Precipitation Difference (High-Freq. - Low-Freq.)", ha='left', va='bottom', fontsize=11, weight='bold')
+        fig.text(ax_tasts_s.get_position().x0, ax_tasts_s.get_position().y1 + nudge, "Danube Basin Temperature Trend", ha='left', va='bottom', fontsize=11, weight='bold')
+        fig.text(ax_tas_s.get_position().x0, ax_tas_s.get_position().y1 + nudge, "Temperature Difference (High-Freq. - Low-Freq.)", ha='left', va='bottom', fontsize=11, weight='bold')
+        fig.text(ax_ds_s.get_position().x0, ax_ds_s.get_position().y1 + nudge, "30-day Minimum Discharge Trend", ha='left', va='bottom', fontsize=11, weight='bold')
+
         path = os.path.join(config.PLOT_DIR, f"final_figure_4_combined_{scenario}_gwl{target_gwl}.png")
         plt.savefig(path, dpi=600, bbox_inches='tight')
         pdf_path = os.path.join(config.PLOT_DIR, f"final_figure_4_combined_{scenario}_gwl{target_gwl}.pdf")
@@ -6469,7 +6687,7 @@ class Visualizer:
         import matplotlib.colors as mcolors
         import matplotlib.patheffects as pe
         try:
-            custom_cmap = matplotlib.pyplot.get_cmap('RdBu_r')
+            custom_cmap = plt.get_cmap('RdBu_r')
         except:
             custom_cmap = matplotlib.cm.get_cmap('RdBu_r')
         norm = mcolors.BoundaryNorm(diff_levels, ncolors=custom_cmap.N, clip=False) if diff_levels is not None else None
@@ -6787,4 +7005,715 @@ class Visualizer:
         plt.savefig(pdf_filepath, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Saved final figure 3 to {filepath} and {pdf_filepath}")
+
+    @staticmethod
+    def plot_final_figure_6_subseasonal_metrics(panels_data, config, scenario='ssp585', target_gwl=3.0):
+        """
+        Creates Final Figure 6: Sub-seasonal Metrics (CDD, CDD Duration Spectrum, Dry-Spell Temp, Wet-Day Temp, and PR Intensity Spectrum)
+        16-Panel Layout (8x2 Grid):
+          Row 0: (a) Summer CDD Trend (2015-2099)                            | (b) Winter CDD Trend (2015-2099)
+          Row 1: (c) Summer CDD Difference Map (High - Low @ GWL 3.0°C)     | (d) Winter CDD Difference Map
+          Row 2: (e) Summer CDD Duration Distribution (GWL 3.0°C)           | (f) Winter CDD Duration Distribution
+          Row 3: (g) Summer Dry-Spell (CDD ≥10d) Temp Trend (2015-2099)     | (h) Winter Dry-Spell Temp Trend
+          Row 4: (i) Summer Dry-Spell Temp Difference Map                   | (j) Winter Dry-Spell Temp Difference Map
+          Row 5: (k) Summer Wet-Day Temp Trend (2015-2099)                  | (l) Winter Wet-Day Temp Trend (2015-2099)
+          Row 6: (m) Summer Wet-Day Temp Difference Map (High - Low)        | (n) Winter Wet-Day Temp Difference Map
+          Row 7: (o) Summer Wet-Day PR Intensity Spectrum (GWL 3.0°C)       | (p) Winter Wet-Day PR Intensity Spectrum
+        """
+        filename_png = "final_figure_6_subseasonal_metrics.png"
+        filename_pdf = "final_figure_6_subseasonal_metrics.pdf"
+        filepath_png = os.path.join(config.PLOT_DIR, filename_png)
+        filepath_pdf = os.path.join(config.PLOT_DIR, filename_pdf)
+        
+        logging.info(f"Plotting 16-Panel Final Figure 6 to {filepath_png}...")
+        Visualizer.ensure_plot_dir_exists()
+        
+        if not panels_data or 'years' not in panels_data:
+            logging.error("Cannot plot Final Figure 6: Missing subseasonal panels data.")
+            return
+
+        years = panels_data['years']
+        spatial_diffs = panels_data.get('spatial_diffs', {})
+        cdd_dur_dist = panels_data.get('cdd_dur_dist', {})
+        pr_intensity_dist = panels_data.get('pr_intensity_dist', {})
+
+        import cartopy.crs as ccrs
+        import cartopy.feature as cfeature
+        import cartopy.io.shapereader as shpreader
+        import matplotlib.colors as mcolors
+        import matplotlib.patches as mpatches
+        from matplotlib.cm import ScalarMappable
+        import matplotlib.gridspec as gridspec
+        import scipy.stats as stats
+        import shapely.ops
+
+        fig = plt.figure(figsize=(14, 33))
+        gs = gridspec.GridSpec(8, 2, figure=fig, hspace=0.42, wspace=0.20)
+
+        high_color = '#d62728' # Crimson Red
+        low_color  = '#1f77b4' # Navy / Steel Blue
+
+        # Helper for time series subplots
+        def _plot_ts(ax, key, title, ylabel, unit_str, is_bottom_ts=False, y_text_pos=0.95):
+            data = panels_data.get(key, {})
+            if not data or data.get('high_mmm') is None or data.get('low_mmm') is None:
+                ax.text(0.5, 0.5, "Data Unavailable", ha='center', va='center')
+                ax.set_title(title, weight='bold', loc='left', fontsize=11)
+                return
+                
+            h_mmm = data['high_mmm'].values
+            h_min = data['high_min'].values
+            h_max = data['high_max'].values
+
+            l_mmm = data['low_mmm'].values
+            l_min = data['low_min'].values
+            l_max = data['low_max'].values
+
+            # 1. Shading 100% Model Spread
+            ax.fill_between(years, h_min, h_max, color=high_color, alpha=0.15, linewidth=0, label='High-Freq. Spread')
+            ax.fill_between(years, l_min, l_max, color=low_color,  alpha=0.15, linewidth=0, label='Low-Freq. Spread')
+
+            # 2. Lines for MMM
+            ax.plot(years, h_mmm, color=high_color, linestyle='--', linewidth=2.0, label='High-Freq. Group (MMM)')
+            ax.plot(years, l_mmm, color=low_color,  linestyle='-',  linewidth=2.0, label='Low-Freq. Group (MMM)')
+
+            # 3. Calculate and Plot Linear Regression Trends
+            mask_h = np.isfinite(years) & np.isfinite(h_mmm)
+            mask_l = np.isfinite(years) & np.isfinite(l_mmm)
+
+            slope_h, inter_h, r_h, p_h, std_h = stats.linregress(years[mask_h], h_mmm[mask_h])
+            slope_l, inter_l, r_l, p_l, std_l = stats.linregress(years[mask_l], l_mmm[mask_l])
+
+            trend_h_line = inter_h + slope_h * years
+            trend_l_line = inter_l + slope_l * years
+
+            ax.plot(years, trend_h_line, color=high_color, linestyle=':', linewidth=1.5)
+            ax.plot(years, trend_l_line, color=low_color,  linestyle=':', linewidth=1.5)
+
+            slope_h_dec = slope_h * 10.0
+            slope_l_dec = slope_l * 10.0
+
+            p_h_str = f"{p_h:.3f}" if p_h >= 0.001 else "< 0.001"
+            p_l_str = f"{p_l:.3f}" if p_l >= 0.001 else "< 0.001"
+
+            trend_box_text = (
+                f"High-Freq. Trend: {slope_h_dec:+.2f} {unit_str}/dec (p = {p_h_str})\n"
+                f"Low-Freq. Trend:  {slope_l_dec:+.2f} {unit_str}/dec (p = {p_l_str})"
+            )
+
+            ax.text(0.03, y_text_pos, trend_box_text, transform=ax.transAxes,
+                    fontsize=9.0, verticalalignment='top',
+                    bbox=dict(boxstyle='round,pad=0.4', facecolor='white', alpha=0.85, edgecolor='gray', linewidth=0.5))
+
+            ax.set_title(title, weight='bold', fontsize=11, loc='left')
+            ax.set_ylabel(ylabel, fontsize=10)
+            ax.grid(True, linestyle='--', alpha=0.5)
+            ax.set_xlim(2015, 2100)
+            if is_bottom_ts:
+                ax.set_xlabel('Year', fontsize=10)
+
+        # Helper for duration distribution subplots
+        def _plot_dur_dist(ax, season_key, title):
+            if not cdd_dur_dist or 'durations' not in cdd_dur_dist:
+                ax.text(0.5, 0.5, "Data Unavailable", ha='center', va='center')
+                ax.set_title(title, weight='bold', loc='left', fontsize=11)
+                return
+            
+            durs = cdd_dur_dist['durations']
+            high_data = cdd_dur_dist.get(f"{season_key}_high", {})
+            low_data  = cdd_dur_dist.get(f"{season_key}_low", {})
+
+            if not high_data or not low_data:
+                ax.text(0.5, 0.5, "Data Unavailable", ha='center', va='center')
+                ax.set_title(title, weight='bold', loc='left', fontsize=11)
+                return
+
+            h_mmm = high_data['mmm']
+            h_min = high_data['min']
+            h_max = high_data['max']
+
+            l_mmm = low_data['mmm']
+            l_min = low_data['min']
+            l_max = low_data['max']
+
+            ax.fill_between(durs, h_min, h_max, color=high_color, alpha=0.15, linewidth=0, label='High-Freq. Spread')
+            ax.fill_between(durs, l_min, l_max, color=low_color,  alpha=0.15, linewidth=0, label='Low-Freq. Spread')
+
+            ax.plot(durs, h_mmm, color=high_color, linestyle='--', linewidth=2.0, marker='o', markersize=3, label='High-Freq. Group (MMM)')
+            ax.plot(durs, l_mmm, color=low_color,  linestyle='-',  linewidth=2.0, marker='s', markersize=3, label='Low-Freq. Group (MMM)')
+
+            ax.set_title(title, weight='bold', fontsize=11, loc='left')
+            ax.set_xlabel('CDD Duration [days]', fontsize=10)
+            ax.set_ylabel('Total Events (31-yr Window)', fontsize=10)
+            ax.grid(True, linestyle='--', alpha=0.5)
+            ax.set_xlim(9.5, 35.5)
+            ax.set_xticks(range(10, 36, 5))
+            ax.set_xticklabels(['10', '15', '20', '25', '30', '35+'])
+
+        # Helper for PR intensity distribution subplots
+        def _plot_pr_dist(ax, season_key, title):
+            if not pr_intensity_dist or 'bin_centers' not in pr_intensity_dist:
+                ax.text(0.5, 0.5, "Data Unavailable", ha='center', va='center')
+                ax.set_title(title, weight='bold', loc='left', fontsize=11)
+                return
+            
+            centers = pr_intensity_dist['bin_centers']
+            high_data = pr_intensity_dist.get(f"{season_key}_high", {})
+            low_data  = pr_intensity_dist.get(f"{season_key}_low", {})
+
+            if not high_data or not low_data:
+                ax.text(0.5, 0.5, "Data Unavailable", ha='center', va='center')
+                ax.set_title(title, weight='bold', loc='left', fontsize=11)
+                return
+
+            h_mmm = high_data['mmm']
+            h_min = high_data['min']
+            h_max = high_data['max']
+
+            l_mmm = low_data['mmm']
+            l_min = low_data['min']
+            l_max = low_data['max']
+
+            ax.fill_between(centers, h_min, h_max, color=high_color, alpha=0.15, linewidth=0, label='High-Freq. Spread')
+            ax.fill_between(centers, l_min, l_max, color=low_color,  alpha=0.15, linewidth=0, label='Low-Freq. Spread')
+
+            ax.plot(centers, h_mmm, color=high_color, linestyle='--', linewidth=2.0, marker='o', markersize=3, label='High-Freq. Group (MMM)')
+            ax.plot(centers, l_mmm, color=low_color,  linestyle='-',  linewidth=2.0, marker='s', markersize=3, label='Low-Freq. Group (MMM)')
+
+            ax.set_title(title, weight='bold', fontsize=11, loc='left')
+            ax.set_xlabel('Precipitation Intensity [mm/day]', fontsize=10)
+            ax.set_ylabel('Total Wet Days (31-yr Window)', fontsize=10)
+            ax.grid(True, linestyle='--', alpha=0.5)
+            ax.set_xlim(1, 25)
+            ax.set_xticks(range(1, 26, 4))
+            ax.set_xticklabels(['1', '5', '9', '13', '17', '21', '25+'])
+
+        # Helper for spatial difference maps (Catchment-specific polygons matching Danube hydro-units)
+        shapefile_path = '/nas/home/vlw/Desktop/STREAM/hydro-units-files/zones.shp'
+        shape_crs = ccrs.LambertAzimuthalEqualArea(central_longitude=20.0, central_latitude=55.0, globe=ccrs.Globe(semimajor_axis=6370997.0, semiminor_axis=6370997.0))
+        buf = 5.0
+        ex = [config.BOX_LON_MIN - buf, config.BOX_LON_MAX + buf, config.BOX_LAT_MIN - buf, config.BOX_LAT_MAX + buf]
+
+        def _plot_spatial_map(ax, diff_array, title, cmap, norm):
+            ax.set_extent(ex, crs=ccrs.PlateCarree())
+            ax.add_feature(cfeature.COASTLINE, linewidth=0.5, edgecolor='black', zorder=5)
+            ax.add_feature(cfeature.BORDERS, linewidth=0.5, edgecolor='black', zorder=5)
+            ax.add_patch(mpatches.Rectangle((config.BOX_LON_MIN, config.BOX_LAT_MIN),
+                                           config.BOX_LON_MAX-config.BOX_LON_MIN, config.BOX_LAT_MAX-config.BOX_LAT_MIN,
+                                           fill=False, edgecolor='magenta', linewidth=1.5, linestyle='--',
+                                           transform=ccrs.PlateCarree(), zorder=10))
+
+            if diff_array is not None and len(diff_array) == 61:
+                try:
+                    import pyproj
+                    from shapely.ops import transform as shapely_transform
+                    reader = shpreader.Reader(shapefile_path)
+                    geometries = list(reader.geometries())
+                    
+                    proj_laea = pyproj.CRS.from_proj4('+proj=laea +lat_0=55 +lon_0=20 +x_0=0 +y_0=0 +a=6370997 +b=6370997 +units=m +no_defs')
+                    proj_wgs84 = pyproj.CRS.from_epsg(4326)
+                    transformer = pyproj.Transformer.from_crs(proj_laea, proj_wgs84, always_xy=True)
+                    
+                    # 1. Reproject 61 catchment geometries to WGS84 Lat/Lon
+                    geoms_wgs84 = [shapely_transform(transformer.transform, g) for g in geometries]
+                    
+                    # 2. Color each catchment polygon with its zone difference value
+                    for g_wgs84, val in zip(geoms_wgs84, diff_array):
+                        if np.isfinite(val):
+                            color = cmap(norm(val))
+                            ax.add_geometries([g_wgs84], crs=ccrs.PlateCarree(), facecolor=color, edgecolor='grey', linewidth=0.2, zorder=4)
+                    
+                    # 3. Overlay Danube basin boundary outline
+                    merged_geom = shapely.ops.unary_union(geometries)
+                    ax.add_geometries([merged_geom], crs=shape_crs, edgecolor='black', facecolor='none', linewidth=1.2, zorder=6)
+                except Exception as e:
+                    logging.warning(f"Could not plot catchment spatial map: {e}")
+            
+            ax.set_title(title, weight='bold', fontsize=11, loc='left')
+
+        # --- ROW 0: CDD Time Series ---
+        ax_a = fig.add_subplot(gs[0, 0])
+        _plot_ts(ax_a, 'summer_cdd', '(a) Summer CDD Trend (May–Oct)', 'CDD [days]', 'days', y_text_pos=0.95)
+
+        ax_b = fig.add_subplot(gs[0, 1])
+        _plot_ts(ax_b, 'winter_cdd', '(b) Winter CDD Trend (Nov–Apr)', 'CDD [days]', 'days', y_text_pos=0.95)
+
+        # --- ROW 1: CDD Spatial Difference Maps ---
+        d_cdd_s = spatial_diffs.get('summer_cdd_diff')
+        d_cdd_w = spatial_diffs.get('winter_cdd_diff')
+
+        d_lim_cdd = 6.0
+        cmap_cdd = plt.get_cmap('BrBG', 10)
+        levs_cdd = np.linspace(-d_lim_cdd, d_lim_cdd, 11)
+        norm_cdd = mcolors.BoundaryNorm(levs_cdd, ncolors=cmap_cdd.N, clip=False)
+
+        ax_c = fig.add_subplot(gs[1, 0], projection=ccrs.PlateCarree())
+        _plot_spatial_map(ax_c, d_cdd_s, '(c) Summer CDD Difference (High - Low)', cmap_cdd, norm_cdd)
+
+        ax_d = fig.add_subplot(gs[1, 1], projection=ccrs.PlateCarree())
+        _plot_spatial_map(ax_d, d_cdd_w, '(d) Winter CDD Difference (High - Low)', cmap_cdd, norm_cdd)
+
+        # --- ROW 2: CDD Event Duration Spectrum (GWL 3.0°C Window) ---
+        ax_e = fig.add_subplot(gs[2, 0])
+        _plot_dur_dist(ax_e, 'summer', '(e) Summer CDD Event Frequency by Duration (GWL 3.0°C)')
+
+        ax_f = fig.add_subplot(gs[2, 1])
+        _plot_dur_dist(ax_f, 'winter', '(f) Winter CDD Event Frequency by Duration (GWL 3.0°C)')
+
+        # --- ROW 3: CDD (≥10d) Temperature Time Series ---
+        ax_g = fig.add_subplot(gs[3, 0])
+        _plot_ts(ax_g, 'summer_cdd_tas', '(g) Summer Dry-Spell (CDD ≥10d) Temp Trend', 'CDD Temp [°C]', '°C', y_text_pos=0.95)
+
+        ax_h = fig.add_subplot(gs[3, 1])
+        _plot_ts(ax_h, 'winter_cdd_tas', '(h) Winter Dry-Spell (CDD ≥10d) Temp Trend', 'CDD Temp [°C]', '°C', y_text_pos=0.95)
+
+        # --- ROW 4: CDD (≥10d) Temperature Spatial Difference Maps ---
+        d_cdd_tas_s = spatial_diffs.get('summer_cdd_tas_diff')
+        d_cdd_tas_w = spatial_diffs.get('winter_cdd_tas_diff')
+
+        d_lim_cdd_tas = 1.5
+        cmap_cdd_tas = plt.get_cmap('RdBu_r', 10)
+        levs_cdd_tas = np.linspace(-d_lim_cdd_tas, d_lim_cdd_tas, 11)
+        norm_cdd_tas = mcolors.BoundaryNorm(levs_cdd_tas, ncolors=cmap_cdd_tas.N, clip=False)
+
+        ax_i = fig.add_subplot(gs[4, 0], projection=ccrs.PlateCarree())
+        _plot_spatial_map(ax_i, d_cdd_tas_s, '(i) Summer Dry-Spell Temp Difference', cmap_cdd_tas, norm_cdd_tas)
+
+        ax_j = fig.add_subplot(gs[4, 1], projection=ccrs.PlateCarree())
+        _plot_spatial_map(ax_j, d_cdd_tas_w, '(j) Winter Dry-Spell Temp Difference', cmap_cdd_tas, norm_cdd_tas)
+
+        # --- ROW 5: Wet-Day Temperature Time Series ---
+        ax_k = fig.add_subplot(gs[5, 0])
+        _plot_ts(ax_k, 'summer_wet_tas', '(k) Summer Wet-Day Temp Trend (May–Oct)', 'Wet-Day Temp [°C]', '°C', y_text_pos=0.95)
+
+        ax_l = fig.add_subplot(gs[5, 1])
+        _plot_ts(ax_l, 'winter_wet_tas', '(l) Winter Wet-Day Temp Trend (Nov–Apr)', 'Wet-Day Temp [°C]', '°C', y_text_pos=0.95)
+
+        # --- ROW 6: Wet-Day Temperature Spatial Difference Maps ---
+        d_wet_s = spatial_diffs.get('summer_wet_tas_diff')
+        d_wet_w = spatial_diffs.get('winter_wet_tas_diff')
+
+        d_lim_wet = 1.2
+        cmap_wet = plt.get_cmap('RdBu_r', 10)
+        levs_wet = np.linspace(-d_lim_wet, d_lim_wet, 11)
+        norm_wet = mcolors.BoundaryNorm(levs_wet, ncolors=cmap_wet.N, clip=False)
+
+        ax_m = fig.add_subplot(gs[6, 0], projection=ccrs.PlateCarree())
+        _plot_spatial_map(ax_m, d_wet_s, '(m) Summer Wet-Day Temp Difference', cmap_wet, norm_wet)
+
+        ax_n = fig.add_subplot(gs[6, 1], projection=ccrs.PlateCarree())
+        _plot_spatial_map(ax_n, d_wet_w, '(n) Winter Wet-Day Temp Difference', cmap_wet, norm_wet)
+
+        # --- ROW 7: Wet-Day Precipitation Intensity Spectrum (GWL 3.0°C Window) ---
+        ax_o = fig.add_subplot(gs[7, 0])
+        _plot_pr_dist(ax_o, 'summer', '(o) Summer Wet-Day PR Intensity Spectrum (GWL 3.0°C)')
+
+        ax_p = fig.add_subplot(gs[7, 1])
+        _plot_pr_dist(ax_p, 'winter', '(p) Winter Wet-Day PR Intensity Spectrum (GWL 3.0°C)')
+
+        # Shared Legend for Time Series (High-Freq vs Low-Freq)
+        handles, labels = ax_a.get_legend_handles_labels()
+        fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.005), ncol=4, frameon=True, fontsize=10)
+
+        # Main Title
+        scenario_str = Visualizer._format_scenario_title(scenario)
+        plt.suptitle(f'Sub-seasonal Drivers (CDD, CDD Duration, Wet-Day Temp & PR Intensity) Comparison: High- vs. Low-Frequency Model Groups\n(Danube Catchment, {scenario_str}, GWL {target_gwl:.1f}°C)',
+                     fontsize=14, weight='bold', y=0.993)
+
+        fig.tight_layout(rect=(0, 0.02, 1, 0.98), h_pad=1.4, w_pad=1.0)
+
+        # Add horizontal colorbars below Row 1 (CDD Maps), Row 4 (CDD Temp Maps), and Row 6 (Wet-Day Temp Maps)
+        pos_c = ax_c.get_position()
+        cb_ax_cdd = fig.add_axes((0.18, pos_c.y0 - 0.015, 0.64, 0.006))
+        fig.colorbar(ScalarMappable(norm=norm_cdd, cmap=cmap_cdd), cax=cb_ax_cdd, orientation='horizontal',
+                     label='CDD Difference [days] (High-Freq. minus Low-Freq.)', extend='both')
+
+        pos_i = ax_i.get_position()
+        cb_ax_cdd_tas = fig.add_axes((0.18, pos_i.y0 - 0.015, 0.64, 0.006))
+        fig.colorbar(ScalarMappable(norm=norm_cdd_tas, cmap=cmap_cdd_tas), cax=cb_ax_cdd_tas, orientation='horizontal',
+                     label='Dry-Spell (CDD ≥10d) Temp. Difference [°C] (High-Freq. minus Low-Freq.)', extend='both')
+
+        pos_m = ax_m.get_position()
+        cb_ax_wet = fig.add_axes((0.18, pos_m.y0 - 0.015, 0.64, 0.006))
+        fig.colorbar(ScalarMappable(norm=norm_wet, cmap=cmap_wet), cax=cb_ax_wet, orientation='horizontal',
+                     label='Wet-Day Temp. Difference [°C] (High-Freq. minus Low-Freq.)', extend='both')
+
+        # Add section titles above each row
+        nudge = 0.008
+        fig.text(ax_a.get_position().x0, ax_a.get_position().y1 + nudge, "Danube Basin Consecutive Dry Days (CDD) Trend (2015–2099)", ha='left', va='bottom', fontsize=11, weight='bold')
+        fig.text(ax_c.get_position().x0, ax_c.get_position().y1 + nudge, f"CDD Spatial Difference at GWL {target_gwl:.1f}°C (High-Freq. minus Low-Freq.)", ha='left', va='bottom', fontsize=11, weight='bold')
+        fig.text(ax_e.get_position().x0, ax_e.get_position().y1 + nudge, f"CDD Event Duration Spectrum at GWL {target_gwl:.1f}°C (High-Freq. vs Low-Freq.)", ha='left', va='bottom', fontsize=11, weight='bold')
+        fig.text(ax_g.get_position().x0, ax_g.get_position().y1 + nudge, "Danube Basin Dry-Spell (CDD ≥10d) Temperature Trend (2015–2099)", ha='left', va='bottom', fontsize=11, weight='bold')
+        fig.text(ax_i.get_position().x0, ax_i.get_position().y1 + nudge, f"Dry-Spell (CDD ≥10d) Temp Spatial Difference at GWL {target_gwl:.1f}°C (High-Freq. minus Low-Freq.)", ha='left', va='bottom', fontsize=11, weight='bold')
+        fig.text(ax_k.get_position().x0, ax_k.get_position().y1 + nudge, "Danube Basin Wet-Day Temperature Trend (2015–2099)", ha='left', va='bottom', fontsize=11, weight='bold')
+        fig.text(ax_m.get_position().x0, ax_m.get_position().y1 + nudge, f"Wet-Day Temperature Spatial Difference at GWL {target_gwl:.1f}°C (High-Freq. minus Low-Freq.)", ha='left', va='bottom', fontsize=11, weight='bold')
+        fig.text(ax_o.get_position().x0, ax_o.get_position().y1 + nudge, f"Wet-Day Precipitation Intensity Spectrum at GWL {target_gwl:.1f}°C (High-Freq. vs Low-Freq.)", ha='left', va='bottom', fontsize=11, weight='bold')
+
+        plt.savefig(filepath_png, dpi=300, bbox_inches='tight')
+        plt.savefig(filepath_pdf, bbox_inches='tight')
+        plt.close(fig)
+        logging.info(f"Successfully generated 16-Panel Final Figure 6: {filepath_png} and {filepath_pdf}")
+
+    @staticmethod
+    def plot_final_figure_7_summer_winter_lowflow_clustering(cmip6_results, config, scenario='ssp585', target_gwl=3.0, return_period_results=None):
+        """
+        Creates Final Figure 7: Timeline Analysis of Summer (Red) vs. Winter (Blue) 30Q10 Low-Flow Events
+        across a 31-Year Window around GWL (+3.0°C) per CMIP6 Model, presented in 2 Subplots:
+          Subplot 1 (Top): Grouped by Summer Model Group Assignment (JJA 30Q10_low Extreme vs Non-Extreme)
+          Subplot 2 (Bottom): Grouped by Winter Model Group Assignment (DJF 30Q10_low Extreme vs Non-Extreme)
+        """
+        filename_png = "final_figure_7_summer_winter_lowflow_clustering.png"
+        filename_pdf = "final_figure_7_summer_winter_lowflow_clustering.pdf"
+        filepath_png = os.path.join(config.PLOT_DIR, filename_png)
+        filepath_pdf = os.path.join(config.PLOT_DIR, filename_pdf)
+        
+        logging.info(f"Plotting 2-Subplot Final Figure 7 to {filepath_png}...")
+        Visualizer.ensure_plot_dir_exists()
+        
+        if not cmip6_results:
+            logging.error("Cannot plot Final Figure 7: Missing cmip6_results.")
+            return
+
+        metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
+        gwl_years_dict = cmip6_results.get('gwl_threshold_years', cmip6_results.get('gwl_years', {}))
+
+        if not metric_timeseries:
+            logging.error("Cannot plot Final Figure 7: Missing model_metric_timeseries.")
+            return
+
+        # 1. Extract Summer & Winter Extreme/Non-Extreme model lists matching Figure 2
+        ext_w, non_w, ext_s, non_s = [], [], [], []
+
+        if return_period_results and 'data' in return_period_results and target_gwl in return_period_results['data']:
+            try:
+                gwl_node = return_period_results['data'][target_gwl]
+                ext_w = gwl_node.get('winter', {}).get('Extreme Models', {}).get('30Q10_low', {}).get('future_keys_all_models', [])
+                non_w = gwl_node.get('winter', {}).get('Non-Extreme Models', {}).get('30Q10_low', {}).get('future_keys_all_models', [])
+                ext_s = gwl_node.get('summer', {}).get('Extreme Models', {}).get('30Q10_low', {}).get('future_keys_all_models', [])
+                non_s = gwl_node.get('summer', {}).get('Non-Extreme Models', {}).get('30Q10_low', {}).get('future_keys_all_models', [])
+            except Exception:
+                pass
+
+        if not ext_w or not non_w or not ext_s or not non_s:
+            try:
+                from storyline import StorylineAnalyzer
+                analyzer = StorylineAnalyzer(config)
+                ext_w_calc, non_w_calc, _ = analyzer.get_composite_extreme_models(cmip6_results, target_gwl, '30Q10_low', 'Winter')
+                ext_s_calc, non_s_calc, _ = analyzer.get_composite_extreme_models(cmip6_results, target_gwl, '30Q10_low', 'Summer')
+                if ext_w_calc: ext_w = ext_w_calc
+                if non_w_calc: non_w = non_w_calc
+                if ext_s_calc: ext_s = ext_s_calc
+                if non_s_calc: non_s = non_s_calc
+            except Exception as e:
+                logging.warning(f"Could not calculate composite extreme models: {e}")
+
+        def is_match(m_key, clean_name, target_list):
+            if not target_list: return False
+            return (m_key in target_list) or (clean_name in target_list) or any(
+                m_key.startswith(x) or x.startswith(clean_name) or clean_name.startswith(x.split('_')[0])
+                for x in target_list
+            )
+
+        # Identify all model keys for the requested scenario
+        model_keys = sorted([k for k in metric_timeseries.keys() if k.endswith(scenario)])
+        if not model_keys:
+            model_keys = sorted(list(metric_timeseries.keys()))
+
+        base_model_records = []
+
+        for m_key in model_keys:
+            ts_dict = metric_timeseries.get(m_key, {})
+            ts_summer = ts_dict.get('30Q_low_summer')
+            ts_winter = ts_dict.get('30Q_low_winter')
+            ts_annual = ts_dict.get('30Q_low_full_year')
+
+            if ts_summer is None or ts_winter is None or ts_annual is None:
+                continue
+
+            clean_name = m_key.replace(f"_{scenario}", "")
+
+            # Historical 30Q10 threshold (1960 - 2014)
+            try:
+                hist_slice = ts_annual.sel(year=slice(1960, 2014))
+                if hist_slice.year.size < 10:
+                    hist_slice = ts_annual.where(ts_annual.year < 2015, drop=True)
+            except Exception:
+                hist_slice = ts_annual.where(ts_annual.year < 2015, drop=True)
+
+            hist_vals = hist_slice.values
+            hist_vals = hist_vals[np.isfinite(hist_vals)]
+            if len(hist_vals) < 10:
+                continue
+
+            thresh_30q10 = np.quantile(hist_vals, 0.10)
+
+            # Determine GWL year
+            gwl_yr = None
+            m_info = gwl_years_dict.get(m_key) or gwl_years_dict.get(clean_name)
+            if isinstance(m_info, dict):
+                gwl_yr = m_info.get(target_gwl)
+            elif isinstance(m_info, (int, float, np.integer)):
+                gwl_yr = m_info
+
+            if gwl_yr is None or not np.isfinite(gwl_yr):
+                continue
+
+            gwl_yr = int(gwl_yr)
+            window_half = config.GWL_YEARS_WINDOW // 2 if hasattr(config, 'GWL_YEARS_WINDOW') else 15
+            rel_years = np.arange(-window_half, window_half + 1)
+            cal_years = gwl_yr + rel_years
+
+            summer_rel = []
+            winter_rel = []
+            same_year_cooccur_rel = []
+            preceded_winter_rel = []
+
+            for ry, cy in zip(rel_years, cal_years):
+                is_s = False
+                is_w = False
+                is_s_prev = False
+
+                if cy in ts_summer.year.values:
+                    v_s = ts_summer.sel(year=cy).item()
+                    if np.isfinite(v_s) and v_s < thresh_30q10:
+                        is_s = True
+
+                if cy in ts_winter.year.values:
+                    v_w = ts_winter.sel(year=cy).item()
+                    if np.isfinite(v_w) and v_w < thresh_30q10:
+                        is_w = True
+
+                if (cy - 1) in ts_summer.year.values:
+                    v_sp = ts_summer.sel(year=cy-1).item()
+                    if np.isfinite(v_sp) and v_sp < thresh_30q10:
+                        is_s_prev = True
+
+                if is_s:
+                    summer_rel.append(ry)
+                if is_w:
+                    winter_rel.append(ry)
+                if is_s and is_w:
+                    same_year_cooccur_rel.append(ry)
+                if is_w and (is_s or is_s_prev):
+                    preceded_winter_rel.append(ry)
+
+            # Classifications
+            is_high_s = is_match(m_key, clean_name, ext_s)
+            is_low_s  = is_match(m_key, clean_name, non_s)
+            group_s   = 'High-Freq.' if is_high_s else ('Low-Freq.' if is_low_s else 'Other')
+
+            is_high_w = is_match(m_key, clean_name, ext_w)
+            is_low_w  = is_match(m_key, clean_name, non_w)
+            group_w   = 'High-Freq.' if is_high_w else ('Low-Freq.' if is_low_w else 'Other')
+
+            base_model_records.append({
+                'key': m_key,
+                'name': clean_name,
+                'group_s': group_s,
+                'group_w': group_w,
+                'gwl_year': gwl_yr,
+                'thresh_30q10': thresh_30q10,
+                'rel_years': rel_years,
+                'summer_rel': summer_rel,
+                'winter_rel': winter_rel,
+                'same_year_cooccur_rel': same_year_cooccur_rel,
+                'preceded_winter_rel': preceded_winter_rel,
+                'n_summer': len(summer_rel),
+                'n_winter': len(winter_rel),
+                'n_preceded_winter': len(preceded_winter_rel)
+            })
+
+        if not base_model_records:
+            logging.error("Cannot plot Final Figure 7: No valid model records found.")
+            return
+
+        import matplotlib.gridspec as gridspec
+        import matplotlib.patches as mpatches
+
+        n_models = len(base_model_records)
+
+        # Set up 2-row layout (Row 1: Summer Grouping, Row 2: Winter Grouping)
+        fig = plt.figure(figsize=(17, max(18, 0.46 * n_models * 2 + 4.5)))
+        gs_outer = gridspec.GridSpec(2, 1, figure=fig, hspace=0.20)
+
+        red_color = '#d62728'   # Summer
+        blue_color = '#1f77b4'  # Winter
+        gold_color = '#ff7f0e'  # Co-occurrence highlight
+
+        high_grp_color = '#b2182b' # Dark Crimson for High-Freq label
+        low_grp_color  = '#2166ac' # Dark Blue for Low-Freq label
+        mod_grp_color  = '#4d4d4d' # Charcoal for Moderate label
+
+        # Helper function to plot a single subplot section (Row)
+        def _plot_section(gs_spec, season_mode, section_title, panel_letters):
+            grp_key = 'group_s' if season_mode == 'summer' else 'group_w'
+            
+            high_group = [r for r in base_model_records if r[grp_key] == 'High-Freq.']
+            low_group  = [r for r in base_model_records if r[grp_key] == 'Low-Freq.']
+            mod_group  = [r for r in base_model_records if r[grp_key] == 'Other']
+
+            high_group.sort(key=lambda x: (x['n_winter'], x['n_summer']), reverse=True)
+            low_group.sort(key=lambda x: (x['n_winter'], x['n_summer']), reverse=True)
+            mod_group.sort(key=lambda x: (x['n_winter'], x['n_summer']), reverse=True)
+
+            ordered_records = []
+            if high_group: ordered_records.extend(high_group)
+            if mod_group: ordered_records.extend(mod_group)
+            if low_group: ordered_records.extend(low_group)
+
+            display_records = list(reversed(ordered_records))
+            n_display = len(display_records)
+
+            gs_inner = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=gs_spec, width_ratios=[3.8, 1.2], wspace=0.15)
+            ax_main = fig.add_subplot(gs_inner[0, 0])
+            ax_stat = fig.add_subplot(gs_inner[0, 1], sharey=ax_main)
+
+            y_labels = []
+            y_label_colors = []
+
+            for i, rec in enumerate(display_records):
+                y_pos = i
+                grp = rec[grp_key]
+                
+                line_color = '#e0e0e0' if grp == 'Other' else ('#fccde5' if grp == 'High-Freq.' else '#d9d9d9')
+                ax_main.plot([-15, 15], [y_pos, y_pos], color=line_color, linestyle='-', linewidth=2.5, zorder=1)
+                
+                s_set = set(rec['summer_rel'])
+                w_set = set(rec['winter_rel'])
+                co_set = set(rec['same_year_cooccur_rel'])
+
+                for ry in rec['rel_years']:
+                    in_s = ry in s_set
+                    in_w = ry in w_set
+                    in_co = ry in co_set
+
+                    if in_co:
+                        ax_main.plot([ry - 0.18, ry + 0.18], [y_pos, y_pos], color=gold_color, linewidth=4.5, alpha=0.9, zorder=2)
+                        ax_main.scatter(ry - 0.18, y_pos, color=red_color, s=65, marker='o', zorder=4, edgecolor='darkred', linewidth=0.6)
+                        ax_main.scatter(ry + 0.18, y_pos, color=blue_color, s=65, marker='o', zorder=4, edgecolor='darkblue', linewidth=0.6)
+                    else:
+                        if in_s:
+                            ax_main.scatter(ry - 0.12, y_pos, color=red_color, s=55, marker='o', zorder=3, edgecolor='darkred', linewidth=0.5)
+                        if in_w:
+                            ax_main.scatter(ry + 0.12, y_pos, color=blue_color, s=55, marker='o', zorder=3, edgecolor='darkblue', linewidth=0.5)
+
+                grp_tag = "High-Freq." if grp == "High-Freq." else ("Low-Freq." if grp == "Low-Freq." else "Other")
+                y_labels.append(f"{rec['name']} ({rec['gwl_year']})  [{grp_tag}]")
+                
+                if grp == "High-Freq.":
+                    y_label_colors.append(high_grp_color)
+                elif grp == "Low-Freq.":
+                    y_label_colors.append(low_grp_color)
+                else:
+                    y_label_colors.append(mod_grp_color)
+
+            # Division lines
+            for idx in range(1, n_display):
+                if display_records[idx][grp_key] != display_records[idx-1][grp_key]:
+                    sep_y = idx - 0.5
+                    ax_main.axhline(sep_y, color='black', linestyle='--', linewidth=1.2, zorder=5)
+                    ax_stat.axhline(sep_y, color='black', linestyle='--', linewidth=1.2, zorder=5)
+
+            ax_main.axvline(0, color='gray', linestyle='--', linewidth=1.5, zorder=2)
+
+            ax_main.set_xlim(-16, 16)
+            ax_main.set_xticks(np.arange(-15, 16, 5))
+            ax_main.set_xticklabels([f"{x:+d}" if x != 0 else "0 (GWL)" for x in np.arange(-15, 16, 5)], fontsize=10, weight='bold')
+            ax_main.set_xlabel("Years Relative to GWL +3.0°C Central Year", fontsize=10.5, weight='bold')
+            
+            ax_main.set_yticks(np.arange(n_display))
+            ax_main.set_yticklabels(y_labels, fontsize=8.5)
+            
+            for tick_label, color in zip(ax_main.get_yticklabels(), y_label_colors):
+                tick_label.set_color(color)
+                tick_label.set_fontweight('bold')
+
+            ax_main.set_ylim(-0.8, n_display - 0.2)
+            ax_main.grid(True, axis='x', linestyle=':', alpha=0.6)
+            ax_main.set_title(f"({panel_letters[0]}) {section_title} - 31-Year Timelines", fontsize=11, weight='bold', loc='left')
+
+            # Bar Chart
+            y_positions = np.arange(n_display)
+            total_w = [r['n_winter'] for r in display_records]
+            preceded_w = [r['n_preceded_winter'] for r in display_records]
+            independent_w = [tw - pw for tw, pw in zip(total_w, preceded_w)]
+
+            ax_stat.barh(y_positions, preceded_w, color=gold_color, edgecolor='darkorange', height=0.55, zorder=3)
+            ax_stat.barh(y_positions, independent_w, left=preceded_w, color=blue_color, edgecolor='darkblue', height=0.55, zorder=3)
+
+            # Annotate each model bar with percentage
+            max_w = max(total_w) if total_w else 1
+            model_pcts = []
+            for i, (tw, pw) in enumerate(zip(total_w, preceded_w)):
+                if tw > 0:
+                    pct_val = (pw / tw) * 100
+                    model_pcts.append(pct_val)
+                    txt = f"{pct_val:.0f}%"
+                    ax_stat.text(tw + 0.15, i, txt, va='center', ha='left', fontsize=8.0, weight='bold', color='#d95f02' if pw > 0 else '#555555')
+                else:
+                    ax_stat.text(0.15, i, "0%", va='center', ha='left', fontsize=8.0, color='gray')
+
+            sec_tot = sum(total_w)
+            sec_pre = sum(preceded_w)
+            sec_pct = (sec_pre / sec_tot * 100) if sec_tot > 0 else 0
+            mean_model_pct = np.mean(model_pcts) if model_pcts else 0
+
+            # Section Group Stats
+            h_recs = [r for r in display_records if r[grp_key] == 'High-Freq.']
+            l_recs = [r for r in display_records if r[grp_key] == 'Low-Freq.']
+
+            h_w_tot, h_w_pre = sum(r['n_winter'] for r in h_recs), sum(r['n_preceded_winter'] for r in h_recs)
+            h_pct = (h_w_pre / h_w_tot * 100) if h_w_tot > 0 else 0
+
+            l_w_tot, l_w_pre = sum(r['n_winter'] for r in l_recs), sum(r['n_preceded_winter'] for r in l_recs)
+            l_pct = (l_w_pre / l_w_tot * 100) if l_w_tot > 0 else 0
+
+            ax_stat.set_xlabel("Winter 30Q10 Event Count", fontsize=10.5, weight='bold')
+            ax_stat.set_title(f"({panel_letters[1]}) Driver Breakdown (High-Freq: {h_pct:.1f}%  |  Low-Freq: {l_pct:.1f}%)", fontsize=10.0, weight='bold', loc='left')
+            ax_stat.grid(True, axis='x', linestyle=':', alpha=0.6)
+            ax_stat.set_xlim(0, max(max_w + 2.2, 5.0))
+            ax_stat.set_ylim(-0.8, n_display - 0.2)
+            plt.setp(ax_stat.get_yticklabels(), visible=False)
+
+            return h_w_pre, h_w_tot, h_pct, l_w_pre, l_w_tot, l_pct, sec_pre, sec_tot, sec_pct, mean_model_pct
+
+        # Plot Subplot 1 (Top): Summer Grouping
+        h_pre_s, h_tot_s, h_pct_s, l_pre_s, l_tot_s, l_pct_s, sec_pre_s, sec_tot_s, sec_pct_s, mean_m_pct_s = _plot_section(
+            gs_outer[0], 'summer', 'Subplot 1: Grouped by Summer Model Group Assignment (JJA 30Q10)', ['a1', 'a2']
+        )
+
+        # Plot Subplot 2 (Bottom): Winter Grouping
+        h_pre_w, h_tot_w, h_pct_w, l_pre_w, l_tot_w, l_pct_w, sec_pre_w, sec_tot_w, sec_pct_w, mean_m_pct_w = _plot_section(
+            gs_outer[1], 'winter', 'Subplot 2: Grouped by Winter Model Group Assignment (DJF 30Q10)', ['b1', 'b2']
+        )
+
+        # Shared Legend
+        leg_red = plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=red_color, markeredgecolor='darkred', markersize=9, label='Summer 30Q10 Event')
+        leg_blue = plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=blue_color, markeredgecolor='darkblue', markersize=9, label='Winter 30Q10 Event')
+        leg_gold = mpatches.Patch(color=gold_color, label='Co-occurring / Summer-Preceded Event')
+        leg_high = mpatches.Patch(color=high_grp_color, label='High-Freq. Model Group')
+        leg_low = mpatches.Patch(color=low_grp_color, label='Low-Freq. Model Group')
+
+        fig.legend(handles=[leg_red, leg_blue, leg_gold, leg_high, leg_low], loc='lower center', bbox_to_anchor=(0.5, -0.012), ncol=5, frameon=True, fontsize=10.5)
+
+        # Overall Title
+        scenario_str = Visualizer._format_scenario_title(scenario)
+        plt.suptitle(f"Final Figure 7: Co-occurrence of Summer & Winter 30Q10 Low-Flow Events @ GWL +{target_gwl:.1f}°C ({scenario_str})\n"
+                     f"Summer Grouping: Overall Mean {sec_pct_s:.1f}% Winter Events Summer-Preceded (High-Freq {h_pct_s:.1f}%, Low-Freq {l_pct_s:.1f}%)  |  "
+                     f"Winter Grouping: Overall Mean {sec_pct_w:.1f}% Winter Events Summer-Preceded (High-Freq {h_pct_w:.1f}%, Low-Freq {l_pct_w:.1f}%)",
+                     fontsize=12.0, weight='bold', y=0.99)
+
+        fig.tight_layout(rect=(0, 0.03, 1, 0.97))
+
+        plt.savefig(filepath_png, dpi=300, bbox_inches='tight')
+        plt.savefig(filepath_pdf, bbox_inches='tight')
+
+        plt.close(fig)
+        logging.info(f"Successfully generated 2-Subplot Final Figure 7: {filepath_png} and {filepath_pdf}")
+
+
+
+
+
+
 

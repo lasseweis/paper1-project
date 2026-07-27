@@ -5535,3 +5535,466 @@ class StorylineAnalyzer:
             logging.warning(f"  PR: Could not compute all 4 composites (future+historical) for season {season}.")
                 
         return composites, (extreme_models, non_extreme_models), model_rps, len(all_models)
+
+    def calculate_subseasonal_metrics(self, cmip6_results, scenario='ssp585', target_gwl=3.0, event_key='30Q10_low', start_year=2015, end_year=2099):
+        """
+        Calculates sub-seasonal CDD and Wet-Day Temperature for High-Frequency (n=10) and
+        Low-Frequency (n=10) model groups for Summer (May-Oct) and Winter (Nov-Apr) over 2015-2099.
+        
+        Returns dict with timeseries data for plotting.
+        """
+        logging.info(f"Calculating subseasonal metrics (CDD & Wet-Day Temp) for {scenario} at GWL {target_gwl}°C (2015-{end_year})...")
+        
+        # 1. Get High-Freq and Low-Freq model classification for Summer and Winter
+        ext_s, non_s, _ = self.get_composite_extreme_models(cmip6_results, gwl=target_gwl, event_key=event_key, season='Summer')
+        ext_w, non_w, _ = self.get_composite_extreme_models(cmip6_results, gwl=target_gwl, event_key=event_key, season='Winter')
+        
+        if not ext_s or not non_s or not ext_w or not non_w:
+            logging.error("Could not extract model classifications for subseasonal metrics.")
+            return None
+
+        high_models_summer = [m.split('_')[0] for m in ext_s]
+        low_models_summer = [m.split('_')[0] for m in non_s]
+        high_models_winter = [m.split('_')[0] for m in ext_w]
+        low_models_winter = [m.split('_')[0] for m in non_w]
+
+        # 2. Match models to catchment CSV files in bias-adjusted & raw catchment directories
+        catchment_dirs = [
+            '/nas/home/vlw/Desktop/STREAM/final-bias-adjusted-data',
+            '/nas/home/vlw/Desktop/STREAM/copernicus-final-adjusted-data',
+            '/nas/home/vlw/Desktop/STREAM/in-catchment-data',
+            '/nas/home/vlw/Desktop/STREAM/copernicus-in-catchment'
+        ]
+        
+        def find_catchment_files(model, scenario):
+            for c_dir in catchment_dirs:
+                # 1. Check bias-adjusted patterns (MONTHLY_1960-2100_...)
+                ba_pr1 = os.path.join(c_dir, f"MONTHLY_*_{model}_*pr_{scenario}_count-*.csv")
+                ba_pr2 = os.path.join(c_dir, f"MONTHLY_*_{model}_pr_{scenario}_count-*.csv")
+                f_pr_ba = sorted(glob.glob(ba_pr1) + glob.glob(ba_pr2))
+                
+                ba_tas1 = os.path.join(c_dir, f"MONTHLY_*_{model}_*tas_{scenario}_count-*.csv")
+                ba_tas2 = os.path.join(c_dir, f"MONTHLY_*_{model}_tas_{scenario}_count-*.csv")
+                f_tas_ba = sorted(glob.glob(ba_tas1) + glob.glob(ba_tas2))
+                
+                if f_pr_ba and f_tas_ba:
+                    return f_pr_ba[0], f_tas_ba[0]
+                
+                # 2. Fallback to un-adjusted catchment files
+                p1_pr = os.path.join(c_dir, f"{model}_pr_{scenario}_*_in-catchment-units.csv")
+                p2_pr = os.path.join(c_dir, f"{model}_*_pr_{scenario}_*_in-catchment-units.csv")
+                f_pr = sorted(glob.glob(p1_pr) + glob.glob(p2_pr))
+                
+                p1_tas = os.path.join(c_dir, f"{model}_tas_{scenario}_*_in-catchment-units.csv")
+                p2_tas = os.path.join(c_dir, f"{model}_*_tas_{scenario}_*_in-catchment-units.csv")
+                f_tas = sorted(glob.glob(p1_tas) + glob.glob(p2_tas))
+                
+                if f_pr and f_tas:
+                    return f_pr[0], f_tas[0]
+            return None, None
+
+
+        all_unique_models = list(set(high_models_summer + low_models_summer + high_models_winter + low_models_winter))
+        model_ts_dict = {}
+
+        for model in all_unique_models:
+            pr_file, tas_file = find_catchment_files(model, scenario)
+            if not pr_file or not tas_file:
+                logging.warning(f"Missing catchment PR or TAS file for {model}. Skipping.")
+                continue
+            
+            try:
+                df_pr = pd.read_csv(pr_file, sep='\t', skiprows=1)
+                df_tas = pd.read_csv(tas_file, sep='\t', skiprows=1)
+                
+                p_cols = [c for c in df_pr.columns if c.startswith('P_')]
+                t_cols = [c for c in df_tas.columns if c.startswith('T_')]
+                
+                df_pr['pr_mean'] = df_pr[p_cols].mean(axis=1)
+                df_tas['tas_mean'] = df_tas[t_cols].mean(axis=1)
+                
+                df = pd.merge(df_pr[['year', 'month', 'day', 'pr_mean']], df_tas[['year', 'month', 'day', 'tas_mean']], on=['year', 'month', 'day'])
+                if df['tas_mean'].mean() > 100:
+                    df['tas_mean'] -= 273.15
+                    
+                res_model = {'years': [], 'summer_cdd': [], 'winter_cdd': [], 'summer_cdd_tas': [], 'winter_cdd_tas': [], 'summer_wet_tas': [], 'winter_wet_tas': []}
+                
+                for y in range(start_year, end_year + 1):
+                    df_s = df[(df['year'] == y) & (df['month'].isin([5, 6, 7, 8, 9, 10]))]
+                    df_w = df[((df['year'] == y - 1) & (df['month'].isin([11, 12]))) | ((df['year'] == y) & (df['month'].isin([1, 2, 3, 4])))]
+                    
+                    def calc_cdd(sub_df, thresh=1.0):
+                        if len(sub_df) == 0: return np.nan
+                        is_dry = (sub_df['pr_mean'].values < thresh).astype(int)
+                        if not np.any(is_dry): return 0.0
+                        padded = np.concatenate(([0], is_dry, [0]))
+                        diffs = np.diff(padded)
+                        starts = np.where(diffs == 1)[0]
+                        ends = np.where(diffs == -1)[0]
+                        return float((ends - starts).max()) if len(starts) > 0 else 0.0
+
+                    def calc_cdd_tas(sub_df, pr_thresh=1.0, min_len=10):
+                        if len(sub_df) == 0: return np.nan
+                        is_dry = (sub_df['pr_mean'].values < pr_thresh).astype(int)
+                        if not np.any(is_dry): return np.nan
+                        padded = np.concatenate(([0], is_dry, [0]))
+                        diffs = np.diff(padded)
+                        starts = np.where(diffs == 1)[0]
+                        ends = np.where(diffs == -1)[0]
+                        cdd_idx = []
+                        for s, e in zip(starts, ends):
+                            if (e - s) >= min_len:
+                                cdd_idx.extend(range(s, e))
+                        if len(cdd_idx) == 0: return np.nan
+                        return float(sub_df['tas_mean'].iloc[cdd_idx].mean())
+
+                    def calc_wet_tas(sub_df, thresh=1.0):
+                        if len(sub_df) == 0: return np.nan
+                        wet = sub_df[sub_df['pr_mean'] >= thresh]
+                        if len(wet) == 0: return np.nan
+                        return float(wet['tas_mean'].mean())
+
+                    res_model['years'].append(y)
+                    res_model['summer_cdd'].append(calc_cdd(df_s))
+                    res_model['winter_cdd'].append(calc_cdd(df_w))
+                    res_model['summer_cdd_tas'].append(calc_cdd_tas(df_s))
+                    res_model['winter_cdd_tas'].append(calc_cdd_tas(df_w))
+                    res_model['summer_wet_tas'].append(calc_wet_tas(df_s))
+                    res_model['winter_wet_tas'].append(calc_wet_tas(df_w))
+                    
+                model_ts_dict[model] = pd.DataFrame(res_model).set_index('years').sort_index()
+            except Exception as e:
+                logging.error(f"Error processing catchment metrics for {model}: {e}")
+
+        # 3. Compute spatial 61-catchment zone metrics at GWL 3.0°C
+        gwl_thresh = cmip6_results.get('gwl_threshold_years', cmip6_results.get('gwl_years', {}))
+        
+        gwl_3_0_years = {
+            'ACCESS-CM2': 2050, 'ACCESS-ESM1-5': 2055, 'AWI-CM-1-1-MR': 2055, 'BCC-CSM2-MR': 2062,
+            'CAMS-CSM1-0': 2066, 'CESM2': 2043, 'CESM2-WACCM': 2045, 'CMCC-CM2-SR5': 2050,
+            'CMCC-ESM2': 2055, 'CNRM-CM6-1': 2058, 'CNRM-ESM2-1': 2064, 'CanESM5': 2041,
+            'E3SM-1-0': 2047, 'EC-Earth3': 2057, 'EC-Earth3-CC': 2056, 'EC-Earth3-Veg-LR': 2061,
+            'FGOALS-g3': 2065, 'GFDL-ESM4': 2076, 'HadGEM3-GC31-LL': 2048, 'HadGEM3-GC31-MM': 2050,
+            'IITM-ESM': 2076, 'INM-CM4-8': 2070, 'INM-CM5-0': 2074, 'IPSL-CM6A-LR': 2051,
+            'KACE-1-0-G': 2043, 'KIOST-ESM': 2065, 'MIROC-ES2L': 2070, 'MIROC6': 2076,
+            'MPI-ESM1-2-HR': 2073, 'MPI-ESM1-2-LR': 2072, 'MRI-ESM2-0': 2064, 'NorESM2-MM': 2076, 'UKESM1-0-LL': 2047
+        }
+
+        def compute_spatial_zone_metrics(group_models, season):
+            cdd_all = []
+            cdd_tas_all = []
+            wet_tas_all = []
+            for m in group_models:
+                m_gwl_dict = gwl_thresh.get(m) or gwl_thresh.get(f"{m}_{scenario}") or gwl_thresh.get(f"{m}_ssp585")
+                gwl_yr = None
+                if isinstance(m_gwl_dict, dict):
+                    gwl_yr = m_gwl_dict.get(target_gwl)
+                elif isinstance(m_gwl_dict, (int, float, np.integer)):
+                    gwl_yr = m_gwl_dict
+                if gwl_yr is None:
+                    gwl_yr = gwl_3_0_years.get(m, 2055)
+                
+                gwl_yr = int(gwl_yr)
+                w_start, w_end = max(1960, gwl_yr - 15), min(2099, gwl_yr + 15)
+                
+                pr_file, tas_file = find_catchment_files(m, scenario)
+                if not pr_file or not tas_file: continue
+
+                try:
+                    df_pr = pd.read_csv(pr_file, sep='\t', skiprows=1)
+                    df_tas = pd.read_csv(tas_file, sep='\t', skiprows=1)
+                    
+                    p_cols = [f'P_{i}' for i in range(61)]
+                    t_cols = [f'T_{i}' for i in range(61)]
+                    
+                    df_pr = df_pr[(df_pr['year'] >= w_start) & (df_pr['year'] <= w_end)]
+                    df_tas = df_tas[(df_tas['year'] >= w_start) & (df_tas['year'] <= w_end)]
+                    
+                    df = pd.merge(df_pr[['year', 'month', 'day'] + p_cols], df_tas[['year', 'month', 'day'] + t_cols], on=['year', 'month', 'day'])
+                    
+                    if df[t_cols].values.mean() > 100:
+                        df[t_cols] = df[t_cols] - 273.15
+                        
+                    m_cdd = []
+                    m_cdd_tas = []
+                    m_wet_tas = []
+                    
+                    for z in range(61):
+                        pz, tz = f'P_{z}', f'T_{z}'
+                        cdd_yrs, cdd_tas_yrs, wet_tas_yrs = [], [], []
+                        for y in range(w_start, w_end + 1):
+                            if season == 'Summer':
+                                sub = df[(df['year'] == y) & (df['month'].isin([5, 6, 7, 8, 9, 10]))]
+                            else:
+                                sub = df[((df['year'] == y - 1) & (df['month'].isin([11, 12]))) | ((df['year'] == y) & (df['month'].isin([1, 2, 3, 4])))]
+                            if len(sub) == 0: continue
+                            
+                            is_dry = (sub[pz].values < 1.0).astype(int)
+                            if not np.any(is_dry):
+                                cdd_v = 0.0
+                            else:
+                                padded = np.concatenate(([0], is_dry, [0]))
+                                diffs = np.diff(padded)
+                                starts = np.where(diffs == 1)[0]
+                                ends = np.where(diffs == -1)[0]
+                                cdd_v = float((ends - starts).max()) if len(starts) > 0 else 0.0
+                                cdd_idx = []
+                                for s, e in zip(starts, ends):
+                                    if (e - s) >= 10:
+                                        cdd_idx.extend(range(s, e))
+                                if len(cdd_idx) > 0:
+                                    cdd_tas_yrs.append(sub[tz].iloc[cdd_idx].mean())
+                            cdd_yrs.append(cdd_v)
+                            
+                            wet_d = sub[sub[pz] >= 1.0]
+                            if len(wet_d) > 0:
+                                wet_tas_yrs.append(wet_d[tz].mean())
+                                
+                        m_cdd.append(np.mean(cdd_yrs) if cdd_yrs else np.nan)
+                        m_cdd_tas.append(np.mean(cdd_tas_yrs) if cdd_tas_yrs else np.nan)
+                        m_wet_tas.append(np.mean(wet_tas_yrs) if wet_tas_yrs else np.nan)
+                        
+                    cdd_all.append(m_cdd)
+                    cdd_tas_all.append(m_cdd_tas)
+                    wet_tas_all.append(m_wet_tas)
+                except Exception as e:
+                    logging.warning(f"Error computing spatial zone metrics for {m}: {e}")
+
+            mean_cdd = np.nanmean(cdd_all, axis=0) if cdd_all else np.full(61, np.nan)
+            mean_cdd_tas = np.nanmean(cdd_tas_all, axis=0) if cdd_tas_all else np.full(61, np.nan)
+            mean_wet_tas = np.nanmean(wet_tas_all, axis=0) if wet_tas_all else np.full(61, np.nan)
+            return mean_cdd, mean_cdd_tas, mean_wet_tas
+
+        cdd_high_s, cdd_tas_high_s, wet_high_s = compute_spatial_zone_metrics(high_models_summer, 'Summer')
+        cdd_low_s,  cdd_tas_low_s,  wet_low_s  = compute_spatial_zone_metrics(low_models_summer, 'Summer')
+
+        cdd_high_w, cdd_tas_high_w, wet_high_w = compute_spatial_zone_metrics(high_models_winter, 'Winter')
+        cdd_low_w,  cdd_tas_low_w,  wet_low_w  = compute_spatial_zone_metrics(low_models_winter, 'Winter')
+
+        spatial_diffs = {
+            'summer_cdd_diff': cdd_high_s - cdd_low_s,
+            'winter_cdd_diff': cdd_high_w - cdd_low_w,
+            'summer_cdd_tas_diff': cdd_tas_high_s - cdd_tas_low_s,
+            'winter_cdd_tas_diff': cdd_tas_high_w - cdd_tas_low_w,
+            'summer_wet_tas_diff': wet_high_s - wet_low_s,
+            'winter_wet_tas_diff': wet_high_w - wet_low_w
+        }
+
+        # 4. Compute CDD event duration distribution (Total events vs Duration in days >= 10) in 31-yr GWL window
+        min_dur = 10
+        max_dur = 35
+        dur_bins = np.arange(min_dur, max_dur + 1)
+        n_bins = len(dur_bins)
+
+        def compute_cdd_duration_distribution(group_models, season):
+            model_hists = []
+            for m in group_models:
+                m_gwl_dict = gwl_thresh.get(m) or gwl_thresh.get(f"{m}_{scenario}") or gwl_thresh.get(f"{m}_ssp585")
+                gwl_yr = None
+                if isinstance(m_gwl_dict, dict):
+                    gwl_yr = m_gwl_dict.get(target_gwl)
+                elif isinstance(m_gwl_dict, (int, float, np.integer)):
+                    gwl_yr = m_gwl_dict
+                if gwl_yr is None:
+                    gwl_yr = gwl_3_0_years.get(m, 2055)
+                
+                gwl_yr = int(gwl_yr)
+                w_start, w_end = max(1960, gwl_yr - 15), min(2099, gwl_yr + 15)
+                
+                pr_file, tas_file = find_catchment_files(m, scenario)
+                if not pr_file or not tas_file: continue
+
+                try:
+                    df_pr = pd.read_csv(pr_file, sep='\t', skiprows=1)
+                    p_cols = [c for c in df_pr.columns if c.startswith('P_')]
+                    df_pr['pr_mean'] = df_pr[p_cols].mean(axis=1)
+                    df_pr = df_pr[(df_pr['year'] >= w_start) & (df_pr['year'] <= w_end)]
+                    
+                    n_yrs = len(df_pr['year'].unique())
+                    if n_yrs == 0: continue
+
+                    durs_all = []
+                    for y in range(w_start, w_end + 1):
+                        if season == 'Summer':
+                            sub = df_pr[(df_pr['year'] == y) & (df_pr['month'].isin([5, 6, 7, 8, 9, 10]))]
+                        else:
+                            sub = df_pr[((df_pr['year'] == y - 1) & (df_pr['month'].isin([11, 12]))) | ((df_pr['year'] == y) & (df_pr['month'].isin([1, 2, 3, 4])))]
+                        if len(sub) == 0: continue
+                        
+                        is_dry = (sub['pr_mean'].values < 1.0).astype(int)
+                        if not np.any(is_dry): continue
+                        padded = np.concatenate(([0], is_dry, [0]))
+                        diffs = np.diff(padded)
+                        starts = np.where(diffs == 1)[0]
+                        ends = np.where(diffs == -1)[0]
+                        durs = ends - starts
+                        durs_filtered = [min(int(d), max_dur) for d in durs if d >= min_dur]
+                        durs_all.extend(durs_filtered)
+
+                    counts, _ = np.histogram(durs_all, bins=np.arange(min_dur, max_dur + 2))
+                    # Total events in 31-year window (scaled if n_yrs != 31)
+                    tot_events_31yr = counts.astype(float) * (31.0 / float(n_yrs))
+                    model_hists.append(tot_events_31yr)
+                except Exception as e:
+                    logging.warning(f"Error computing duration dist for {m}: {e}")
+
+            if not model_hists:
+                return {'mmm': np.zeros(n_bins), 'min': np.zeros(n_bins), 'max': np.zeros(n_bins)}
+
+            arr = np.array(model_hists)
+            return {
+                'mmm': np.mean(arr, axis=0),
+                'min': np.min(arr, axis=0),
+                'max': np.max(arr, axis=0),
+            }
+
+        cdd_dur_dist = {
+            'durations': dur_bins,
+            'summer_high': compute_cdd_duration_distribution(high_models_summer, 'Summer'),
+            'summer_low':  compute_cdd_duration_distribution(low_models_summer, 'Summer'),
+            'winter_high': compute_cdd_duration_distribution(high_models_winter, 'Winter'),
+            'winter_low':  compute_cdd_duration_distribution(low_models_winter, 'Winter'),
+        }
+
+        # 5. Compute Wet-Day Precipitation Intensity Distribution in 31-yr GWL window
+        min_pr = 1.0
+        max_pr = 25.0
+        pr_bins = np.arange(min_pr, max_pr + 1.0, 1.0)
+        n_pr_bins = len(pr_bins) - 1
+        pr_bin_centers = 0.5 * (pr_bins[:-1] + pr_bins[1:])
+
+        def compute_pr_intensity_distribution(group_models, season):
+            model_hists = []
+            for m in group_models:
+                m_gwl_dict = gwl_thresh.get(m) or gwl_thresh.get(f"{m}_{scenario}") or gwl_thresh.get(f"{m}_ssp585")
+                gwl_yr = None
+                if isinstance(m_gwl_dict, dict):
+                    gwl_yr = m_gwl_dict.get(target_gwl)
+                elif isinstance(m_gwl_dict, (int, float, np.integer)):
+                    gwl_yr = m_gwl_dict
+                if gwl_yr is None:
+                    gwl_yr = gwl_3_0_years.get(m, 2055)
+                
+                gwl_yr = int(gwl_yr)
+                w_start, w_end = max(1960, gwl_yr - 15), min(2099, gwl_yr + 15)
+                
+                pr_file, tas_file = find_catchment_files(m, scenario)
+                if not pr_file or not tas_file: continue
+
+                try:
+                    df_pr = pd.read_csv(pr_file, sep='\t', skiprows=1)
+                    p_cols = [c for c in df_pr.columns if c.startswith('P_')]
+                    df_pr['pr_mean'] = df_pr[p_cols].mean(axis=1)
+                    df_pr = df_pr[(df_pr['year'] >= w_start) & (df_pr['year'] <= w_end)]
+                    
+                    n_yrs = len(df_pr['year'].unique())
+                    if n_yrs == 0: continue
+
+                    wet_pr_values = []
+                    for y in range(w_start, w_end + 1):
+                        if season == 'Summer':
+                            sub = df_pr[(df_pr['year'] == y) & (df_pr['month'].isin([5, 6, 7, 8, 9, 10]))]
+                        else:
+                            sub = df_pr[((df_pr['year'] == y - 1) & (df_pr['month'].isin([11, 12]))) | ((df_pr['year'] == y) & (df_pr['month'].isin([1, 2, 3, 4])))]
+                        if len(sub) == 0: continue
+                        
+                        wet_days = sub[sub['pr_mean'] >= min_pr]['pr_mean'].values
+                        if len(wet_days) > 0:
+                            wet_pr_values.extend(np.minimum(wet_days, max_pr - 0.01))
+
+                    counts, _ = np.histogram(wet_pr_values, bins=pr_bins)
+                    tot_days_31yr = counts.astype(float) * (31.0 / float(n_yrs))
+                    model_hists.append(tot_days_31yr)
+                except Exception as e:
+                    logging.warning(f"Error computing PR intensity dist for {m}: {e}")
+
+            if not model_hists:
+                return {'mmm': np.zeros(n_pr_bins), 'min': np.zeros(n_pr_bins), 'max': np.zeros(n_pr_bins)}
+
+            arr = np.array(model_hists)
+            return {
+                'mmm': np.mean(arr, axis=0),
+                'min': np.min(arr, axis=0),
+                'max': np.max(arr, axis=0),
+            }
+
+        pr_intensity_dist = {
+            'bin_centers': pr_bin_centers,
+            'summer_high': compute_pr_intensity_distribution(high_models_summer, 'Summer'),
+            'summer_low':  compute_pr_intensity_distribution(low_models_summer, 'Summer'),
+            'winter_high': compute_pr_intensity_distribution(high_models_winter, 'Winter'),
+            'winter_low':  compute_pr_intensity_distribution(low_models_winter, 'Winter'),
+        }
+
+        years_arr = np.arange(start_year, end_year + 1)
+
+        def aggregate_group_metrics(group_models, col_name):
+            model_dfs = [model_ts_dict[m][col_name] for m in group_models if m in model_ts_dict]
+            if not model_dfs:
+                return None, None, None
+            concat_df = pd.concat(model_dfs, axis=1)
+            mmm = concat_df.mean(axis=1)
+            min_envelope = concat_df.min(axis=1)
+            max_envelope = concat_df.max(axis=1)
+            return mmm, min_envelope, max_envelope
+
+        panels_data = {
+            'years': years_arr,
+            'summer_cdd': {
+                'high_mmm': aggregate_group_metrics(high_models_summer, 'summer_cdd')[0],
+                'high_min': aggregate_group_metrics(high_models_summer, 'summer_cdd')[1],
+                'high_max': aggregate_group_metrics(high_models_summer, 'summer_cdd')[2],
+                'low_mmm': aggregate_group_metrics(low_models_summer, 'summer_cdd')[0],
+                'low_min': aggregate_group_metrics(low_models_summer, 'summer_cdd')[1],
+                'low_max': aggregate_group_metrics(low_models_summer, 'summer_cdd')[2],
+            },
+            'winter_cdd': {
+                'high_mmm': aggregate_group_metrics(high_models_winter, 'winter_cdd')[0],
+                'high_min': aggregate_group_metrics(high_models_winter, 'winter_cdd')[1],
+                'high_max': aggregate_group_metrics(high_models_winter, 'winter_cdd')[2],
+                'low_mmm': aggregate_group_metrics(low_models_winter, 'winter_cdd')[0],
+                'low_min': aggregate_group_metrics(low_models_winter, 'winter_cdd')[1],
+                'low_max': aggregate_group_metrics(low_models_winter, 'winter_cdd')[2],
+            },
+            'summer_cdd_tas': {
+                'high_mmm': aggregate_group_metrics(high_models_summer, 'summer_cdd_tas')[0],
+                'high_min': aggregate_group_metrics(high_models_summer, 'summer_cdd_tas')[1],
+                'high_max': aggregate_group_metrics(high_models_summer, 'summer_cdd_tas')[2],
+                'low_mmm': aggregate_group_metrics(low_models_summer, 'summer_cdd_tas')[0],
+                'low_min': aggregate_group_metrics(low_models_summer, 'summer_cdd_tas')[1],
+                'low_max': aggregate_group_metrics(low_models_summer, 'summer_cdd_tas')[2],
+            },
+            'winter_cdd_tas': {
+                'high_mmm': aggregate_group_metrics(high_models_winter, 'winter_cdd_tas')[0],
+                'high_min': aggregate_group_metrics(high_models_winter, 'winter_cdd_tas')[1],
+                'high_max': aggregate_group_metrics(high_models_winter, 'winter_cdd_tas')[2],
+                'low_mmm': aggregate_group_metrics(low_models_winter, 'winter_cdd_tas')[0],
+                'low_min': aggregate_group_metrics(low_models_winter, 'winter_cdd_tas')[1],
+                'low_max': aggregate_group_metrics(low_models_winter, 'winter_cdd_tas')[2],
+            },
+            'summer_wet_tas': {
+                'high_mmm': aggregate_group_metrics(high_models_summer, 'summer_wet_tas')[0],
+                'high_min': aggregate_group_metrics(high_models_summer, 'summer_wet_tas')[1],
+                'high_max': aggregate_group_metrics(high_models_summer, 'summer_wet_tas')[2],
+                'low_mmm': aggregate_group_metrics(low_models_summer, 'summer_wet_tas')[0],
+                'low_min': aggregate_group_metrics(low_models_summer, 'summer_wet_tas')[1],
+                'low_max': aggregate_group_metrics(low_models_summer, 'summer_wet_tas')[2],
+            },
+            'winter_wet_tas': {
+                'high_mmm': aggregate_group_metrics(high_models_winter, 'winter_wet_tas')[0],
+                'high_min': aggregate_group_metrics(high_models_winter, 'winter_wet_tas')[1],
+                'high_max': aggregate_group_metrics(high_models_winter, 'winter_wet_tas')[2],
+                'low_mmm': aggregate_group_metrics(low_models_winter, 'winter_wet_tas')[0],
+                'low_min': aggregate_group_metrics(low_models_winter, 'winter_wet_tas')[1],
+                'low_max': aggregate_group_metrics(low_models_winter, 'winter_wet_tas')[2],
+            },
+            'cdd_dur_dist': cdd_dur_dist,
+            'pr_intensity_dist': pr_intensity_dist,
+            'spatial_diffs': spatial_diffs,
+            'high_models_summer': high_models_summer,
+            'low_models_summer': low_models_summer,
+            'high_models_winter': high_models_winter,
+            'low_models_winter': low_models_winter,
+        }
+
+        return panels_data

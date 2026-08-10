@@ -185,7 +185,7 @@ class StorylineAnalyzer:
     def _extract_gwl_means_v2(self, index_timeseries, gwl_years_model, gwl):
         """Extracts the N-year mean of a time series centered around a GWL threshold year."""
         threshold_year = gwl_years_model.get(gwl)
-        if threshold_year is None or index_timeseries is None:
+        if threshold_year is None or index_timeseries is None or isinstance(index_timeseries, dict) or not hasattr(index_timeseries, 'dims'):
             return xr.DataArray(np.nan)
 
         # Wähle die korrekte Zeitdimension
@@ -409,6 +409,7 @@ class StorylineAnalyzer:
                     return ts_grouped
 
                 # Store monthly timeseries for lagged impacts
+                metric_timeseries[key]['discharge_monthly_full'] = discharge_monthly_full
                 metric_timeseries[key]['Mar_discharge'] = get_monthly_timeseries(discharge_monthly_full, 3)
                 metric_timeseries[key]['Apr_discharge'] = get_monthly_timeseries(discharge_monthly_full, 4)
                 metric_timeseries[key]['May_discharge'] = get_monthly_timeseries(discharge_monthly_full, 5)
@@ -473,17 +474,34 @@ class StorylineAnalyzer:
                      common_time = np.intersect1d(pr_box_full.time, tas_box_full.time)
                      pr_box_full = pr_box_full.sel(time=common_time)
                      tas_box_full = tas_box_full.sel(time=common_time)
+                     metric_timeseries[key]['pr_box_full'] = pr_box_full
+                     metric_timeseries[key]['tas_box_full'] = tas_box_full
 
-                     lat_center = (box_coords[0] + box_coords[1]) / 2
+                     lat_center = (box_coords[0] + box_coords[1]) / 2.0
                      spei_full = DataProcessor.calculate_spei(pr_box_full, tas_box_full, lat=lat_center, scale=4)
                      if spei_full is not None:
                          da_spei_ann = DataProcessor.assign_season_to_dataarray(spei_full)
                          if da_spei_ann is not None:
                              metric_timeseries[key]['Annual_spei'] = da_spei_ann.groupby('season_year').mean('time')
+
+                     # Calculate SPEI-6 for Summer (May-Oct, ending month 10) and Winter (Nov-Apr, ending month 4)
+                     spei6_full = DataProcessor.calculate_spei(pr_box_full, tas_box_full, lat=lat_center, scale=6, by_month=True)
+                     if spei6_full is not None:
+                         spei6_oct = spei6_full.where(spei6_full.time.dt.month == 10, drop=True)
+                         spei6_s_dict = {int(y): float(val) for y, val in zip(spei6_oct.time.dt.year.values, spei6_oct.values) if np.isfinite(val)}
+                         metric_timeseries[key]['spei6_summer_dict'] = spei6_s_dict
+
+                         spei6_apr = spei6_full.where(spei6_full.time.dt.month == 4, drop=True)
+                         spei6_w_dict = {int(y): float(val) for y, val in zip(spei6_apr.time.dt.year.values, spei6_apr.values) if np.isfinite(val)}
+                         metric_timeseries[key]['spei6_winter_dict'] = spei6_w_dict
             # --- END: NEW Annual Metrics ---
 
         # Step 4: Calculate absolute metric values at historical reference and at each GWL
-        metrics_list = list(metric_timeseries.get(next(iter(metric_timeseries)), {}).keys())
+        first_model_metrics = metric_timeseries.get(next(iter(metric_timeseries)), {})
+        metrics_list = [
+            met for met, ts in first_model_metrics.items()
+            if ts is not None and not isinstance(ts, dict) and hasattr(ts, 'dims')
+        ]
         hist_ref_start, hist_ref_end = self.config.CMIP6_ANOMALY_REF_START, self.config.CMIP6_ANOMALY_REF_END
         
         model_abs_means_at_gwl = {}
@@ -494,7 +512,8 @@ class StorylineAnalyzer:
             # --- MODIFIKATION: Zeit-Dimension korrekt behandeln ---
             hist_means = {}
             for met, ts in ts_data.items():
-                if ts is None or ts.size == 0: continue
+                if ts is None or isinstance(ts, dict) or not hasattr(ts, 'size'): continue
+                if ts.size == 0: continue
                 
                 time_dim = 'season_year'
                 if time_dim not in ts.dims:
@@ -5633,7 +5652,7 @@ class StorylineAnalyzer:
                         ends = np.where(diffs == -1)[0]
                         return float((ends - starts).max()) if len(starts) > 0 else 0.0
 
-                    def calc_cdd_tas(sub_df, pr_thresh=1.0, min_len=10):
+                    def calc_cdd_tas(sub_df, pr_thresh=1.0, min_len=7):
                         if len(sub_df) == 0: return np.nan
                         is_dry = (sub_df['pr_mean'].values < pr_thresh).astype(int)
                         if not np.any(is_dry): return np.nan
@@ -5740,7 +5759,7 @@ class StorylineAnalyzer:
                                 cdd_v = float((ends - starts).max()) if len(starts) > 0 else 0.0
                                 cdd_idx = []
                                 for s, e in zip(starts, ends):
-                                    if (e - s) >= 10:
+                                    if (e - s) >= 7:
                                         cdd_idx.extend(range(s, e))
                                 if len(cdd_idx) > 0:
                                     cdd_tas_yrs.append(sub[tz].iloc[cdd_idx].mean())
@@ -5780,8 +5799,8 @@ class StorylineAnalyzer:
             'winter_wet_tas_diff': wet_high_w - wet_low_w
         }
 
-        # 4. Compute CDD event duration distribution (Total events vs Duration in days >= 10) in 31-yr GWL window
-        min_dur = 10
+        # 4. Compute CDD event duration distribution (Total events vs Duration in days >= 7) in 31-yr GWL window
+        min_dur = 7
         max_dur = 35
         dur_bins = np.arange(min_dur, max_dur + 1)
         n_bins = len(dur_bins)

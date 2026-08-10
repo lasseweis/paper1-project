@@ -1419,6 +1419,33 @@ class ClimateAnalysis:
                         return_period_results=return_period_results_for_plot
                     )
 
+                # --- PLOT: Final Figure 8 (Lagged Correlation for Winter Discharge & Preceding Precipitation) ---
+                if scenario == 'ssp585':
+                    fig8_filename = os.path.join(Config.PLOT_DIR, "final_figure_8_winter_pr_discharge_lagged_correlation.png")
+                    logging.info(f"Plotting Final Figure 8 for {scenario}...")
+                    Visualizer.plot_final_figure_8_winter_lagged_correlation(
+                        cmip6_results, Config(), scenario=scenario, target_gwl=3.0,
+                        return_period_results=return_period_results_for_plot
+                    )
+
+                # --- PLOT: Final Figure 9 (Daily Discharge Variance & Extreme Precipitation Response) ---
+                if scenario == 'ssp585':
+                    fig9_filename = os.path.join(Config.PLOT_DIR, f"final_figure_9_daily_discharge_variance_{scenario}_gwl3.0.png")
+                    logging.info(f"Plotting Final Figure 9 for {scenario}...")
+                    Visualizer.plot_final_figure_9_daily_discharge_variance_and_extreme_pr_response(
+                        cmip6_results, discharge_data_loaded, Config(), scenario=scenario, target_gwl=3.0,
+                        return_period_results=return_period_results_for_plot
+                    )
+
+                # --- PLOT: Final Figure 10 (Seasonal Cycles of PR, TAS, Discharge, U850 for GWL +3.0°C) ---
+                if scenario == 'ssp585':
+                    fig10_filename = os.path.join(Config.PLOT_DIR, f"final_figure_10_seasonal_cycles_{scenario}_gwl3.0.png")
+                    logging.info(f"Plotting Final Figure 10 for {scenario}...")
+                    Visualizer.plot_final_figure_10_seasonal_cycles(
+                        cmip6_results, discharge_data_loaded, Config(), scenario=scenario, target_gwl=3.0,
+                        return_period_results=return_period_results_for_plot
+                    )
+
                 # --- Log summary for the scenario ---
                 storyline_classification_2d = cmip6_results.get('storyline_classification_2d')
                 if storyline_classification_2d:

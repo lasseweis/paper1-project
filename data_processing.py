@@ -670,7 +670,7 @@ class DataProcessor:
         return pet_monthly
 
     @staticmethod
-    def calculate_spei(pr_monthly, tas_monthly, lat, scale=4):
+    def calculate_spei(pr_monthly, tas_monthly, lat, scale=4, by_month=True):
         """
         Calculates the Standardized Precipitation-Evapotranspiration Index (SPEI).
         Handles both 1D timeseries and 3D (gridded) DataArrays.
@@ -704,7 +704,8 @@ class DataProcessor:
             
             params = fisk.fit(series[not_nan])
             cdf = fisk.cdf(series.values, *params)
-            spei_values = norm.ppf(cdf)
+            cdf_clipped = np.clip(cdf, 1e-5, 1.0 - 1e-5)
+            spei_values = norm.ppf(cdf_clipped)
             return spei_values
 
         if is_spatial:
@@ -718,21 +719,28 @@ class DataProcessor:
             )
             spei_ts = spei_values.rename(f'spei_{scale}')
         else:
-            # --- START DER KORREKTUR ---
-            # Filtere explizit nach endlichen Werten für die Anpassung der Verteilung
-            values_to_fit = valid_balance.values[np.isfinite(valid_balance.values)]
-            
-            # Prüfe, ob genügend Datenpunkte für eine robuste Anpassung vorhanden sind
-            if len(values_to_fit) < 10:
-                logging.warning("Not enough finite data points for SPEI calculation, returning NaNs.")
-                spei_values = np.full_like(valid_balance.values, np.nan)
+            spei_values = np.full_like(valid_balance.values, np.nan)
+            if by_month and hasattr(valid_balance, 'time') and hasattr(valid_balance.time.dt, 'month'):
+                months = valid_balance.time.dt.month.values
+                for m in range(1, 13):
+                    idx = (months == m)
+                    vals_m = valid_balance.values[idx]
+                    finite_m = vals_m[np.isfinite(vals_m)]
+                    if len(finite_m) >= 10:
+                        try:
+                            params = fisk.fit(finite_m)
+                            cdf = fisk.cdf(vals_m, *params)
+                            cdf_clipped = np.clip(cdf, 1e-5, 1.0 - 1e-5)
+                            spei_values[idx] = norm.ppf(cdf_clipped)
+                        except Exception as e_fit:
+                            logging.warning(f"SPEI fitting failed for month {m}: {e_fit}")
             else:
-                # Führe die Anpassung nur mit den gültigen Werten durch
-                params = fisk.fit(values_to_fit)
-                # Wende die CDF auf die ursprünglichen Daten an, um die Form beizubehalten (NaNs bleiben NaNs)
-                cdf = fisk.cdf(valid_balance.values, *params)
-                spei_values = norm.ppf(cdf)
-            # --- ENDE DER KORREKTUR ---
+                values_to_fit = valid_balance.values[np.isfinite(valid_balance.values)]
+                if len(values_to_fit) >= 10:
+                    params = fisk.fit(values_to_fit)
+                    cdf = fisk.cdf(valid_balance.values, *params)
+                    cdf_clipped = np.clip(cdf, 1e-5, 1.0 - 1e-5)
+                    spei_values = norm.ppf(cdf_clipped)
 
             spei_ts = xr.DataArray(
                 spei_values,

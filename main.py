@@ -1446,6 +1446,15 @@ class ClimateAnalysis:
                         return_period_results=return_period_results_for_plot
                     )
 
+                # --- PLOT: Final Figure 11 (Full Timeseries 1960-2100 HF Storyline Models vs Ref Model CNRM-ESM2-1) ---
+                if scenario == 'ssp585':
+                    logging.info(f"Plotting Final Figure 11 for {scenario}...")
+                    Visualizer.plot_final_figure_11_hf_vs_ref_timeseries(
+                        cmip6_results, discharge_data_loaded, Config(), scenario=scenario, target_gwl=3.0,
+                        ref_model_name='CNRM-ESM2-1',
+                        return_period_results=return_period_results_for_plot
+                    )
+
                 # --- Log summary for the scenario ---
                 storyline_classification_2d = cmip6_results.get('storyline_classification_2d')
                 if storyline_classification_2d:

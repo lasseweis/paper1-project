@@ -8769,11 +8769,11 @@ class Visualizer:
             if ts_summer is None or ts_winter is None or ts_annual is None:
                 continue
 
-            # Historical 30Q10 threshold
+            # Historical 30Q10 threshold (1985-2014 baseline period per CMIP6 model)
             try:
-                hist_slice = ts_annual.sel(year=slice(1960, 2014))
+                hist_slice = ts_annual.sel(year=slice(1985, 2014))
                 if hist_slice.year.size < 10:
-                    hist_slice = ts_annual.where(ts_annual.year < 2015, drop=True)
+                    hist_slice = ts_annual.sel(year=slice(1960, 2014))
             except Exception:
                 hist_slice = ts_annual.where(ts_annual.year < 2015, drop=True)
 
@@ -8814,8 +8814,10 @@ class Visualizer:
                 if is_s and is_w:
                     cluster_rel_years.append(ry)
 
-            # Load monthly PR & TAS
-            pr_df, tas_df = None, None
+            # Load daily PR, TAS, Q, U850 and compute 30-day centered running means
+            pr_s, tas_s, q_s, u850_s = None, None, None, None
+
+            # Load daily PR & TAS
             pr_file, tas_file = find_catchment_files(clean_name, scenario)
             if pr_file and tas_file:
                 try:
@@ -8827,105 +8829,150 @@ class Visualizer:
                     df_tas_raw['tas_mean'] = df_tas_raw[t_cols].mean(axis=1)
 
                     df_pt = pd.merge(df_pr_raw[['year', 'month', 'day', 'pr_mean']], df_tas_raw[['year', 'month', 'day', 'tas_mean']], on=['year', 'month', 'day'])
+                    df_pt['time'] = pd.to_datetime(df_pt[['year', 'month', 'day']])
                     if df_pt['tas_mean'].mean() > 100:
                         df_pt['tas_mean'] -= 273.15
-                    pr_df = df_pt.groupby(['year', 'month'])['pr_mean'].mean().reset_index()
-                    tas_df = df_pt.groupby(['year', 'month'])['tas_mean'].mean().reset_index()
+                    
+                    df_pt = df_pt.sort_values('time').set_index('time')
+                    pr_s = df_pt['pr_mean'].rolling(30, center=True, min_periods=15).mean()
+                    tas_s = df_pt['tas_mean'].rolling(30, center=True, min_periods=15).mean()
                 except Exception as e:
                     logging.warning(f"Error loading catchment files for {clean_name}: {e}")
 
             # Fallback for PR and TAS if catchment files unavailable
-            if pr_df is None:
+            if pr_s is None:
                 da_pr_box = ts_dict.get('pr_box_full')
                 if da_pr_box is not None:
-                    pr_df = pd.DataFrame({
-                        'year': da_pr_box.time.dt.year.values,
-                        'month': da_pr_box.time.dt.month.values,
-                        'pr_mean': da_pr_box.values
-                    })
-            if tas_df is None:
+                    s_pr_raw = pd.Series(da_pr_box.values, index=pd.to_datetime(da_pr_box.time.values))
+                    pr_s = s_pr_raw.sort_index().rolling(30, center=True, min_periods=15).mean()
+            if tas_s is None:
                 da_tas_box = ts_dict.get('tas_box_full')
                 if da_tas_box is not None:
-                    tas_df = pd.DataFrame({
-                        'year': da_tas_box.time.dt.year.values,
-                        'month': da_tas_box.time.dt.month.values,
-                        'tas_mean': da_tas_box.values
-                    })
+                    s_tas_raw = pd.Series(da_tas_box.values, index=pd.to_datetime(da_tas_box.time.values))
+                    tas_s = s_tas_raw.sort_index().rolling(30, center=True, min_periods=15).mean()
 
-            # Load monthly Discharge
-            q_df = None
+            # Load daily Discharge (30d centered mean)
             if df_q_raw is not None and clean_name in df_q_raw.columns:
-                q_sub = df_q_raw[['year', 'month', clean_name]].dropna()
-                q_df = q_sub.groupby(['year', 'month'])[clean_name].mean().reset_index()
-                q_df = q_df.rename(columns={clean_name: 'q_mean'})
+                try:
+                    df_m_q = df_q_raw[['time', 'year', clean_name]].dropna().copy()
+                    s_q_raw = df_m_q.sort_values('time').set_index('time')[clean_name]
+                    q_s = s_q_raw.rolling(30, center=True, min_periods=15).mean()
+                except Exception as e:
+                    logging.warning(f"Error processing discharge for {clean_name}: {e}")
             elif ts_dict.get('discharge_monthly_full') is not None:
                 da_q = ts_dict.get('discharge_monthly_full')
-                q_df = pd.DataFrame({
-                    'year': da_q.time.dt.year.values,
-                    'month': da_q.time.dt.month.values,
-                    'q_mean': da_q.values
-                })
+                s_q_raw = pd.Series(da_q.values, index=pd.to_datetime(da_q.time.values))
+                q_s = s_q_raw.sort_index().rolling(30, center=True, min_periods=15).mean()
 
-            # Load monthly U850 (u > 0)
-            u850_df = None
+            # Load daily U850 (Mean Westerly Wind Speed over Danube Catchment Box: 46N-50N, 8E-17E, cos-weighted, u>0)
             try:
-                preloaded_ua = cmip6_results.get('preloaded_cmip6_data', {}).get(f"{clean_name}_{scenario}", {}).get('ua')
+                m_data = cmip6_results.get('cmip6_model_data_loaded', {}).get(m_key)
+                if not m_data:
+                    m_data = cmip6_results.get('cmip6_model_data_loaded', {}).get(clean_name, {})
+                if m_data is None:
+                    m_data = {}
+                preloaded_ua = m_data.get('ua') if m_data.get('ua') is not None else m_data.get('u850')
                 if preloaded_ua is None:
+                    preloaded_ua = cmip6_results.get('preloaded_cmip6_data', {}).get(f"{clean_name}_{scenario}", {}).get('ua')
+                if preloaded_ua is None and analyzer_inst is not None:
                     preloaded_ua = analyzer_inst._load_and_preprocess_model_data(clean_name, [scenario], 'ua')
+                
                 if preloaded_ua is not None:
-                    # Spatial box crop
-                    lats = preloaded_ua.lat.values
-                    lons = preloaded_ua.lon.values
-                    lat_mask = (lats >= config.BOX_LAT_MIN) & (lats <= config.BOX_LAT_MAX)
-                    lon_mask = (lons >= config.BOX_LON_MIN) & (lons <= config.BOX_LON_MAX)
-                    
-                    ua_sub = preloaded_ua.isel(lat=lat_mask, lon=lon_mask)
-                    # Filter u > 0
-                    ua_pos = ua_sub.where(ua_sub > 0)
-                    ua_box_mean = ua_pos.mean(dim=[d for d in ua_pos.dims if d not in ['time']], skipna=True)
-                    
-                    u850_df = pd.DataFrame({
-                        'year': ua_box_mean.time.dt.year.values,
-                        'month': ua_box_mean.time.dt.month.values,
-                        'u850_mean': ua_box_mean.values
-                    })
+                    ua_da = preloaded_ua
+                    if hasattr(ua_da, 'lon') and hasattr(ua_da, 'lat'):
+                        lons = np.asarray(ua_da.lon.values).ravel()
+                        if bool(np.any(lons > 180)):
+                            lons_norm = np.where(lons > 180, lons - 360, lons)
+                            ua_da = ua_da.assign_coords(lon=lons_norm).sortby('lon')
+                        
+                        lat_min, lat_max = config.BOX_LAT_MIN, config.BOX_LAT_MAX
+                        lon_min, lon_max = config.BOX_LON_MIN, config.BOX_LON_MAX
+                        
+                        lats = np.asarray(ua_da.lat.values).ravel()
+                        is_ascending = bool(float(lats[0]) < float(lats[-1]))
+                        lat_slice = slice(lat_min, lat_max) if is_ascending else slice(lat_max, lat_min)
+                        lon_slice = slice(lon_min, lon_max)
+                        
+                        ua_sub = ua_da.sel(lat=lat_slice, lon=lon_slice)
+                        westerlies = ua_sub.where(ua_sub > 0)
+                        weights = np.cos(np.deg2rad(westerlies.lat))
+                        ua_box_mean = westerlies.weighted(weights).mean(dim=['lat', 'lon'], skipna=True)
+                        
+                        if ua_box_mean.ndim > 1:
+                            time_dim = next((d for d in ['time', 'season_year', 'year'] if d in ua_box_mean.dims), None)
+                            if time_dim:
+                                dims_to_squeeze = [d for d in ua_box_mean.dims if d != time_dim]
+                                ua_box_mean = ua_box_mean.squeeze(dim=dims_to_squeeze, drop=True)
+                        
+                        s_u850_raw = ua_box_mean.to_series()
+                        
+                        # Robust cftime to pandas DatetimeIndex conversion
+                        if hasattr(s_u850_raw.index, 'to_datetimeindex'):
+                            try:
+                                s_u850_raw.index = s_u850_raw.index.to_datetimeindex()
+                            except Exception:
+                                s_u850_raw.index = pd.to_datetime([t.strftime('%Y-%m-%d %H:%M:%S') if hasattr(t, 'strftime') else str(t) for t in s_u850_raw.index], errors='coerce')
+                        else:
+                            s_u850_raw.index = pd.to_datetime([t.strftime('%Y-%m-%d %H:%M:%S') if hasattr(t, 'strftime') else str(t) for t in s_u850_raw.index], errors='coerce')
+                        
+                        s_u850_raw = s_u850_raw.dropna()
+                        u850_s = s_u850_raw.sort_index()  # U850 is monthly data: do not apply 30-month rolling mean
             except Exception as e:
                 logging.warning(f"Could not calculate U850 for {clean_name}: {e}")
 
-            # Calculate event timing (exact months of 30Q10 low-flow event minimums)
+            # Helper for mapping date to 1..60 fractional month index
+            def get_day_60m_idx(dt, cy):
+                if dt.year == cy - 3:
+                    days_in_m = pd.Period(f"{dt.year}-{dt.month:02d}").days_in_month
+                    return 1.0 + (dt.month - 1) + (dt.day - 1) / float(days_in_m)
+                elif dt.year == cy - 2:
+                    days_in_m = pd.Period(f"{dt.year}-{dt.month:02d}").days_in_month
+                    return 13.0 + (dt.month - 1) + (dt.day - 1) / float(days_in_m)
+                elif dt.year == cy - 1:
+                    days_in_m = pd.Period(f"{dt.year}-{dt.month:02d}").days_in_month
+                    return 25.0 + (dt.month - 1) + (dt.day - 1) / float(days_in_m)
+                elif dt.year == cy:
+                    days_in_m = pd.Period(f"{dt.year}-{dt.month:02d}").days_in_month
+                    return 37.0 + (dt.month - 1) + (dt.day - 1) / float(days_in_m)
+                elif dt.year == cy + 1:
+                    days_in_m = pd.Period(f"{dt.year}-{dt.month:02d}").days_in_month
+                    return 49.0 + (dt.month - 1) + (dt.day - 1) / float(days_in_m)
+                return None
+
+            # Calculate event timing across 60-month window (36m before to 1y after Y)
             s_event_months = []
             w_event_months = []
-            if df_q_raw is not None and clean_name in df_q_raw.columns:
-                try:
-                    df_m_q = df_q_raw[['time', 'year', clean_name]].dropna()
-                    s_q_m = df_m_q.set_index('time')[clean_name]
-                    q_30d_m = s_q_m.rolling(30, center=True, min_periods=15).mean()
+            s_event_qvals = []
+            w_event_qvals = []
 
-                    for ry in cluster_rel_years:
-                        cy = gwl_yr + ry
-                        # Summer event timing (JJA)
+            if q_s is not None:
+                for ry in cluster_rel_years:
+                    cy = gwl_yr + ry
+                    
+                    for y_check in [cy - 3, cy - 2, cy - 1, cy, cy + 1]:
+                        # Summer event (JJA)
                         try:
-                            sub_s = q_30d_m.loc[f'{cy}-06-01':f'{cy}-09-30']
+                            sub_s = q_s.loc[f'{y_check}-06-01':f'{y_check}-09-30']
                             if not sub_s.empty and sub_s.min() < thresh_30q10:
-                                t_min_s = sub_s.idxmin()
-                                m_val = t_min_s.month + (t_min_s.day - 1) / 31.0
-                                s_event_months.append(m_val)
+                                t_min = sub_s.idxmin()
+                                idx = get_day_60m_idx(t_min, cy)
+                                if idx is not None:
+                                    s_event_months.append(idx)
+                                    s_event_qvals.append(sub_s.min())
                         except Exception:
                             pass
 
-                        # Winter event timing (DJF)
+                        # Winter event (DJF)
                         try:
-                            sub_w = q_30d_m.loc[f'{cy-1}-12-01':f'{cy}-03-15']
+                            sub_w = q_s.loc[f'{y_check}-12-01':f'{y_check+1}-03-15']
                             if not sub_w.empty and sub_w.min() < thresh_30q10:
-                                t_min_w = sub_w.idxmin()
-                                m_val = (t_min_w.month if t_min_w.month != 12 else 0) + (t_min_w.day - 1) / 31.0
-                                if m_val < 0.5:
-                                    m_val = 12.0 + (t_min_w.day - 1) / 31.0
-                                w_event_months.append(m_val)
+                                t_min = sub_w.idxmin()
+                                idx = get_day_60m_idx(t_min, cy)
+                                if idx is not None:
+                                    w_event_months.append(idx)
+                                    w_event_qvals.append(sub_w.min())
                         except Exception:
                             pass
-                except Exception as e:
-                    logging.warning(f"Could not calculate event timing for {clean_name}: {e}")
 
             # Determine Group Classification
             is_high_s = is_in_list(m_key, clean_name, ext_s)
@@ -8943,57 +8990,148 @@ class Visualizer:
                 'grp_s': grp_s,
                 'grp_w': grp_w,
                 'cluster_rel_years': cluster_rel_years,
+                'thresh_30q10': thresh_30q10,
                 's_event_months': s_event_months,
                 'w_event_months': w_event_months,
-                'pr_df': pr_df,
-                'tas_df': tas_df,
-                'q_df': q_df,
-                'u850_df': u850_df
+                's_event_qvals': s_event_qvals,
+                'w_event_qvals': w_event_qvals,
+                'pr_s': pr_s,
+                'tas_s': tas_s,
+                'q_s': q_s,
+                'u850_s': u850_s
             })
 
         if not model_records:
             logging.error("Cannot plot Final Figure 10: No valid model records.")
             return
 
-        # Setup figure layout (4 rows x 4 columns: larger size, sharex=False so all subplots show X labels)
-        fig, axes = plt.subplots(4, 4, figsize=(20, 20), sharex=False)
-        month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-        month_indices = np.arange(1, 13)
+        # Setup figure layout (4 rows x 4 columns: sharex=False so all subplots show X labels)
+        fig, axes = plt.subplots(4, 4, figsize=(24, 20), sharex=False)
+        
+        month_names = []
+        years_rel = ['Y-3', 'Y-2', 'Y-1', 'Y', 'Y+1']
+        m_short = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        for y_str in years_rel:
+            for m_idx, m_name in enumerate(m_short):
+                if m_idx == 0:
+                    month_names.append(f"{m_name}\n({y_str})")
+                else:
+                    month_names.append(m_name)
+                    
+        month_indices = np.arange(1, 61)
+        month_indices_3m = month_indices[::3]
+        month_names_3m = [month_names[i] for i in range(0, len(month_names), 3)]
+        grid_x = np.linspace(1.0, 61.0, 1826)
 
         high_col = '#b2182b' # Dark Crimson
         low_col  = '#2166ac' # Dark Blue
         diff_col = '#7a0177' # Deep Purple for difference
 
-        def calc_seasonal_cycle_for_models(rec_list, target_rel_years_dict, var_col, df_key):
+        def calc_60m_30d_cycle_for_models(rec_list, target_rel_years_dict, s_key):
             """
-            Computes average 12-month seasonal cycle across models in rec_list.
+            Computes average 60-month (5-year) 30-day centered running mean cycle across models in rec_list.
+            Spans 36 months before (Y-3..Y-1), cluster event year Y, and 1 year after (Y+1).
             """
-            model_cycles = []
+            model_curves = []
             for rec in rec_list:
-                df = rec.get(df_key)
-                if df is None or df.empty or var_col not in df.columns:
+                s = rec.get(s_key)
+                if s is None or s.empty:
                     continue
                 gwl_yr = rec['gwl_year']
                 rel_yrs = target_rel_years_dict.get(rec['name'], rec['cluster_rel_years'])
                 if not rel_yrs:
                     rel_yrs = np.arange(-15, 16)
                 
-                sel_cal_years = [gwl_yr + ry for ry in rel_yrs]
-                df_sub = df[df['year'].isin(sel_cal_years)]
-                if df_sub.empty:
+                event_curves = []
+                for ry in rel_yrs:
+                    cy = gwl_yr + ry
+                    try:
+                        sub = s.loc[f'{cy-3}-01-01':f'{cy+1}-12-31']
+                        min_len = 30 if s_key == 'u850_s' else 1000
+                        if sub.empty or len(sub) < min_len:
+                            continue
+                        
+                        x_vals = []
+                        y_vals = []
+                        for dt, val in sub.items():
+                            if np.isfinite(val):
+                                x_i = get_day_60m_idx(dt, cy)
+                                if x_i is not None:
+                                    x_vals.append(x_i)
+                                    y_vals.append(val)
+                        
+                        if len(x_vals) >= min_len:
+                            order = np.argsort(x_vals)
+                            x_arr = np.array(x_vals)[order]
+                            y_arr = np.array(y_vals)[order]
+                            
+                            x_uniq, u_idx = np.unique(x_arr, return_index=True)
+                            y_uniq = y_arr[u_idx]
+                            
+                            curve_interp = np.interp(grid_x, x_uniq, y_uniq)
+                            min_finite = 30 if s_key == 'u850_s' else 1200
+                            if np.sum(np.isfinite(curve_interp)) >= min_finite:
+                                event_curves.append(curve_interp)
+                    except Exception:
+                        pass
+                
+                if event_curves:
+                    m_curve = np.nanmean(event_curves, axis=0)
+                    min_finite = 30 if s_key == 'u850_s' else 1200
+                    if np.sum(np.isfinite(m_curve)) >= min_finite:
+                        model_curves.append(m_curve)
+            
+            if not model_curves:
+                return None, None, None, None
+            arr = np.array(model_curves)
+            mean_curve = np.nanmean(arr, axis=0)
+            min_curve = np.nanmin(arr, axis=0)
+            max_curve = np.nanmax(arr, axis=0)
+            return mean_curve, min_curve, max_curve, arr
+
+        # Helper for grouping coincident event dots and annotating event count badges
+        def plot_event_dots_with_counts(ax_target, x_vals, y_vals, color_hex, label_str, is_discharge=False):
+            if not x_vals:
+                return
+            x_arr = np.array(x_vals)
+            y_arr = np.array(y_vals) if y_vals is not None and len(y_vals) == len(x_vals) else None
+            
+            # Cluster events purely by time (X coordinate) within ~10 days (x_thresh = 0.35 month)
+            used = np.zeros(len(x_arr), dtype=bool)
+            x_thresh = 0.35  # fractional month (~10 days)
+
+            first = True
+            for i in range(len(x_arr)):
+                if used[i]:
                     continue
                 
-                cycle = df_sub.groupby('month')[var_col].mean()
-                cycle = cycle.reindex(month_indices).values
-                if np.all(np.isfinite(cycle)):
-                    model_cycles.append(cycle)
-            
-            if not model_cycles:
-                return None, None, None
-            arr = np.array(model_cycles)
-            mean_cycle = np.nanmean(arr, axis=0)
-            std_cycle = np.nanstd(arr, axis=0)
-            return mean_cycle, std_cycle, arr
+                # Group all events occurring at nearly the same date
+                dist = np.abs(x_arr - x_arr[i])
+                cluster_idx = np.where(~used & (dist <= x_thresh))[0]
+                    
+                used[cluster_idx] = True
+                count = len(cluster_idx)
+                
+                cx = float(np.mean(x_arr[cluster_idx]))
+                if is_discharge and y_arr is not None:
+                    cy = float(np.mean(y_arr[cluster_idx]))
+                else:
+                    cy = float(y_vals[0])
+                
+                lbl = label_str if first else None
+                first = False
+                
+                ax_target.scatter(cx, cy, color=color_hex, marker='o', s=30 if is_discharge else 24,
+                                  edgecolor='black', linewidth=0.5, zorder=6, alpha=0.75, label=lbl)
+                
+                if count > 1:
+                    import matplotlib.patheffects as pe
+                    y_span = ax_target.get_ylim()[1] - ax_target.get_ylim()[0]
+                    y_off = (0.025 * y_span) if is_discharge else (0.03 * y_span)
+                    
+                    ax_target.text(cx, cy + y_off, str(count), fontsize=7.0, weight='bold', color=color_hex,
+                                   ha='center', va='bottom', zorder=7,
+                                   path_effects=[pe.withStroke(linewidth=1.5, foreground='white')])
 
         sections = [
             ('summer', 'Summer Storyline Classification', axes[0], axes[1],
@@ -9003,10 +9141,10 @@ class Visualizer:
         ]
 
         var_configs = [
-            ('pr_mean', 'pr_df', 'Precipitation', 'Precipitation (mm/day)', '$\\Delta$ Precipitation (mm/day)'),
-            ('tas_mean', 'tas_df', 'Temperature', 'Temperature (°C)', '$\\Delta$ Temperature (°C)'),
-            ('u850_mean', 'u850_df', 'U850 Wind Speed (u>0)', 'U850 Wind Speed (m/s)', '$\\Delta$ U850 Wind Speed (m/s)'),
-            ('q_mean', 'q_df', 'Discharge', 'Discharge ($m^3/s$)', '$\\Delta$ Discharge ($m^3/s$)')
+            ('pr_s', 'Precipitation', 'Precipitation (mm/day)', '$\\Delta$ Precipitation (mm/day)'),
+            ('tas_s', 'Temperature', 'Temperature (°C)', '$\\Delta$ Temperature (°C)'),
+            ('u850_s', 'U850 Wind Speed (u>0)', 'U850 Wind Speed (m/s)', '$\\Delta$ U850 Wind Speed (m/s)'),
+            ('q_s', 'Discharge', 'Discharge ($m^3/s$)', '$\\Delta$ Discharge ($m^3/s$)')
         ]
 
         for s_idx, (season_mode, s_title, row_cycles_axes, row_diff_axes, letters_cyc, letters_diff) in enumerate(sections):
@@ -9022,113 +9160,664 @@ class Visualizer:
             hf_target_years = {r['name']: r['cluster_rel_years'] if r['cluster_rel_years'] else all_hf_rel_years for r in hf_recs}
             lf_target_years = {r['name']: all_hf_rel_years for r in lf_recs}
 
-            # Collect 30Q10 low-flow event months across HF models
+            # Collect 30Q10 low-flow event months and qvals across HF models
             hf_s_event_months = [m for r in hf_recs for m in r['s_event_months']]
             hf_w_event_months = [m for r in hf_recs for m in r['w_event_months']]
+            hf_s_event_qvals  = [q for r in hf_recs for q in r['s_event_qvals']]
+            hf_w_event_qvals  = [q for r in hf_recs for q in r['w_event_qvals']]
+
+            # Compute CMIP6 1985-2014 historical 30Q10 threshold min, max, mean
+            cmip6_thresh_vals = [r['thresh_30q10'] for r in model_records if 'thresh_30q10' in r and np.isfinite(r['thresh_30q10'])]
+            if cmip6_thresh_vals:
+                thresh_min = np.min(cmip6_thresh_vals)
+                thresh_max = np.max(cmip6_thresh_vals)
+                thresh_mean = np.mean(cmip6_thresh_vals)
+            else:
+                thresh_min, thresh_max, thresh_mean = None, None, None
 
             # Subheader banners across the top of each row section
             row_cycles_axes[0].annotate(
-                f"SECTION {s_idx+1}A: {s_title.upper()} — MEAN SEASONAL CYCLES",
-                xy=(0.0, 1.28), xycoords='axes fraction', fontsize=11.5, weight='bold', color='#111111',
+                f"SECTION {s_idx+1}A: {s_title.upper()} — 60-MONTH 30-DAY RUNNING MEAN COMPOSITES (36M PRE TO 1Y POST)",
+                xy=(0.0, 1.36), xycoords='axes fraction', fontsize=11.5, weight='bold', color='#111111',
                 bbox=dict(boxstyle='round,pad=0.3', facecolor='#e6f2ff' if s_idx==0 else '#e6ffe6', edgecolor='none', alpha=0.9)
             )
             row_diff_axes[0].annotate(
                 f"SECTION {s_idx+1}B: {s_title.upper()} — ABSOLUTE DIFFERENCE (HIGH-FREQ. − LOW-FREQ.)",
-                xy=(0.0, 1.28), xycoords='axes fraction', fontsize=11.5, weight='bold', color='#5c007a',
+                xy=(0.0, 1.36), xycoords='axes fraction', fontsize=11.5, weight='bold', color='#5c007a',
                 bbox=dict(boxstyle='round,pad=0.3', facecolor='#f3e6ff', edgecolor='none', alpha=0.9)
             )
 
-            for v_idx, (var_col, df_key, var_label, y_label_cyc, y_label_diff) in enumerate(var_configs):
+            for v_idx, (s_key, var_label, y_label_cyc, y_label_diff) in enumerate(var_configs):
                 ax_cyc = row_cycles_axes[v_idx]
                 ax_diff = row_diff_axes[v_idx]
 
                 letter_cyc = letters_cyc[v_idx]
                 letter_diff = letters_diff[v_idx]
 
-                m_hf, std_hf, _ = calc_seasonal_cycle_for_models(hf_recs, hf_target_years, var_col, df_key)
-                m_lf, std_lf, _ = calc_seasonal_cycle_for_models(lf_recs, lf_target_years, var_col, df_key)
+                m_hf, min_hf, max_hf, _ = calc_60m_30d_cycle_for_models(hf_recs, hf_target_years, s_key)
+                m_lf, min_lf, max_lf, _ = calc_60m_30d_cycle_for_models(lf_recs, lf_target_years, s_key)
 
-                # 1. Plot Seasonal Cycles
+                # Add year-transition lines & cluster season background bands
+                for ax_target in [ax_cyc, ax_diff]:
+                    ax_target.axvline(13.0, color='gray', linestyle='--', linewidth=0.9, alpha=0.5) # Start Y-2
+                    ax_target.axvline(25.0, color='gray', linestyle='--', linewidth=0.9, alpha=0.5) # Start Y-1
+                    ax_target.axvline(37.0, color='gray', linestyle='--', linewidth=1.3, alpha=0.85) # Start Event Year Y
+                    ax_target.axvline(49.0, color='gray', linestyle='--', linewidth=1.3, alpha=0.85) # Start Post Year Y+1
+                    
+                    # Background shading for Cluster Event Year Y seasons
+                    ax_target.axvspan(42.0, 45.0, color='#fee08b', alpha=0.18, zorder=0) # Cluster Summer JJA Y
+                    ax_target.axvspan(48.0, 51.0, color='#e0f3f8', alpha=0.18, zorder=0) # Cluster Winter DJF Y/Y+1
+
+                # 1. Plot 60-Month 30d Running Mean Composites (Shade 100% min-max model spread)
                 if m_hf is not None:
-                    ax_cyc.plot(month_indices, m_hf, color=high_col, linewidth=2.4, marker='o', markersize=5, label=f'High-Freq. ({len(hf_recs)} models)')
-                    ax_cyc.fill_between(month_indices, m_hf - std_hf, m_hf + std_hf, color=high_col, alpha=0.18)
+                    ax_cyc.plot(grid_x, m_hf, color=high_col, linewidth=2.4, label=f'High-Freq. ({len(hf_recs)} models)')
+                    ax_cyc.fill_between(grid_x, min_hf, max_hf, color=high_col, alpha=0.18)
 
                 if m_lf is not None:
-                    ax_cyc.plot(month_indices, m_lf, color=low_col, linewidth=2.4, marker='s', markersize=5, linestyle='--', label=f'Low-Freq. ({len(lf_recs)} models)')
-                    ax_cyc.fill_between(month_indices, m_lf - std_lf, m_lf + std_lf, color=low_col, alpha=0.18)
+                    ax_cyc.plot(grid_x, m_lf, color=low_col, linewidth=2.4, linestyle='--', label=f'Low-Freq. ({len(lf_recs)} models)')
+                    ax_cyc.fill_between(grid_x, min_lf, max_lf, color=low_col, alpha=0.18)
 
-                # Plot 30Q10 Low-Flow Event Timing Scatter Dots along bottom of x-axis
+                # Plot 30Q10 Low-Flow Event Timing & Discharge Scatter Dots (with count badges for overlapping events)
+                if s_key == 'q_s':
+                    # Add CMIP6 1985-2014 historical 30Q10 threshold band & mean line
+                    if thresh_min is not None and thresh_max is not None and thresh_mean is not None:
+                        ax_cyc.axhspan(thresh_min, thresh_max, color='#d62728', alpha=0.14, zorder=1,
+                                       label=f'CMIP6 Hist. 30Q10 Band ({int(thresh_min)}–{int(thresh_max)} $m^3/s$)')
+                        ax_cyc.axhline(thresh_mean, color='#a50f15', linestyle='--', linewidth=1.4, alpha=0.9,
+                                       label=f'CMIP6 Hist. 30Q10 Mean (~{int(thresh_mean)} $m^3/s$)')
+
+                # Plot scatter dots as timing markers along fixed horizontal baseline at bottom of plot (zero vertical height variation)
                 y_min_c, y_max_c = ax_cyc.get_ylim()
                 y_rng_c = y_max_c - y_min_c
-                y_pos_s = y_min_c + y_rng_c * 0.05
-                y_pos_w = y_min_c + y_rng_c * 0.09
+                y_pos_s = [y_min_c + y_rng_c * 0.05] * len(hf_s_event_months)
+                y_pos_w = [y_min_c + y_rng_c * 0.09] * len(hf_w_event_months)
 
-                np.random.seed(42)
                 if hf_s_event_months:
-                    jit_s = np.random.uniform(-y_rng_c * 0.012, y_rng_c * 0.012, size=len(hf_s_event_months))
-                    ax_cyc.scatter(hf_s_event_months, y_pos_s + jit_s, color='#d62728', marker='o', s=32,
-                                   edgecolor='black', linewidth=0.5, zorder=6, alpha=0.85, label='Summer 30Q10 Event')
-
+                    plot_event_dots_with_counts(ax_cyc, hf_s_event_months, y_pos_s, '#d62728', 'Summer Event Timing', is_discharge=False)
                 if hf_w_event_months:
-                    jit_w = np.random.uniform(-y_rng_c * 0.012, y_rng_c * 0.012, size=len(hf_w_event_months))
-                    ax_cyc.scatter(hf_w_event_months, y_pos_w + jit_w, color='#1f77b4', marker='o', s=32,
-                                   edgecolor='black', linewidth=0.5, zorder=6, alpha=0.85, label='Winter 30Q10 Event')
+                    plot_event_dots_with_counts(ax_cyc, hf_w_event_months, y_pos_w, '#1f77b4', 'Winter Event Timing', is_discharge=False)
 
-                ax_cyc.set_xticks(month_indices)
-                ax_cyc.set_xticklabels(month_names, fontsize=9.5, weight='bold')
-                ax_cyc.tick_params(axis='x', labelbottom=True, labelsize=9.5)
-                ax_cyc.set_xlabel("Month", fontsize=9.5, weight='bold')
+                ax_cyc.set_xticks(month_indices_3m)
+                ax_cyc.set_xticklabels(month_names_3m, fontsize=6.5, weight='bold', rotation=90, ha='center')
+                ax_cyc.tick_params(axis='x', labelbottom=True, labelsize=6.5)
+                ax_cyc.set_xlabel("Month (5-Year Sequence: 36 Months Before to 1 Year After Cluster Event Year Y)", fontsize=8.0, weight='bold')
                 ax_cyc.set_ylabel(y_label_cyc, fontsize=9.5, weight='bold')
-                ax_cyc.set_title(f"{letter_cyc} {var_label}", fontsize=11.0, weight='bold', loc='left', pad=6)
+                ax_cyc.set_title(f"{letter_cyc} {var_label} (30-Day Centered Mean)", fontsize=10.5, weight='bold', loc='left', pad=20)
                 ax_cyc.grid(True, linestyle=':', alpha=0.6)
-                ax_cyc.legend(loc='best', fontsize=8.0, frameon=True)
+                ax_cyc.legend(loc='lower left', bbox_to_anchor=(0.0, 1.01), ncol=3, fontsize=6.8, frameon=False)
 
                 # 2. Plot Absolute Difference (High - Low)
                 if m_hf is not None and m_lf is not None:
                     diff_vals = m_hf - m_lf
                     ax_diff.axhline(0, color='gray', linestyle='--', linewidth=1.1, alpha=0.7)
-                    ax_diff.plot(month_indices, diff_vals, color=diff_col, linewidth=2.4, marker='d', markersize=5, label='Abs. Diff. (High − Low)')
+                    ax_diff.plot(grid_x, diff_vals, color=diff_col, linewidth=2.4, label='Abs. Diff. (High − Low)')
                     
-                    ax_diff.fill_between(month_indices, 0, diff_vals, where=(diff_vals >= 0), color='#d7191c', alpha=0.22, interpolate=True)
-                    ax_diff.fill_between(month_indices, 0, diff_vals, where=(diff_vals < 0), color='#2b83ba', alpha=0.22, interpolate=True)
+                    ax_diff.fill_between(grid_x, 0, diff_vals, where=(diff_vals >= 0), color='#d7191c', alpha=0.22, interpolate=True)
+                    ax_diff.fill_between(grid_x, 0, diff_vals, where=(diff_vals < 0), color='#2b83ba', alpha=0.22, interpolate=True)
 
                 y_min_d, y_max_d = ax_diff.get_ylim()
                 y_rng_d = y_max_d - y_min_d
-                y_pos_sd = y_min_d + y_rng_d * 0.05
-                y_pos_wd = y_min_d + y_rng_d * 0.09
+                y_pos_sd = [y_min_d + y_rng_d * 0.05] * len(hf_s_event_months)
+                y_pos_wd = [y_min_d + y_rng_d * 0.09] * len(hf_w_event_months)
 
                 if hf_s_event_months:
-                    jit_sd = np.random.uniform(-y_rng_d * 0.012, y_rng_d * 0.012, size=len(hf_s_event_months))
-                    ax_diff.scatter(hf_s_event_months, y_pos_sd + jit_sd, color='#d62728', marker='o', s=32,
-                                    edgecolor='black', linewidth=0.5, zorder=6, alpha=0.85, label='Summer 30Q10 Event')
-
+                    plot_event_dots_with_counts(ax_diff, hf_s_event_months, y_pos_sd, '#d62728', 'Summer Event Timing', is_discharge=False)
                 if hf_w_event_months:
-                    jit_wd = np.random.uniform(-y_rng_d * 0.012, y_rng_d * 0.012, size=len(hf_w_event_months))
-                    ax_diff.scatter(hf_w_event_months, y_pos_wd + jit_wd, color='#1f77b4', marker='o', s=32,
-                                    edgecolor='black', linewidth=0.5, zorder=6, alpha=0.85, label='Winter 30Q10 Event')
+                    plot_event_dots_with_counts(ax_diff, hf_w_event_months, y_pos_wd, '#1f77b4', 'Winter Event Timing', is_discharge=False)
 
-                ax_diff.set_xticks(month_indices)
-                ax_diff.set_xticklabels(month_names, fontsize=9.5, weight='bold')
-                ax_diff.tick_params(axis='x', labelbottom=True, labelsize=9.5)
-                ax_diff.set_xlabel("Month", fontsize=9.5, weight='bold')
+                ax_diff.set_xticks(month_indices_3m)
+                ax_diff.set_xticklabels(month_names_3m, fontsize=6.5, weight='bold', rotation=90, ha='center')
+                ax_diff.tick_params(axis='x', labelbottom=True, labelsize=6.5)
+                ax_diff.set_xlabel("Month (5-Year Sequence: 36 Months Before to 1 Year After Cluster Event Year Y)", fontsize=8.0, weight='bold')
                 ax_diff.set_ylabel(y_label_diff, fontsize=9.5, weight='bold')
-                ax_diff.set_title(f"{letter_diff} $\\Delta$ {var_label} (High − Low)", fontsize=11.0, weight='bold', loc='left', pad=6)
+                ax_diff.set_title(f"{letter_diff} $\\Delta$ {var_label} (High − Low)", fontsize=10.5, weight='bold', loc='left', pad=20)
                 ax_diff.grid(True, linestyle=':', alpha=0.6)
-                ax_diff.legend(loc='best', fontsize=8.0, frameon=True)
+                ax_diff.legend(loc='lower left', bbox_to_anchor=(0.0, 1.01), ncol=3, fontsize=6.8, frameon=False)
 
         fig.suptitle(
-            f"Final Figure 10: GWL +{target_gwl:.1f}°C Seasonal Cycles & Absolute Differences ({Visualizer._format_scenario_title(scenario)})\n"
-            f"Comparing High- vs. Low-Frequency Storylines Filtered for Low-Flow Cluster Event Years (30Q10 Event Timing Dots)",
+            f"Final Figure 10: GWL +{target_gwl:.1f}°C 60-Month 30-Day Centered Running Mean Composites & Differences ({Visualizer._format_scenario_title(scenario)})\n"
+            f"Comparing High- vs. Low-Frequency Storylines (5-Year Window: 36 Months Before to 1 Year After Cluster Event Year Y)",
             fontsize=13.0, weight='bold', y=0.996
         )
 
         fig.tight_layout(rect=(0, 0.01, 1, 0.97))
-        fig.subplots_adjust(hspace=0.58, wspace=0.30)
+        fig.subplots_adjust(hspace=0.75, wspace=0.30)
 
         plt.savefig(filepath_png, dpi=300, bbox_inches='tight')
         plt.savefig(filepath_pdf, bbox_inches='tight')
         plt.close(fig)
         logging.info(f"Successfully generated 16-Panel Final Figure 10: {filepath_png} and {filepath_pdf}")
+
+    @staticmethod
+    def plot_final_figure_11_hf_vs_ref_timeseries(
+        cmip6_results, discharge_data_loaded, config, scenario='ssp585', target_gwl=3.0, ref_model_name='CNRM-ESM2-1', return_period_results=None
+    ):
+        """
+        Creates Final Figure 11: Full Timeseries (1960-2100) and 21-Year Rolling Monthly Standard Deviation
+        Variability (1-Sigma & 2-Sigma Bands) for each High-Frequency Storyline Model.
+        
+        Subplot layout per model (10 models total, 1 page per model in vector PDF):
+          - Section Header Banner: MODEL N: HF_MODEL (SSP5-8.5 1960-2100)
+          - 8 vertically stacked subplots sharing 1960-2100 X-axis with GridSpec height ratios [2.5, 1.0, 2.5, 1.0, 2.5, 1.0, 2.5, 1.0]:
+            1. Precipitation Timeseries
+            2. Precipitation 21-Year Rolling Monthly Std. Dev. (1σ & 2σ Bands) [compact]
+            3. Temperature Timeseries
+            4. Temperature 21-Year Rolling Monthly Std. Dev. (1σ & 2σ Bands) [compact]
+            5. U850 Wind Speed Timeseries
+            6. U850 21-Year Rolling Monthly Std. Dev. (1σ & 2σ Bands) [compact]
+            7. Discharge Timeseries with 30Q10 threshold line and Low-Flow Event dots
+            8. Discharge 21-Year Rolling Monthly Std. Dev. (1σ & 2σ Bands) [compact]
+        """
+        import os
+        import pandas as pd
+        import numpy as np
+        import glob
+        import xarray as xr
+        import re
+        import matplotlib.pyplot as plt
+        import matplotlib.gridspec as gridspec
+        import matplotlib.patches as mpatches
+        import matplotlib.dates as mdates
+        import matplotlib.ticker as mticker
+        from matplotlib.backends.backend_pdf import PdfPages
+
+        filename_png = f"final_figure_11_hf_timeseries_std_{scenario}_gwl{target_gwl:.1f}.png"
+        filename_pdf = f"final_figure_11_hf_timeseries_std_{scenario}_gwl{target_gwl:.1f}.pdf"
+        filepath_png = os.path.join(config.PLOT_DIR, filename_png)
+        filepath_pdf = os.path.join(config.PLOT_DIR, filename_pdf)
+
+        logging.info(f"Plotting Final Figure 11 (Full Timeseries & Rolling Monthly Std 1σ/2σ Bands 1960-2100) to {filepath_pdf}...")
+        Visualizer.ensure_plot_dir_exists()
+
+        if not cmip6_results:
+            logging.error("Cannot plot Final Figure 11: Missing cmip6_results.")
+            return
+
+        def clean_model_name(s):
+            if not s: return ''
+            s = str(s).strip()
+            for scn in ['ssp585', 'ssp245', 'ssp126', 'historical']:
+                if s.endswith(f'_{scn}'):
+                    s = s[:-len(scn)-1]
+            s = re.sub(r'_r\d+i\d+p\d+f\d+$', '', s)
+            return s.strip()
+
+        # 1. Extract High-Frequency Storyline Models (N=10)
+        ext_s, non_s, ext_w, non_w = [], [], [], []
+        if return_period_results and 'data' in return_period_results and target_gwl in return_period_results['data']:
+            try:
+                gwl_node = return_period_results['data'][target_gwl]
+                ext_s = gwl_node.get('summer', {}).get('Extreme Models', {}).get('30Q10_low', {}).get('future_keys_all_models', [])
+                ext_w = gwl_node.get('winter', {}).get('Extreme Models', {}).get('30Q10_low', {}).get('future_keys_all_models', [])
+            except Exception:
+                pass
+
+        storyline_classification_2d = cmip6_results.get('storyline_classification_2d', {}) if cmip6_results else {}
+        if target_gwl in storyline_classification_2d:
+            if not ext_s: ext_s = storyline_classification_2d[target_gwl].get('JJA_Extreme Models', storyline_classification_2d[target_gwl].get('summer_Extreme Models', []))
+            if not ext_w: ext_w = storyline_classification_2d[target_gwl].get('DJF_Extreme Models', storyline_classification_2d[target_gwl].get('winter_Extreme Models', []))
+
+        if not ext_s:
+            try:
+                from storyline import StorylineAnalyzer
+                analyzer = StorylineAnalyzer(config)
+                ext_s_calc, _, _ = analyzer.get_composite_extreme_models(cmip6_results, target_gwl, '30Q10_low', 'Summer')
+                if ext_s_calc: ext_s = ext_s_calc
+            except Exception as e:
+                logging.warning(f"Could not calculate composite extreme models for Fig 11: {e}")
+
+        metric_timeseries = cmip6_results.get('model_metric_timeseries', {})
+        if not ext_s:
+            ext_s = [k for k in metric_timeseries.keys() if k.endswith(scenario)]
+
+        hf_models_clean = []
+        for m in ext_s:
+            c_name = clean_model_name(m)
+            if c_name not in hf_models_clean:
+                hf_models_clean.append(c_name)
+
+        hf_models_clean = hf_models_clean[:10]
+        if not hf_models_clean:
+            logging.error("Cannot plot Final Figure 11: No High-Frequency models identified.")
+            return
+
+        # Helper to compute historical 30Q10 low-flow threshold per model (1985-2014 baseline)
+        def calc_hist_30q10_thresh(c_name):
+            m_key = f"{c_name}_{scenario}"
+            ts_dict = metric_timeseries.get(m_key, metric_timeseries.get(c_name, {}))
+            ts_annual = ts_dict.get('30Q_low_full_year')
+            if ts_annual is not None:
+                try:
+                    hist_slice = ts_annual.sel(year=slice(1985, 2014))
+                    if hist_slice.year.size < 10:
+                        hist_slice = ts_annual.sel(year=slice(1960, 2014))
+                except Exception:
+                    hist_slice = ts_annual.where(ts_annual.year < 2015, drop=True)
+                hist_vals = hist_slice.values
+                hist_vals = hist_vals[np.isfinite(hist_vals)]
+                if len(hist_vals) >= 10:
+                    return float(np.quantile(hist_vals, 0.10))
+            return None
+
+        # Helper to compute standardized monthly anomalies relative to reference baseline period (1985-2014)
+        def compute_standardized_anomalies(s_series, ref_start=1985, ref_end=2014):
+            if not isinstance(s_series, pd.Series) or s_series.empty:
+                return None
+            try:
+                s_clean = s_series.dropna().sort_index()
+                if s_clean.empty:
+                    return None
+                
+                dt_index = pd.DatetimeIndex(s_clean.index)
+                df_s = pd.DataFrame({
+                    'year': [d.year for d in dt_index],
+                    'month': [d.month for d in dt_index],
+                    'val': s_clean.values
+                }, index=dt_index)
+                
+                df_ref = df_s[(df_s['year'] >= ref_start) & (df_s['year'] <= ref_end)]
+                if df_ref.empty or len(df_ref['year'].unique()) < 5:
+                    df_ref = df_s[df_s['year'] <= 2014]
+                
+                monthly_stats = {}
+                for m in range(1, 13):
+                    m_vals = df_ref.loc[df_ref['month'] == m, 'val'].values
+                    if len(m_vals) >= 3:
+                        m_mean = float(np.mean(m_vals))
+                        m_std = float(np.std(m_vals, ddof=1))
+                    else:
+                        m_mean = np.nan
+                        m_std = np.nan
+                    monthly_stats[m] = (m_mean, m_std)
+                    
+                z_vals = []
+                for dt, val in zip(dt_index, s_clean.values):
+                    m = dt.month
+                    m_mean, m_std = monthly_stats.get(m, (np.nan, np.nan))
+                    if np.isfinite(m_std) and m_std > 0 and np.isfinite(m_mean):
+                        z_vals.append((val - m_mean) / m_std)
+                    else:
+                        z_vals.append(np.nan)
+                        
+                return pd.Series(z_vals, index=s_clean.index)
+            except Exception as e:
+                logging.warning(f"Error computing standardized anomalies: {e}")
+                return None
+
+        # Helper to compute 21-year rolling monthly standard deviation (accounting for seasonality)
+        def compute_rolling_monthly_std(s_series, window_years=21):
+            if not isinstance(s_series, pd.Series) or s_series.empty:
+                return None, None
+            try:
+                s_clean = s_series.dropna().sort_index()
+                if s_clean.empty:
+                    return None, None
+
+                dt_idx = pd.DatetimeIndex(s_clean.index)
+                df_s = pd.DataFrame({
+                    'year': [d.year for d in dt_idx],
+                    'month': [d.month for d in dt_idx],
+                    'val': s_clean.values
+                })
+                
+                half_w = window_years // 2 # 10 years
+                unique_ym = df_s[['year', 'month']].drop_duplicates().values
+                
+                std_dict = {}
+                for y_curr, m_curr in unique_ym:
+                    y_curr = int(y_curr)
+                    m_curr = int(m_curr)
+                    y_min = max(1960, y_curr - half_w)
+                    y_max = min(2100, y_curr + half_w)
+                    
+                    sub_vals = df_s.loc[(df_s['year'] >= y_min) & (df_s['year'] <= y_max) & (df_s['month'] == m_curr), 'val'].values
+                    if len(sub_vals) >= 4:
+                        std_dict[(y_curr, m_curr)] = float(np.std(sub_vals, ddof=1))
+                    else:
+                        std_dict[(y_curr, m_curr)] = np.nan
+                        
+                std_1s = [std_dict.get((dt.year, dt.month), np.nan) for dt in s_clean.index]
+                s_1sigma = pd.Series(std_1s, index=s_clean.index)
+                s_2sigma = s_1sigma * 2.0
+                return s_1sigma, s_2sigma
+            except Exception as e:
+                logging.warning(f"Error computing rolling monthly std: {e}")
+                return None, None
+
+        # 2. Setup Data Loading Helpers
+        discharge_filepath = getattr(config, f"DISCHARGE_{scenario.upper()}_FILE", None)
+        if not discharge_filepath or not os.path.exists(discharge_filepath):
+            discharge_filepath = os.path.join(config.DATA_BASE_PATH, f"CP65_{'8.5' if scenario=='ssp585' else '4.5'}-Tabelle_1.csv")
+
+        df_q_raw = None
+        if os.path.exists(discharge_filepath):
+            try:
+                df_q_raw = pd.read_csv(discharge_filepath, sep=';', decimal=',', na_values=['-0,01'])
+                date_col = df_q_raw.columns[0]
+                df_q_raw = df_q_raw.rename(columns={date_col: 'date'})
+                df_q_raw['time'] = pd.to_datetime(df_q_raw['date'])
+                for col in df_q_raw.columns:
+                    if col not in ['date', 'time', 'year', 'month', 'day']:
+                        df_q_raw[col] = pd.to_numeric(df_q_raw[col], errors='coerce')
+            except Exception as e:
+                logging.warning(f"Failed to load discharge CSV in Fig 11: {e}")
+
+        catchment_dirs = [
+            '/nas/home/vlw/Desktop/STREAM/final-bias-adjusted-data',
+            '/nas/home/vlw/Desktop/STREAM/copernicus-final-adjusted-data',
+            '/nas/home/vlw/Desktop/STREAM/in-catchment-data',
+            '/nas/home/vlw/Desktop/STREAM/copernicus-in-catchment'
+        ]
+
+        def find_catchment_files(model_name, scn):
+            for c_dir in catchment_dirs:
+                ba_pr1 = os.path.join(c_dir, f"MONTHLY_*_{model_name}_*pr_{scn}_count-*.csv")
+                ba_pr2 = os.path.join(c_dir, f"MONTHLY_*_{model_name}_pr_{scn}_count-*.csv")
+                f_pr_ba = sorted(glob.glob(ba_pr1) + glob.glob(ba_pr2))
+                
+                ba_tas1 = os.path.join(c_dir, f"MONTHLY_*_{model_name}_*tas_{scn}_count-*.csv")
+                ba_tas2 = os.path.join(c_dir, f"MONTHLY_*_{model_name}_tas_{scn}_count-*.csv")
+                f_tas_ba = sorted(glob.glob(ba_tas1) + glob.glob(ba_tas2))
+                
+                if f_pr_ba and f_tas_ba:
+                    return f_pr_ba[0], f_tas_ba[0]
+                
+                p1_pr = os.path.join(c_dir, f"{model_name}_pr_{scn}_*_in-catchment-units.csv")
+                p2_pr = os.path.join(c_dir, f"{model_name}_*_pr_{scn}_*_in-catchment-units.csv")
+                f_pr = sorted(glob.glob(p1_pr) + glob.glob(p2_pr))
+                
+                p1_tas = os.path.join(c_dir, f"{model_name}_tas_{scn}_*_in-catchment-units.csv")
+                p2_tas = os.path.join(c_dir, f"{model_name}_*_tas_{scn}_*_in-catchment-units.csv")
+                f_tas = sorted(glob.glob(p1_tas) + glob.glob(p2_tas))
+                
+                if f_pr and f_tas:
+                    return f_pr[0], f_tas[0]
+            return None, None
+
+        from storyline import StorylineAnalyzer
+        analyzer_inst = StorylineAnalyzer(config)
+
+        def load_model_full_timeseries(clean_name):
+            m_key = f"{clean_name}_{scenario}"
+            ts_dict = metric_timeseries.get(m_key, metric_timeseries.get(clean_name, {}))
+
+            pr_s, tas_s, q_s, u850_s = None, None, None, None
+
+            # 1. PR & TAS
+            pr_file, tas_file = find_catchment_files(clean_name, scenario)
+            if pr_file and tas_file:
+                try:
+                    df_pr_raw = pd.read_csv(pr_file, sep='\t', skiprows=1)
+                    df_tas_raw = pd.read_csv(tas_file, sep='\t', skiprows=1)
+                    p_cols = [c for c in df_pr_raw.columns if c.startswith('P_')]
+                    t_cols = [c for c in df_tas_raw.columns if c.startswith('T_')]
+                    df_pr_raw['pr_mean'] = df_pr_raw[p_cols].mean(axis=1)
+                    df_tas_raw['tas_mean'] = df_tas_raw[t_cols].mean(axis=1)
+
+                    df_pt = pd.merge(df_pr_raw[['year', 'month', 'day', 'pr_mean']], df_tas_raw[['year', 'month', 'day', 'tas_mean']], on=['year', 'month', 'day'])
+                    df_pt['time'] = pd.to_datetime(df_pt[['year', 'month', 'day']])
+                    if df_pt['tas_mean'].mean() > 100:
+                        df_pt['tas_mean'] -= 273.15
+                    
+                    df_pt = df_pt.sort_values('time').set_index('time')
+                    pr_s = df_pt['pr_mean'].rolling(30, center=True, min_periods=15).mean()
+                    tas_s = df_pt['tas_mean'].rolling(30, center=True, min_periods=15).mean()
+                except Exception as e:
+                    logging.warning(f"Error loading catchment files for {clean_name}: {e}")
+
+            if pr_s is None and ts_dict:
+                da_pr_box = ts_dict.get('pr_box_full')
+                if da_pr_box is not None:
+                    s_pr_raw = pd.Series(da_pr_box.values, index=pd.to_datetime(da_pr_box.time.values))
+                    pr_s = s_pr_raw.sort_index().rolling(30, center=True, min_periods=15).mean()
+            if tas_s is None and ts_dict:
+                da_tas_box = ts_dict.get('tas_box_full')
+                if da_tas_box is not None:
+                    s_tas_raw = pd.Series(da_tas_box.values, index=pd.to_datetime(da_tas_box.time.values))
+                    tas_s = s_tas_raw.sort_index().rolling(30, center=True, min_periods=15).mean()
+
+            # 2. Discharge
+            if df_q_raw is not None and clean_name in df_q_raw.columns:
+                try:
+                    df_m_q = df_q_raw[['time', clean_name]].dropna().copy()
+                    s_q_raw = df_m_q.sort_values('time').set_index('time')[clean_name]
+                    q_s = s_q_raw.rolling(30, center=True, min_periods=15).mean()
+                except Exception as e:
+                    logging.warning(f"Error processing discharge for {clean_name}: {e}")
+            elif ts_dict and ts_dict.get('discharge_monthly_full') is not None:
+                da_q = ts_dict.get('discharge_monthly_full')
+                s_q_raw = pd.Series(da_q.values, index=pd.to_datetime(da_q.time.values))
+                q_s = s_q_raw.sort_index().rolling(30, center=True, min_periods=15).mean()
+
+            # 3. U850
+            try:
+                m_data = cmip6_results.get('cmip6_model_data_loaded', {}).get(m_key)
+                if not m_data:
+                    m_data = cmip6_results.get('cmip6_model_data_loaded', {}).get(clean_name, {})
+                if m_data is None: m_data = {}
+                preloaded_ua = m_data.get('ua') if m_data.get('ua') is not None else m_data.get('u850')
+                if preloaded_ua is None:
+                    preloaded_ua = cmip6_results.get('preloaded_cmip6_data', {}).get(f"{clean_name}_{scenario}", {}).get('ua')
+                if preloaded_ua is None and analyzer_inst is not None:
+                    preloaded_ua = analyzer_inst._load_and_preprocess_model_data(clean_name, [scenario], 'ua')
+                
+                if preloaded_ua is not None:
+                    ua_da = preloaded_ua
+                    if hasattr(ua_da, 'lon') and hasattr(ua_da, 'lat'):
+                        lons = np.asarray(ua_da.lon.values).ravel()
+                        if bool(np.any(lons > 180)):
+                            lons_norm = np.where(lons > 180, lons - 360, lons)
+                            ua_da = ua_da.assign_coords(lon=lons_norm).sortby('lon')
+                        
+                        lat_min, lat_max = config.BOX_LAT_MIN, config.BOX_LAT_MAX
+                        lon_min, lon_max = config.BOX_LON_MIN, config.BOX_LON_MAX
+                        
+                        lats = np.asarray(ua_da.lat.values).ravel()
+                        is_ascending = bool(float(lats[0]) < float(lats[-1]))
+                        lat_slice = slice(lat_min, lat_max) if is_ascending else slice(lat_max, lat_min)
+                        lon_slice = slice(lon_min, lon_max)
+                        
+                        ua_sub = ua_da.sel(lat=lat_slice, lon=lon_slice)
+                        westerlies = ua_sub.where(ua_sub > 0)
+                        weights = np.cos(np.deg2rad(westerlies.lat))
+                        ua_box_mean = westerlies.weighted(weights).mean(dim=['lat', 'lon'], skipna=True)
+                        
+                        if ua_box_mean.ndim > 1:
+                            time_dim = next((d for d in ['time', 'season_year', 'year'] if d in ua_box_mean.dims), None)
+                            if time_dim:
+                                dims_to_squeeze = [d for d in ua_box_mean.dims if d != time_dim]
+                                ua_box_mean = ua_box_mean.squeeze(dim=dims_to_squeeze, drop=True)
+                        
+                        s_u850_raw = ua_box_mean.to_series()
+                        if hasattr(s_u850_raw.index, 'to_datetimeindex'):
+                            try: s_u850_raw.index = s_u850_raw.index.to_datetimeindex()
+                            except Exception: s_u850_raw.index = pd.to_datetime([t.strftime('%Y-%m-%d %H:%M:%S') if hasattr(t, 'strftime') else str(t) for t in s_u850_raw.index], errors='coerce')
+                        else:
+                            s_u850_raw.index = pd.to_datetime([t.strftime('%Y-%m-%d %H:%M:%S') if hasattr(t, 'strftime') else str(t) for t in s_u850_raw.index], errors='coerce')
+                        
+                        u850_s = s_u850_raw.dropna().sort_index()
+            except Exception as e:
+                logging.warning(f"Could not calculate U850 for {clean_name}: {e}")
+
+            thresh_30q10 = calc_hist_30q10_thresh(clean_name)
+            return {'pr_s': pr_s, 'tas_s': tas_s, 'q_s': q_s, 'u850_s': u850_s, 'thresh_30q10': thresh_30q10}
+
+        # 3. Setup Multi-Page PDF Generation
+        n_models = len(hf_models_clean)
+        high_col  = '#b2182b' # Dark Crimson for High-Freq model
+        std_1_col = '#7a0177' # Deep Purple for 1-Sigma
+        std_2_col = '#c994c7' # Light Purple for 2-Sigma
+
+        var_configs = [
+            ('pr_s', 'Precipitation', 'Precipitation (mm/day)', r'Precip. Std ($\sigma$ mm/day)', r'Precip. Anomaly ($\sigma$)'),
+            ('tas_s', 'Temperature', 'Temperature (°C)', r'Temp. Std ($\sigma$ °C)', r'Temp. Anomaly ($\sigma$)'),
+            ('u850_s', 'U850 Wind Speed (u>0)', 'U850 Wind Speed (m/s)', r'U850 Std ($\sigma$ m/s)', r'U850 Anomaly ($\sigma$)'),
+            ('q_s', 'Discharge', r'Discharge ($m^3/s$)', r'Discharge Std ($\sigma$ $m^3/s$)', r'Discharge Anomaly ($\sigma$)')
+        ]
+
+        x_min_num = mdates.date2num(pd.Timestamp('1960-01-01'))
+        x_max_num = mdates.date2num(pd.Timestamp('2100-12-31'))
+        date_formatter_quarterly = mdates.DateFormatter('%b %Y')
+
+        logging.info(f"Generating multi-page vector PDF ({filepath_pdf}) for {n_models} High-Frequency models...")
+
+        with PdfPages(filepath_pdf) as pdf:
+            for m_idx, hf_name in enumerate(hf_models_clean):
+                logging.info(f"Plotting model {m_idx+1}/{n_models}: {hf_name} (Timeseries, 21y Rolling Std & Standardized Anomalies with Fixed \u00b11\u03c3/\u00b12\u03c3 Bands)...")
+                hf_ts_data = load_model_full_timeseries(hf_name)
+
+                # Page dimensions per model: 102 inches wide x 22 inches high (3x wider for ultimate timeline detail)
+                fig_model = plt.figure(figsize=(102, 22))
+
+                gs_model = gridspec.GridSpec(
+                    12, 1, figure=fig_model,
+                    height_ratios=[2.2, 1.0, 1.0, 2.2, 1.0, 1.0, 2.2, 1.0, 1.0, 2.2, 1.0, 1.0],
+                    hspace=0.35
+                )
+
+                # Section Banner Title for Model
+                banner_ax = fig_model.add_subplot(gs_model[0])
+                banner_ax.axis('off')
+                banner_ax.annotate(
+                    rf"MODEL {m_idx+1}/{n_models}: HIGH-FREQUENCY STORYLINE MODEL [{hf_name}] — FULL TIMESERIES, 21-YEAR ROLLING VOLATILITY & STANDARDIZED ANOMALIES (FIXED $\pm 1\sigma$ & $\pm 2\sigma$ THRESHOLDS, SSP5-8.5 1960–2100)",
+                    xy=(0.0, 1.35), xycoords='axes fraction', fontsize=13.0, weight='bold', color='#111111',
+                    bbox=dict(boxstyle='round,pad=0.4', facecolor='#fee0d2', edgecolor='#b2182b', linewidth=1.5, alpha=0.95)
+                )
+
+                # Extract discharge series and 30Q10 low-flow threshold to identify low-flow event dates across all variables
+                s_q_hf = hf_ts_data.get('q_s')
+                thresh_hf = hf_ts_data.get('thresh_30q10')
+
+                events_hf_dates = None
+                if isinstance(s_q_hf, pd.Series) and isinstance(thresh_hf, (int, float)) and np.isfinite(thresh_hf):
+                    events_hf_dates = s_q_hf[s_q_hf < thresh_hf].index
+
+                def get_event_values_for_series(s_series, ev_dates):
+                    if not isinstance(s_series, pd.Series) or s_series.empty or ev_dates is None or len(ev_dates) == 0:
+                        return None
+                    try:
+                        s_clean = s_series.dropna()
+                        if s_clean.empty:
+                            return None
+                        reindexed = s_clean.reindex(ev_dates, method='nearest')
+                        return reindexed.dropna()
+                    except Exception:
+                        return None
+
+                axes_model = [fig_model.add_subplot(gs_model[r]) for r in range(12)]
+
+                # Share X-axis across all subplots within this page
+                for r in range(1, 12):
+                    axes_model[r].sharex(axes_model[0])
+
+                for v_i, (s_key, var_name, y_label_ts, y_label_std, y_label_z) in enumerate(var_configs):
+                    ax_ts  = axes_model[v_i * 3]
+                    ax_std = axes_model[v_i * 3 + 1]
+                    ax_z   = axes_model[v_i * 3 + 2]
+
+                    s_hf = hf_ts_data.get(s_key)
+
+                    # Grid setup & X-axis configuration for all subplots (3-Month ticks & labels on every subplot)
+                    for ax_curr in (ax_ts, ax_std, ax_z):
+                        ax_curr.set_rasterized(True)
+                        ax_curr.yaxis.set_major_locator(mticker.MaxNLocator(nbins=6, prune=None))
+                        ax_curr.yaxis.set_minor_locator(mticker.AutoMinorLocator(n=2))
+                        ax_curr.grid(True, which='major', linestyle='--', linewidth=0.6, alpha=0.5)
+                        ax_curr.grid(True, which='minor', linestyle=':', linewidth=0.4, alpha=0.3)
+
+                        ax_curr.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 4, 7, 10]))
+                        ax_curr.xaxis.set_minor_locator(mdates.MonthLocator(interval=1))
+                        ax_curr.xaxis.set_major_formatter(date_formatter_quarterly)
+                        ax_curr.tick_params(axis='x', which='major', labelbottom=True, labelsize=7.0, rotation=90, length=4)
+                        ax_curr.tick_params(axis='x', which='minor', length=2)
+                        ax_curr.set_xlabel("Time (Full 1960–2100 Continuous Timeseries, 3-Month Ticks)", fontsize=8.5, weight='bold')
+                        ax_curr.set_xlim(x_min_num, x_max_num)
+
+                    is_series_hf = isinstance(s_hf, pd.Series)
+
+                    # --- Subplot 1: Absolute Timeseries ---
+                    if is_series_hf and not s_hf.empty:
+                        ax_ts.plot(s_hf.index, s_hf.values, color=high_col, linewidth=1.2, label=f'High-Freq Model: {hf_name}', alpha=0.85, rasterized=True)
+
+                    if s_key == 'q_s':
+                        if isinstance(thresh_hf, (int, float)) and np.isfinite(thresh_hf):
+                            ax_ts.axhline(thresh_hf, color=high_col, linestyle=':', linewidth=1.3, alpha=0.85,
+                                          label=rf'{hf_name} Hist. 30Q10 Thresh (~{int(thresh_hf)} $m^3/s$)')
+
+                    ev_vals_hf = get_event_values_for_series(s_hf, events_hf_dates)
+                    if ev_vals_hf is not None and not ev_vals_hf.empty:
+                        ax_ts.scatter(ev_vals_hf.index, ev_vals_hf.values, color=high_col, marker='o', s=6,
+                                      edgecolor='black', linewidth=0.2, zorder=6, alpha=0.45,
+                                      label=f'{hf_name} Low-Flow Events (N={len(ev_vals_hf)})', rasterized=True)
+
+                    ax_ts.set_ylabel(y_label_ts, fontsize=9.0, weight='bold')
+                    ax_ts.set_title(f"({chr(97 + v_i*3)}) {var_name} Absolute Timeseries (1960–2100)", fontsize=10.0, weight='bold', loc='left', pad=4)
+                    ax_ts.legend(loc='upper left', bbox_to_anchor=(1.002, 1.0), fontsize=8.0, frameon=True, framealpha=0.95, ncol=1)
+
+                    # --- Subplot 2: 21-Year Rolling Monthly Std. Dev. Curves ---
+                    if is_series_hf and not s_hf.empty:
+                        s_1sig, s_2sig = compute_rolling_monthly_std(s_hf, window_years=21)
+                        if s_1sig is not None and s_2sig is not None and not s_1sig.empty:
+                            ax_std.plot(s_1sig.index, s_1sig.values, color=std_1_col, linewidth=1.2, label=r'$1\sigma$ Volatility (21-Yr Rolling Monthly Std Dev)', rasterized=True)
+                            ax_std.plot(s_2sig.index, s_2sig.values, color=std_2_col, linewidth=1.1, linestyle='--', label=r'$2\sigma$ Volatility', rasterized=True)
+                            ax_std.fill_between(s_1sig.index, 0, s_1sig.values, color=std_1_col, alpha=0.30, interpolate=True, rasterized=True)
+                            ax_std.fill_between(s_2sig.index, s_1sig.values, s_2sig.values, color=std_2_col, alpha=0.20, interpolate=True, rasterized=True)
+
+                    ax_std.set_ylabel(y_label_std, fontsize=8.5, weight='bold')
+                    ax_std.set_title(rf"({chr(97 + v_i*3 + 1)}) {var_name} 21-Year Rolling Monthly Std. Dev. Magnitude ($1\sigma$ & $2\sigma$ Curves)", fontsize=9.5, weight='bold', loc='left', pad=4)
+                    ax_std.legend(loc='upper left', bbox_to_anchor=(1.002, 1.0), fontsize=8.0, frameon=True, framealpha=0.95, ncol=1)
+
+                    # --- Subplot 3: Standardized Anomaly relative to Baseline with Fixed +-1, +-2, +-3 Std Dev Lines ---
+                    if is_series_hf and not s_hf.empty:
+                        s_z = compute_standardized_anomalies(s_hf, ref_start=1985, ref_end=2014)
+                        if s_z is not None and not s_z.empty:
+                            ax_z.plot(s_z.index, s_z.values, color='#1f78b4', linewidth=1.1, label=rf'{var_name} Standardized Anomaly ($z$-score)', alpha=0.85, zorder=4, rasterized=True)
+
+                            ax_z.axhline(0.0, color='#333333', linestyle='-', linewidth=0.7, alpha=0.85, label=r'0$\sigma$ (1985–2014 Hist. Mean)', zorder=3)
+                            ax_z.axhline(1.0, color='#7a0177', linestyle='--', linewidth=0.7, alpha=0.75, label=r'+1$\sigma$ Baseline Std. Dev.', zorder=3)
+                            ax_z.axhline(-1.0, color='#7a0177', linestyle='--', linewidth=0.7, alpha=0.75, label=r'-1$\sigma$ Baseline Std. Dev.', zorder=3)
+                            ax_z.axhline(2.0, color='#d95f02', linestyle='--', linewidth=0.75, alpha=0.85, label=r'+2$\sigma$ Moderate Extreme', zorder=3)
+                            ax_z.axhline(-2.0, color='#7570b3', linestyle='--', linewidth=0.75, alpha=0.85, label=r'-2$\sigma$ Moderate Deficit', zorder=3)
+                            ax_z.axhline(3.0, color='#b2182b', linestyle='--', linewidth=0.8, alpha=0.9, label=r'+3$\sigma$ Severe Extreme', zorder=3)
+                            ax_z.axhline(-3.0, color='#2166ac', linestyle='--', linewidth=0.8, alpha=0.9, label=r'-3$\sigma$ Severe Deficit', zorder=3)
+
+                            ax_z.axhspan(-1.0, 1.0, color='#e0f3f8', alpha=0.30, zorder=1, label=r'$\pm 1\sigma$ Normal Range')
+                            ax_z.axhspan(1.0, 2.0, color='#fee090', alpha=0.20, zorder=1, label=r'+1$\sigma$ to +2$\sigma$ Zone')
+                            ax_z.axhspan(-2.0, -1.0, color='#fee090', alpha=0.20, zorder=1)
+                            ax_z.axhspan(2.0, 3.0, color='#f46d43', alpha=0.18, zorder=1, label=r'+2$\sigma$ to +3$\sigma$ High Zone')
+                            ax_z.axhspan(-3.0, -2.0, color='#74add1', alpha=0.18, zorder=1)
+                            ax_z.axhspan(3.0, 20.0, color='#d73027', alpha=0.18, zorder=1, label=r'> +3$\sigma$ Extreme Zone')
+                            ax_z.axhspan(-20.0, -3.0, color='#4575b4', alpha=0.18, zorder=1, label=r'< -3$\sigma$ Extreme Deficit')
+
+                            ev_z_vals = get_event_values_for_series(s_z, events_hf_dates)
+                            if ev_z_vals is not None and not ev_z_vals.empty:
+                                ax_z.scatter(ev_z_vals.index, ev_z_vals.values, color=high_col, marker='o', s=6,
+                                             edgecolor='black', linewidth=0.2, zorder=6, alpha=0.5,
+                                             label=f'{hf_name} Low-Flow Events (N={len(ev_z_vals)})', rasterized=True)
+
+                            z_min_data = float(s_z.min())
+                            z_max_data = float(s_z.max())
+                            y_min_lim = min(-3.5, np.floor(z_min_data - 0.5))
+                            y_max_lim = max(3.5, np.ceil(z_max_data + 0.5))
+                            ax_z.set_ylim(y_min_lim, y_max_lim)
+
+                    ax_z.set_ylabel(y_label_z, fontsize=8.5, weight='bold')
+                    ax_z.set_title(rf"({chr(97 + v_i*3 + 2)}) {var_name} Standardized Anomaly relative to 1985–2014 Baseline (Fixed $\pm 1\sigma$, $\pm 2\sigma$ & $\pm 3\sigma$ Thresholds)", fontsize=9.5, weight='bold', loc='left', pad=4)
+                    ax_z.legend(loc='upper left', bbox_to_anchor=(1.002, 1.0), fontsize=8.0, frameon=True, framealpha=0.95, ncol=1)
+
+                fig_model.suptitle(
+                    rf"Final Figure 11 (Model {m_idx+1}/{n_models}): Full Timeseries (1960–2100), 21y Rolling Volatility & Standardized Anomalies [{hf_name}]\n"
+                    rf"Evaluated for Precipitation, Temperature, U850 Zonal Wind, and River Discharge with Fixed $\pm 1\sigma$, $\pm 2\sigma$ & $\pm 3\sigma$ Thresholds ({Visualizer._format_scenario_title(scenario)})",
+                    fontsize=14.0, weight='bold', y=0.995
+                )
+
+                # Save page into multi-page vector PDF with rasterized heavy lines
+                pdf.savefig(fig_model, bbox_inches='tight', dpi=300)
+                plt.close(fig_model)
+
+        logging.info(f"Successfully generated lightweight multi-page PDF ({filepath_pdf})")
+
+
 
 
 
